@@ -1,8 +1,7 @@
-<p align="center">
-  <img src="docs/assets/brand/logo.png" alt="GOD logo" width="140" />
-</p>
-
-<h1 align="center">GOD · Govern · Observe · Direct</h1>
+<h1 align="center">
+  <img src="docs/assets/brand/logo.png" alt="GOD logo" width="44" />
+  GOD · Govern · Observe · Direct
+</h1>
 
 <p align="center">
   <img src="docs/assets/screenshots/00-hero.png" alt="GOD — Govern · Observe · Direct" width="100%" />
