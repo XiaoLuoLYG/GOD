@@ -31,6 +31,11 @@ locations:
   - eat_at_home
   - sleep_at_home
   - relax_at_home
+  - tidy_home
+  - read_at_home
+  - work_from_home
+  - video_call_family
+  - water_plants
   scene_type: home
   bounds:
     x: 71
@@ -52,6 +57,10 @@ locations:
   - attend_class
   - teach_class
   - study_after_class
+  - prepare_lesson
+  - grade_homework
+  - hold_office_hours
+  - school_meeting
   scene_type: school
   bounds:
     x: 108
@@ -71,6 +80,10 @@ locations:
   interaction_ids:
   - read_book
   - study_library
+  - research_topic
+  - borrow_book
+  - return_book
+  - quiet_work
   scene_type: library
   bounds:
     x: 118
@@ -93,6 +106,10 @@ locations:
   - eat_light_meal
   - chat_over_coffee
   - work_cafe_shift
+  - order_coffee
+  - take_takeaway
+  - casual_meetup
+  - tidy_cafe
   scene_type: cafe
   bounds:
     x: 72
@@ -115,6 +132,10 @@ locations:
   - meet_friend
   - rest_on_bench
   - coordinate_group
+  - morning_exercise
+  - bird_watch
+  - picnic
+  - public_announcement
   scene_type: park
   bounds:
     x: 21
@@ -138,6 +159,9 @@ locations:
   - inspect_supplies
   - prepare_kit
   - repair_tools
+  - restock_shelves
+  - customer_service
+  - lend_tools
   scene_type: supply_store
   bounds:
     x: 57
@@ -161,6 +185,10 @@ locations:
   interaction_ids:
   - buy_food
   - work_shop_shift
+  - restock_vegetables
+  - haggle_price
+  - deliver_order
+  - chat_with_regular
   scene_type: market
   bounds:
     x: 75
@@ -183,6 +211,10 @@ locations:
   interaction_ids:
   - buy_medicine
   - pharmacy_consultation
+  - refill_prescription
+  - blood_pressure_check
+  - organize_medicine_shelf
+  - home_visit_prep
   scene_type: pharmacy
   bounds:
     x: 75
@@ -204,6 +236,9 @@ locations:
   interaction_ids:
   - socialize_at_pub
   - eat_pub_meal
+  - watch_match
+  - evening_chat
+  - host_event
   scene_type: pub
   bounds:
     x: 53
@@ -225,6 +260,9 @@ locations:
   interaction_ids:
   - rest_at_dorm
   - eat_at_dorm
+  - study_in_dorm
+  - common_room_hangout
+  - video_call_home
   scene_type: dorm
   bounds:
     x: 105
@@ -506,3 +544,387 @@ interactions:
     status: active
     emotion: content
     latest_event: "{agent_name} 在宿舍吃饭。"
+- id: tidy_home
+  name: 整理家务
+  description: 在家收拾房间或整理物品。
+  allowed_location_ids:
+  - home
+  effects:
+    action: "{agent_name} 正在家中收拾"
+    status: active
+    emotion: calm
+    latest_event: "{agent_name} 在家中整理了一下。"
+- id: read_at_home
+  name: 在家阅读
+  description: 在家中翻一本书或杂志。
+  allowed_location_ids:
+  - home
+  effects:
+    action: "{agent_name} 正在家中翻书"
+    status: resting
+    emotion: focused
+    latest_event: "{agent_name} 在家中读了一会儿书。"
+- id: work_from_home
+  name: 居家办公
+  description: 在家中远程处理工作。
+  allowed_location_ids:
+  - home
+  effects:
+    action: "{agent_name} 正在家中远程办公"
+    status: active
+    emotion: focused
+    latest_event: "{agent_name} 在家中继续远程工作。"
+- id: video_call_family
+  name: 视频家人
+  description: 在家中和家人视频通话。
+  allowed_location_ids:
+  - home
+  effects:
+    action: "{agent_name} 正在家中和家人视频"
+    status: socializing
+    emotion: warm
+    latest_event: "{agent_name} 在家中和家人通了视频。"
+- id: water_plants
+  name: 浇花
+  description: 在家给花草浇水或修剪。
+  allowed_location_ids:
+  - home
+  effects:
+    action: "{agent_name} 正在家中浇花"
+    status: active
+    emotion: calm
+    latest_event: "{agent_name} 在家中浇了一遍花。"
+- id: prepare_lesson
+  name: 备课
+  description: 在学校教室准备课程材料。
+  allowed_location_ids:
+  - school
+  effects:
+    action: "{agent_name} 正在学校备课"
+    status: active
+    emotion: focused
+    latest_event: "{agent_name} 在学校完成了一段备课。"
+- id: grade_homework
+  name: 批改作业
+  description: 在学校教室或办公室批改学生作业。
+  allowed_location_ids:
+  - school
+  effects:
+    action: "{agent_name} 正在学校批改作业"
+    status: active
+    emotion: focused
+    latest_event: "{agent_name} 在学校批改了一批作业。"
+- id: hold_office_hours
+  name: 课后答疑
+  description: 在学校接待学生答疑或谈话。
+  allowed_location_ids:
+  - school
+  effects:
+    action: "{agent_name} 正在学校进行课后答疑"
+    status: socializing
+    emotion: warm
+    latest_event: "{agent_name} 在学校接待了一位学生答疑。"
+- id: school_meeting
+  name: 教研例会
+  description: 在学校参加教研或行政例会。
+  allowed_location_ids:
+  - school
+  effects:
+    action: "{agent_name} 正在学校参加例会"
+    status: active
+    emotion: focused
+    latest_event: "{agent_name} 在学校参加了一次例会。"
+- id: research_topic
+  name: 资料查阅
+  description: 在学校图书馆查找资料。
+  allowed_location_ids:
+  - library
+  effects:
+    action: "{agent_name} 正在图书馆查资料"
+    status: active
+    emotion: focused
+    latest_event: "{agent_name} 在图书馆完成了一段资料查阅。"
+- id: borrow_book
+  name: 借书
+  description: 在图书馆办理借书手续。
+  allowed_location_ids:
+  - library
+  effects:
+    action: "{agent_name} 正在图书馆借书"
+    status: active
+    emotion: calm
+    latest_event: "{agent_name} 在图书馆借了一本书。"
+- id: return_book
+  name: 还书
+  description: 在图书馆归还借出的书籍。
+  allowed_location_ids:
+  - library
+  effects:
+    action: "{agent_name} 正在图书馆还书"
+    status: active
+    emotion: calm
+    latest_event: "{agent_name} 在图书馆把书还了。"
+- id: quiet_work
+  name: 安静办公
+  description: 在图书馆安静地进行个人办公。
+  allowed_location_ids:
+  - library
+  effects:
+    action: "{agent_name} 正在图书馆安静办公"
+    status: active
+    emotion: focused
+    latest_event: "{agent_name} 在图书馆完成了一段安静办公。"
+- id: order_coffee
+  name: 点咖啡
+  description: 在 Hobbs Cafe 点一杯咖啡。
+  allowed_location_ids:
+  - cafe
+  effects:
+    action: "{agent_name} 正在咖啡馆点单"
+    status: active
+    emotion: calm
+    latest_event: "{agent_name} 在咖啡馆点了一杯咖啡。"
+- id: take_takeaway
+  name: 外带
+  description: 在 Hobbs Cafe 打包外带饮品或简餐。
+  allowed_location_ids:
+  - cafe
+  effects:
+    action: "{agent_name} 正在咖啡馆打包外带"
+    status: active
+    emotion: calm
+    latest_event: "{agent_name} 在咖啡馆打包外带。"
+- id: casual_meetup
+  name: 随性碰头
+  description: 在 Hobbs Cafe 和熟人临时碰个面。
+  allowed_location_ids:
+  - cafe
+  effects:
+    action: "{agent_name} 正在咖啡馆和熟人碰头"
+    status: socializing
+    emotion: warm
+    latest_event: "{agent_name} 在咖啡馆和熟人随性见了一面。"
+    group_message: "{agent_name} 在咖啡馆顺口说：{message}"
+- id: tidy_cafe
+  name: 整理咖啡馆
+  description: 在 Hobbs Cafe 整理桌椅、补水或清洁吧台。
+  allowed_location_ids:
+  - cafe
+  effects:
+    action: "{agent_name} 正在咖啡馆整理桌椅"
+    status: active
+    emotion: calm
+    latest_event: "{agent_name} 在咖啡馆做了一次清整。"
+- id: morning_exercise
+  name: 晨练
+  description: 在 Johnson Park 晨练或拉伸。
+  allowed_location_ids:
+  - park
+  effects:
+    action: "{agent_name} 正在公园晨练"
+    status: active
+    emotion: focused
+    latest_event: "{agent_name} 在公园做了一段晨练。"
+- id: bird_watch
+  name: 观鸟
+  description: 在 Johnson Park 安静看树上的鸟。
+  allowed_location_ids:
+  - park
+  effects:
+    action: "{agent_name} 正在公园观鸟"
+    status: resting
+    emotion: peaceful
+    latest_event: "{agent_name} 在公园看了一会儿鸟。"
+- id: picnic
+  name: 简单野餐
+  description: 在 Johnson Park 草地上简单野餐或吃便当。
+  allowed_location_ids:
+  - park
+  effects:
+    action: "{agent_name} 正在公园简单野餐"
+    status: socializing
+    emotion: warm
+    latest_event: "{agent_name} 在公园进行了一次简单野餐。"
+- id: public_announcement
+  name: 公共播报
+  description: 在 Johnson Park 向群组发布公共公告或提醒。
+  allowed_location_ids:
+  - park
+  effects:
+    action: "{agent_name} 正在公园发布一条公共公告"
+    status: socializing
+    emotion: focused
+    latest_event: "{agent_name} 在公园发出了一条公共公告。"
+    group_message: "{agent_name} 在公园通知大家：{message}"
+- id: restock_shelves
+  name: 上货
+  description: 在 Harvey Oak Supply Store 给货架上货。
+  allowed_location_ids:
+  - supply_store
+  effects:
+    action: "{agent_name} 正在供给店上货"
+    status: active
+    emotion: focused
+    latest_event: "{agent_name} 在供给店补了一批货。"
+- id: customer_service
+  name: 顾客接待
+  description: 在 Harvey Oak Supply Store 接待来店顾客。
+  allowed_location_ids:
+  - supply_store
+  effects:
+    action: "{agent_name} 正在供给店接待顾客"
+    status: socializing
+    emotion: warm
+    latest_event: "{agent_name} 在供给店接待了一位顾客。"
+- id: lend_tools
+  name: 借出工具
+  description: 在 Harvey Oak Supply Store 借出工具给熟客或邻居。
+  allowed_location_ids:
+  - supply_store
+  effects:
+    action: "{agent_name} 正在供给店借出工具"
+    status: active
+    emotion: calm
+    latest_event: "{agent_name} 在供给店借出了一件工具。"
+- id: restock_vegetables
+  name: 蔬果补货
+  description: 在 The Willows Market 给蔬果摊补货。
+  allowed_location_ids:
+  - market
+  effects:
+    action: "{agent_name} 正在市场补蔬果"
+    status: active
+    emotion: focused
+    latest_event: "{agent_name} 在市场补了一批蔬果。"
+- id: haggle_price
+  name: 议价
+  description: 在 The Willows Market 和顾客议价。
+  allowed_location_ids:
+  - market
+  effects:
+    action: "{agent_name} 正在市场和顾客议价"
+    status: active
+    emotion: focused
+    latest_event: "{agent_name} 在市场和顾客达成了价格。"
+- id: deliver_order
+  name: 送单
+  description: 在 The Willows Market 给附近邻居送一单。
+  allowed_location_ids:
+  - market
+  effects:
+    action: "{agent_name} 正在市场送一单"
+    status: active
+    emotion: focused
+    latest_event: "{agent_name} 在市场送出了一单。"
+- id: chat_with_regular
+  name: 和老客闲聊
+  description: 在 The Willows Market 和老顾客寒暄。
+  allowed_location_ids:
+  - market
+  effects:
+    action: "{agent_name} 正在市场和老客寒暄"
+    status: socializing
+    emotion: warm
+    latest_event: "{agent_name} 在市场和老客聊了两句。"
+- id: refill_prescription
+  name: 续方
+  description: 在 The Willows Pharmacy 为居民办理处方续方。
+  allowed_location_ids:
+  - pharmacy
+  effects:
+    action: "{agent_name} 正在药房办理续方"
+    status: active
+    emotion: calm
+    latest_event: "{agent_name} 在药房完成了一次续方。"
+- id: blood_pressure_check
+  name: 量血压
+  description: 在 The Willows Pharmacy 为居民量血压并记录。
+  allowed_location_ids:
+  - pharmacy
+  effects:
+    action: "{agent_name} 正在药房量血压"
+    status: active
+    emotion: calm
+    latest_event: "{agent_name} 在药房量了一次血压。"
+- id: organize_medicine_shelf
+  name: 整理药架
+  description: 在 The Willows Pharmacy 整理药品和过期排查。
+  allowed_location_ids:
+  - pharmacy
+  effects:
+    action: "{agent_name} 正在药房整理药架"
+    status: active
+    emotion: focused
+    latest_event: "{agent_name} 在药房完成了一次药架整理。"
+- id: home_visit_prep
+  name: 上门准备
+  description: 在 The Willows Pharmacy 整理上门随访需要带的用品。
+  allowed_location_ids:
+  - pharmacy
+  effects:
+    action: "{agent_name} 正在药房整理上门用品"
+    status: active
+    emotion: focused
+    latest_event: "{agent_name} 在药房准备好了上门用品。"
+- id: watch_match
+  name: 看比赛
+  description: 在 The Rose and Crown Pub 看一场比赛转播。
+  allowed_location_ids:
+  - pub
+  effects:
+    action: "{agent_name} 正在酒馆看比赛"
+    status: socializing
+    emotion: warm
+    latest_event: "{agent_name} 在酒馆看了一段比赛。"
+- id: evening_chat
+  name: 晚间闲聊
+  description: 在 The Rose and Crown Pub 和熟人晚间闲聊。
+  allowed_location_ids:
+  - pub
+  effects:
+    action: "{agent_name} 正在酒馆和熟人闲聊"
+    status: socializing
+    emotion: warm
+    latest_event: "{agent_name} 在酒馆和熟人聊了一会儿。"
+    group_message: "{agent_name} 在酒馆顺口说：{message}"
+- id: host_event
+  name: 主持小活动
+  description: 在 The Rose and Crown Pub 张罗一个小型活动。
+  allowed_location_ids:
+  - pub
+  effects:
+    action: "{agent_name} 正在酒馆张罗一个小活动"
+    status: socializing
+    emotion: focused
+    latest_event: "{agent_name} 在酒馆张罗了一次小活动。"
+    group_message: "{agent_name} 在酒馆张罗：{message}"
+- id: study_in_dorm
+  name: 宿舍自习
+  description: 在 Oak Hill College 宿舍安静自习。
+  allowed_location_ids:
+  - dorm
+  effects:
+    action: "{agent_name} 正在宿舍自习"
+    status: active
+    emotion: focused
+    latest_event: "{agent_name} 在宿舍完成了一段自习。"
+- id: common_room_hangout
+  name: 公共区休闲
+  description: 在 Oak Hill College 宿舍公共区和同学休闲。
+  allowed_location_ids:
+  - dorm
+  effects:
+    action: "{agent_name} 正在宿舍公共区休闲"
+    status: socializing
+    emotion: warm
+    latest_event: "{agent_name} 在宿舍公共区和同学打了招呼。"
+- id: video_call_home
+  name: 视频家里
+  description: 在 Oak Hill College 宿舍和家人视频。
+  allowed_location_ids:
+  - dorm
+  effects:
+    action: "{agent_name} 正在宿舍和家人视频"
+    status: socializing
+    emotion: warm
+    latest_event: "{agent_name} 在宿舍和家人通了视频。"

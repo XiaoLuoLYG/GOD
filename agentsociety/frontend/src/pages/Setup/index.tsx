@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     Alert,
     Button,
@@ -67,6 +67,12 @@ type SetupStatus = {
         experiment_id?: string;
         workspace_path?: string;
     } | null;
+    default_experiment?: {
+        hypothesis_id?: string;
+        experiment_id?: string;
+        workspace_path?: string;
+        config_exists?: boolean;
+    };
     needs_setup: boolean;
     map_locations: MapLocation[];
 };
@@ -200,9 +206,11 @@ export default function SetupPage() {
     const [savingModel, setSavingModel] = useState(false);
     const [generating, setGenerating] = useState(false);
     const [publishing, setPublishing] = useState(false);
+    const [startingDefault, setStartingDefault] = useState(false);
     const [agentModalOpen, setAgentModalOpen] = useState(false);
     const [editingAgentId, setEditingAgentId] = useState<number | null>(null);
     const [basicsValues, setBasicsValues] = useState<BasicsForm>(() => loadStoredBasics());
+    const basicsRef = useRef<BasicsForm>(basicsValues);
     const [agentForm] = Form.useForm<AgentFormValues>();
     const [modelForm] = Form.useForm<ModelForm>();
     const [basicsForm] = Form.useForm<BasicsForm>();
@@ -252,14 +260,7 @@ export default function SetupPage() {
         const values = await modelForm.validateFields();
         setSavingModel(true);
         try {
-            const cleaned = Object.fromEntries(
-                Object.entries(values).filter(([, value]) => value !== undefined && String(value).trim() !== '')
-            );
-            const payload = await fetchJson<SetupStatus>('/api/v1/god/setup/model-config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(cleaned),
-            });
+            const payload = await persistModelConfig(values);
             setStatus(payload);
             messageApi.success('模型配置已保存到本地 .env。');
             setCurrentStep(1);
@@ -270,12 +271,28 @@ export default function SetupPage() {
         }
     };
 
-    const persistBasicsFromForm = async () => {
-        const values = await basicsForm.validateFields();
+    const cleanModelValues = (values: ModelForm) => Object.fromEntries(
+        Object.entries(values).filter(([, value]) => value !== undefined && String(value).trim() !== '')
+    );
+
+    const persistModelConfig = async (values: ModelForm) => fetchJson<SetupStatus>('/api/v1/god/setup/model-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cleanModelValues(values)),
+    });
+
+    const syncBasicsValues = (values: Partial<BasicsForm>) => {
         const normalized = normalizeBasicsValues(values);
-        basicsForm.setFieldsValue(normalized);
+        basicsRef.current = normalized;
         setBasicsValues(normalized);
         saveStoredBasics(normalized);
+        return normalized;
+    };
+
+    const persistBasicsFromForm = async () => {
+        const values = await basicsForm.validateFields();
+        const normalized = syncBasicsValues(values);
+        basicsForm.setFieldsValue(normalized);
         return normalized;
     };
 
@@ -294,7 +311,7 @@ export default function SetupPage() {
         const modelValues = await modelForm.validateFields();
         const basicsPayload = currentStep === 1
             ? await persistBasicsFromForm()
-            : normalizeBasicsValues(basicsValues);
+            : basicsRef.current;
         setGenerating(true);
         try {
             const payload = await fetchJson<DraftPayload>('/api/v1/god/setup/generate-draft', {
@@ -312,6 +329,35 @@ export default function SetupPage() {
             messageApi.error(`生成实验草案失败: ${error instanceof Error ? error.message : String(error)}`);
         } finally {
             setGenerating(false);
+        }
+    };
+
+    const startDefaultExperiment = async () => {
+        const modelValues = await modelForm.validateFields();
+        if (!status?.model_config.GOD_LLM_API_KEY?.configured && !String(modelValues.GOD_LLM_API_KEY || '').trim()) {
+            messageApi.error('请先填写并保存 API key，或在本地 .env 中配置 GOD_LLM_API_KEY。');
+            return;
+        }
+        setStartingDefault(true);
+        try {
+            const nextStatus = await persistModelConfig(modelValues);
+            setStatus(nextStatus);
+            const result = await fetchJson<{
+                hypothesis_id: string;
+                experiment_id: string;
+                workspace_path: string;
+            }>('/api/v1/god/setup/start-default', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+            });
+            messageApi.success('默认实验已设为当前实验，并已请求 GOD 启动。');
+            window.setTimeout(() => {
+                navigate(`/pixel-replay/${encodeURIComponent(result.hypothesis_id)}/${encodeURIComponent(result.experiment_id)}?workspace_path=${encodeURIComponent(result.workspace_path)}`);
+            }, 700);
+        } catch (error) {
+            messageApi.error(`启动默认实验失败: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            setStartingDefault(false);
         }
     };
 
@@ -611,6 +657,14 @@ export default function SetupPage() {
                 <Button type="primary" icon={<SaveOutlined />} loading={savingModel} onClick={saveModelConfig}>
                     保存模型配置
                 </Button>
+                <Button
+                    icon={<PlayCircleOutlined />}
+                    loading={startingDefault}
+                    disabled={status?.default_experiment?.config_exists === false}
+                    onClick={startDefaultExperiment}
+                >
+                    直接运行默认实验
+                </Button>
                 <Tag>{status?.model_config.GOD_LLM_API_KEY?.configured ? 'API key configured' : 'API key missing'}</Tag>
                 <Text type="secondary">{status?.env_file}</Text>
             </Space>
@@ -622,7 +676,7 @@ export default function SetupPage() {
             <Alert
                 type="warning"
                 showIcon
-                message="当前版本不会生成新地图；GOD agent 会把你的实验设定映射到 The Ville 的已知地点。"
+                message="实验参数都是可选的；留空会使用默认 GOD Town 参数。当前版本不会生成新地图，会把设定映射到 The Ville 的已知地点。"
                 style={{ marginBottom: 18 }}
             />
             <Form
@@ -630,9 +684,7 @@ export default function SetupPage() {
                 layout="vertical"
                 initialValues={basicsValues}
                 onValuesChange={(_, allValues) => {
-                    const next = normalizeBasicsValues({ ...basicsValues, ...allValues });
-                    setBasicsValues(next);
-                    saveStoredBasics(next);
+                    syncBasicsValues({ ...basicsRef.current, ...allValues });
                 }}
             >
                 <Row gutter={16}>
@@ -640,7 +692,6 @@ export default function SetupPage() {
                         <Form.Item
                             name="title"
                             label={formLabel('实验标题', '用于生成目录、README、实验背景标题。默认：斯坦福监狱实验适配模拟。格式：短标题，后端会据此生成 hypothesis 目录名。')}
-                            rules={[{ required: true }]}
                         >
                             <Input placeholder="例如：斯坦福监狱实验适配模拟" />
                         </Form.Item>
@@ -649,7 +700,6 @@ export default function SetupPage() {
                         <Form.Item
                             name="agent_count"
                             label={formLabel('Agent 个数', 'GOD agent 会生成对应数量的角色、人设和初始位置。默认：10。格式：1-50 的整数。')}
-                            rules={[{ required: true }]}
                         >
                             <InputNumber min={1} max={50} placeholder="10" style={{ width: '100%' }} />
                         </Form.Item>
@@ -658,7 +708,6 @@ export default function SetupPage() {
                         <Form.Item
                             name="num_steps"
                             label={formLabel('初始 steps', 'steps.yaml 中默认 run step 数。默认：4。格式：1-100 的整数，表示初始 run 计划包含多少步。')}
-                            rules={[{ required: true }]}
                         >
                             <InputNumber min={1} max={100} placeholder="4" style={{ width: '100%' }} />
                         </Form.Item>
@@ -667,7 +716,6 @@ export default function SetupPage() {
                         <Form.Item
                             name="tick"
                             label={formLabel('Tick 秒数', '每个 step 推进的仿真秒数。默认：1800。格式：正整数秒，1800 表示每步推进 30 分钟。')}
-                            rules={[{ required: true }]}
                         >
                             <InputNumber min={1} placeholder="1800" style={{ width: '100%' }} />
                         </Form.Item>
@@ -676,7 +724,6 @@ export default function SetupPage() {
                         <Form.Item
                             name="start_t"
                             label={formLabel('开始时间', 'ISO 时间，决定 agent 的日程判断。默认：2026-05-11T08:20:00+08:00。格式：ISO 8601，包含时区。')}
-                            rules={[{ required: true }]}
                         >
                             <Input placeholder="2026-05-11T08:20:00+08:00" />
                         </Form.Item>
@@ -709,7 +756,6 @@ export default function SetupPage() {
                         <Form.Item
                             name="background"
                             label={formLabel('实验背景 / 设定', '格式：自然语言。建议写清角色、场景、观察目标、禁止行为。默认会生成一个安全版权力/角色压力模拟。')}
-                            rules={[{ required: true }]}
                         >
                             <Input.TextArea
                                 rows={8}

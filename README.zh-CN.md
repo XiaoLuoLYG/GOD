@@ -121,20 +121,33 @@ flowchart LR
 ## 🧪 默认实验
 
 ```text
-god_town
-├── 10 个有不同人设的居民
-├── 一个像素小镇：房子、路径、广场
-└── 一份可在任意 step 介入的脚本化计划
+god_town · The Ville 普通工作日基线
+├── environment：The Ville 像素小镇，10 个地点（家 / 学校 / 图书馆 / 咖啡馆 / 公园 /
+│   供给店 / 市场 / 药房 / 酒馆 / 宿舍）+ 共 65 个 location-scoped interaction
+├── shared world：experiment_context 共享标题、背景、日期/天气/校历、镇上规则、
+│   公共事实和语言偏好，每个 agent 每步都看得到
+├── personas：10 位居民，profile 包含 age / gender / family / housing /
+│   economic_status / health / needs / worries / secrets / social_network /
+│   emotional_baseline / language_style / detailed_routine / inventory /
+│   recent_history / triggers / dislikes / short_term_goals / long_term_goal /
+│   quirks / skills（JiuwenClaw 风格命名）
+└── step plan：可在任意 step 介入、分叉或重放的实验脚本
 ```
 
-如果你要跑自己的实验，把新的 config 放到 `quick_experiments/`，让 `GOD_EXPERIMENT` 指过去就行。
+如果要跑自己的实验，把新的 config 放到 `quick_experiments/`，让 `GOD_EXPERIMENT` 指过去就行。
 
 ## 🛣️ Roadmap
 
-- [ ] 在同一个控制台里跑多个小镇实验
-- [ ] 每个 step 的操作员笔记
-- [ ] 可插拔的地图清单
-- [ ] 公开 demo
+- [ ] 多实验编排：在同一个控制台里运行多个实验、对照组和重复试验，支持横向对比。
+- [ ] 实时地图生成：地图可随事件、资源变化、建筑修复、道路阻断和人群活动动态更新。
+- [ ] 事件响应世界：天气、事故、节日、冲突、谣言、供应短缺等事件能改变环境和 agent 决策。
+- [ ] 可插拔 agent：支持替换不同 LLM agent runtime、persona 模板、skill 包和决策策略。
+- [ ] 可插拔地图：支持加载不同地图 manifest、地点语义、交互对象和导航规则。
+- [ ] 更真实的默认实验：扩展需求、职业、家庭、社交网络、经济约束、情绪和长期记忆。
+- [ ] 大规模仿真：接入 AgentSociety 的批量 agent、分片运行、采样 replay 和聚合指标。
+- [ ] 实验评估：跨实验指标、行为差异分析、干预效果评估和可复现实验快照。
+- [ ] 操作员工作流：每个 step 的操作员笔记、标签、书签和关键事件摘要。
+- [ ] 公开 demo 与场景分享：托管 demo、实验模板、地图模板和可复用配置包。
 
 有想法？欢迎来 issue 和 PR 聊。
 
