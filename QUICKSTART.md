@@ -30,7 +30,7 @@ python3 --version && npm --version && uv --version
 ## 2. Clone
 
 ```bash
-git clone https://github.com/<your-org>/GOD.git
+git clone https://github.com/XiaoLuoLYG/GOD.git
 cd GOD
 ```
 
@@ -45,7 +45,7 @@ The first run will:
 1. Create `.env` from `.env.example`.
 2. Prompt for the LLM API key, API base URL, and model name.
 3. Install Python + Node dependencies.
-4. Bring up the full stack and create a fresh live session.
+4. Bring up the full stack, create a live session, and run the first step.
 
 Three settings are required:
 
@@ -89,30 +89,8 @@ This wipes the previous run and starts a clean live session.
 
 ```bash
 ./scripts/god.sh start    # idempotent; reuses running services
+./scripts/god.sh restart  # stop everything cleanly, then start again
 ./scripts/god.sh stop     # stop everything
 ./scripts/god.sh tail     # follow logs
 ./scripts/god.sh open     # open the control room in the browser
 ```
-
-## Troubleshooting
-
-**The page stays on “loading”.**
-Check the logs:
-
-```bash
-./scripts/god.sh tail
-```
-
-If you see `401` or authentication errors, your API key / base / model combo was rejected by the provider. Update `.env`, then:
-
-```bash
-./scripts/god.sh restart
-```
-
-**Want to start over from scratch.**
-
-```bash
-./scripts/god.sh restart
-```
-
-That stops everything cleanly and brings the stack back up.

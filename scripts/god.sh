@@ -60,11 +60,9 @@ start     Start GOD (idempotent; reuses running services) and open frontend page
 restart   Stop everything cleanly, then start.
 new-run   Stop, wipe the current run, then start a fresh session.
 stop      Stop GOD and release its ports.
-status    Print URLs, ports, paths, and model status.
+status    Print URLs, ports, and model status.
 tail      Follow GOD service logs.
 open      Open the GOD frontend pages in the default browser.
-
-Hidden maintenance commands: factory-reset.
 EOF
 }
 
@@ -325,15 +323,22 @@ PY
 }
 
 replay_url() {
-  printf '%s/pixel-replay/%s/%s?workspace_path=%s\n' \
+  printf '%s/pixel-replay/%s/%s\n' \
     "$frontend_url" \
+    "$GOD_EXPERIMENT" \
+    "$GOD_EXPERIMENT_RUN"
+}
+
+session_url() {
+  printf '%s/api/v1/live-experiments/%s/%s/sessions?workspace_path=%s\n' \
+    "$backend_url" \
     "$GOD_EXPERIMENT" \
     "$GOD_EXPERIMENT_RUN" \
     "$(urlencode "$LIVE_WORKSPACE_PATH")"
 }
 
-session_url() {
-  printf '%s/api/v1/live-experiments/%s/%s/sessions?workspace_path=%s\n' \
+run_step_url() {
+  printf '%s/api/v1/live-experiments/%s/%s/run-step?workspace_path=%s\n' \
     "$backend_url" \
     "$GOD_EXPERIMENT" \
     "$GOD_EXPERIMENT_RUN" \
@@ -568,13 +573,13 @@ setup_deps() {
 
   if [[ ! -d "$BACKEND_ROOT/frontend/node_modules" || "${GOD_FORCE_SETUP:-0}" == "1" ]]; then
     log "Installing control-room dependencies"
-    npm install --prefix "$BACKEND_ROOT/frontend"
+    npm install --no-audit --no-fund --loglevel=error --prefix "$BACKEND_ROOT/frontend"
   fi
 
   local runtime_frontend="$RUNTIME_ROOT/jiuwenclaw/channels/web/frontend"
   if [[ ! -d "$runtime_frontend/node_modules" || "${GOD_FORCE_SETUP:-0}" == "1" ]]; then
     log "Installing runtime UI dependencies"
-    npm install --prefix "$runtime_frontend"
+    npm install --no-audit --no-fund --loglevel=error --prefix "$runtime_frontend"
   fi
 }
 
@@ -587,12 +592,25 @@ ensure_runtime_instance() {
   ) || existing=1
 
   if [[ "$existing" != "0" ]]; then
-    log "Initializing agent runtime instance"
+    log "Initializing agent runtime instance (default language: $RUNTIME_LANGUAGE)"
     local workspace="$HOME/.jiuwenclaw-instances/$RUNTIME_INSTANCE"
+    : > "$LOG_DIR/runtime-init.log"
     if [[ -d "$workspace" ]]; then
-      (cd "$RUNTIME_ROOT" && printf 'yes\n%s\n' "$RUNTIME_LANGUAGE" | uv run jiuwenclaw-init --name "$RUNTIME_INSTANCE")
+      (
+        cd "$RUNTIME_ROOT"
+        printf 'yes\n%s\n' "$RUNTIME_LANGUAGE" | uv run jiuwenclaw-init --name "$RUNTIME_INSTANCE" >> "$LOG_DIR/runtime-init.log" 2>&1
+      ) || {
+        tail -n 80 "$LOG_DIR/runtime-init.log" >&2 || true
+        die "Failed to initialize agent runtime instance"
+      }
     else
-      (cd "$RUNTIME_ROOT" && printf '%s\n' "$RUNTIME_LANGUAGE" | uv run jiuwenclaw-init --name "$RUNTIME_INSTANCE")
+      (
+        cd "$RUNTIME_ROOT"
+        printf '%s\n' "$RUNTIME_LANGUAGE" | uv run jiuwenclaw-init --name "$RUNTIME_INSTANCE" >> "$LOG_DIR/runtime-init.log" 2>&1
+      ) || {
+        tail -n 80 "$LOG_DIR/runtime-init.log" >&2 || true
+        die "Failed to initialize agent runtime instance"
+      }
     fi
   fi
 
@@ -792,6 +810,9 @@ start_frontend() {
   : > "$LOG_DIR/frontend.log"
   local frontend_cmd
   frontend_cmd="cd $(shell_quote "$BACKEND_ROOT/frontend")"
+  frontend_cmd+=" && export VITE_REPLAY_WORKSPACE_PATH=$(shell_quote "$LIVE_WORKSPACE_PATH")"
+  frontend_cmd+=" && export VITE_DEFAULT_REPLAY_HYPOTHESIS_ID=$(shell_quote "$GOD_EXPERIMENT")"
+  frontend_cmd+=" && export VITE_DEFAULT_REPLAY_EXPERIMENT_ID=$(shell_quote "$GOD_EXPERIMENT_RUN")"
   frontend_cmd+=" && exec npm run dev -- --host 127.0.0.1 --port $(shell_quote "$GOD_FRONTEND_PORT") >> $(shell_quote "$LOG_DIR/frontend.log") 2>&1"
   start_detached_service "god-frontend" "$FRONTEND_PID_FILE" "$frontend_cmd"
 
@@ -799,11 +820,23 @@ start_frontend() {
 }
 
 create_session() {
-  start_backend
+  if ! is_port_open "$GOD_BACKEND_PORT" || ! curl -fsS "$backend_url/health" >/dev/null 2>&1; then
+    start_backend
+  fi
   log "Creating live session"
-  curl -fsS -X POST "$(session_url)" \
+  local status_json
+  status_json="$(curl -fsS -X POST "$(session_url)" \
     -H 'content-type: application/json' \
-    -d '{}' | python3 -m json.tool || die "Failed to create live session"
+    -d '{}')" || die "Failed to create live session"
+
+  local step_count
+  step_count="$(python3 -c 'import json, sys; print(json.load(sys.stdin).get("step_count", 0))' <<< "$status_json")"
+  if [[ "${GOD_PRIME_FIRST_STEP:-1}" != "0" && "$step_count" == "0" ]]; then
+    log "Priming live session (step 1)"
+    curl -fsS -X POST "$(run_step_url)" \
+      -H 'content-type: application/json' \
+      -d '{}' >/dev/null || die "Failed to run the first live step"
+  fi
 }
 
 start_all() {
@@ -920,9 +953,11 @@ case "$ACTION" in
     ;;
   restart)
     restart_all
+    open_frontend_pages
     ;;
   new-run)
     new_run
+    open_frontend_pages
     ;;
   factory-reset|reset)
     factory_reset

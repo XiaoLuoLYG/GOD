@@ -38,8 +38,7 @@ const TILE_SIZE = 32;
 const CHARACTER_ROOT = '/pixel-town/characters';
 const DEFAULT_HYPOTHESIS_ID = import.meta.env.VITE_DEFAULT_REPLAY_HYPOTHESIS_ID ?? 'god_town';
 const DEFAULT_EXPERIMENT_ID = import.meta.env.VITE_DEFAULT_REPLAY_EXPERIMENT_ID ?? '1';
-const DEFAULT_WORKSPACE_PATH = import.meta.env.VITE_REPLAY_WORKSPACE_PATH
-    ?? '/Users/luoyige/Documents/projects/GOD/agentsociety/quick_experiments';
+const DEFAULT_WORKSPACE_PATH = import.meta.env.VITE_REPLAY_WORKSPACE_PATH ?? '';
 const HIDDEN_TILE_LAYER_NAMES = new Set([
     'AgentSociety Scene Footprints',
     'Collisions',

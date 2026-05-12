@@ -54,7 +54,7 @@
 ## 🚀 Quick Start
 
 ```bash
-git clone https://github.com/<your-org>/GOD.git
+git clone https://github.com/XiaoLuoLYG/GOD.git
 cd GOD
 ./scripts/god.sh start
 ```
@@ -108,6 +108,7 @@ flowchart LR
 
 ```bash
 ./scripts/god.sh start      # start the full stack (idempotent)
+./scripts/god.sh restart    # stop everything cleanly, then start again
 ./scripts/god.sh new-run    # wipe replay data and start a fresh session
 ./scripts/god.sh status     # ports, URLs, model status
 ./scripts/god.sh stop       # stop everything
@@ -143,7 +144,7 @@ Issues and pull requests are very welcome. To set up a dev environment:
 ./scripts/god.sh start
 ```
 
-That installs Python and Node dependencies, brings up the full stack, and opens a live session. From there, edit and reload.
+That installs Python and Node dependencies, brings up the full stack, creates a live session, and runs the first step so the control room opens on a populated town. From there, edit and reload.
 
 ## 🙌 Acknowledgements
 
@@ -177,11 +178,11 @@ And takes inspiration from [Generative Agents](https://arxiv.org/abs/2304.03442)
 
 ## ⭐ Star History
 
-<a href="https://star-history.com/#your-org/GOD&Date">
+<a href="https://star-history.com/#XiaoLuoLYG/GOD&Date">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=your-org/GOD&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=your-org/GOD&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=your-org/GOD&type=Date" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=XiaoLuoLYG/GOD&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=XiaoLuoLYG/GOD&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=XiaoLuoLYG/GOD&type=Date" />
   </picture>
 </a>
 

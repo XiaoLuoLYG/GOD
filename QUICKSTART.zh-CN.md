@@ -30,7 +30,7 @@ python3 --version && npm --version && uv --version
 ## 2. 克隆
 
 ```bash
-git clone https://github.com/<your-org>/GOD.git
+git clone https://github.com/XiaoLuoLYG/GOD.git
 cd GOD
 ```
 
@@ -45,7 +45,7 @@ cd GOD
 1. 从 `.env.example` 创建 `.env`。
 2. 询问 LLM API key、API base URL、模型名。
 3. 安装 Python 和 Node 依赖。
-4. 启动完整栈，并创建一个干净的 live session。
+4. 启动完整栈，创建 live session，并先跑完第 1 步。
 
 需要的三个配置：
 
@@ -89,30 +89,8 @@ http://127.0.0.1:5174/pixel-replay/god_town/1
 
 ```bash
 ./scripts/god.sh start    # 可重复执行；已运行的服务会被复用
+./scripts/god.sh restart  # 先干净停止，再重新启动
 ./scripts/god.sh stop     # 停止所有服务
 ./scripts/god.sh tail     # 跟随日志
 ./scripts/god.sh open     # 在浏览器里打开控制台
 ```
-
-## 故障排查
-
-**页面一直 loading。**
-看日志：
-
-```bash
-./scripts/god.sh tail
-```
-
-如果出现 `401` 或鉴权失败，说明 API key / base / model 组合被服务方拒绝。改完 `.env` 后：
-
-```bash
-./scripts/god.sh restart
-```
-
-**想完全重来。**
-
-```bash
-./scripts/god.sh restart
-```
-
-会先把所有服务干净地停掉，再重新启动。
