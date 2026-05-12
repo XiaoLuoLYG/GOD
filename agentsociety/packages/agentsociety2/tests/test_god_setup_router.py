@@ -99,6 +99,22 @@ def test_setup_status_redacts_api_key_and_requires_first_setup(monkeypatch, tmp_
     assert status["needs_setup"] is True
 
 
+def test_merged_env_prefers_saved_env_file_over_stale_process_env(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    monkeypatch.setenv("GOD_LLM_API_BASE", "https://api.openai.com/v1")
+    (tmp_path / ".env").write_text(
+        "GOD_LLM_API_KEY=sk-test-secret\n"
+        "GOD_LLM_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1\n"
+        "GOD_LLM_MODEL=qwen-plus\n",
+        encoding="utf-8",
+    )
+
+    env = god_setup._merged_env()
+
+    assert env["GOD_LLM_API_BASE"] == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    assert env["GOD_LLM_MODEL"] == "qwen-plus"
+
+
 def test_generate_draft_normalizes_model_output(monkeypatch, tmp_path):
     _configure_tmp_god(monkeypatch, tmp_path)
     monkeypatch.setattr(god_setup, "_known_location_ids", lambda: ["school", "park", "cafe"])
@@ -129,6 +145,77 @@ def test_generate_draft_normalizes_model_output(monkeypatch, tmp_path):
     latest = json.loads((tmp_path / ".god" / "run" / "latest-draft.json").read_text(encoding="utf-8"))
     assert latest["basics"]["background"] == "A bounded simulation about assigned authority roles."
     assert latest["draft"]["experiment_context"]["title"] == "Stanford Prison Adaptation"
+
+
+def test_generate_draft_uses_saved_api_base_when_request_omits_it(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    monkeypatch.setenv("GOD_LLM_API_BASE", "https://api.openai.com/v1")
+    (tmp_path / ".env").write_text(
+        "GOD_LLM_API_KEY=sk-env-key\n"
+        "GOD_LLM_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1\n"
+        "GOD_LLM_MODEL=qwen-plus\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(god_setup, "_known_location_ids", lambda: ["school", "park", "cafe"])
+    captured = {}
+
+    async def fake_call(**kwargs):
+        captured.update(kwargs)
+        return _raw_draft()
+
+    monkeypatch.setattr(god_setup, "_call_openai_compatible", fake_call)
+
+    anyio.run(
+        god_setup.generate_draft,
+        GenerateDraftRequest(
+            model_config=ModelConfigPayload(),
+            basics=DraftBasics(agent_count=2),
+        ),
+    )
+
+    assert captured["api_base"] == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    assert captured["model"] == "qwen-plus"
+
+
+def test_normalize_draft_replaces_generic_agent_names(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    monkeypatch.setattr(god_setup, "_known_location_ids", lambda: ["school", "park", "cafe"])
+    raw = _raw_draft()
+    raw["init_config"]["agents"][0]["kwargs"]["name"] = "Jiuwen Agent 1"
+    raw["init_config"]["agents"][0]["kwargs"]["profile"]["name"] = "Jiuwen Agent 1"
+
+    draft = god_setup._normalize_draft(
+        raw,
+        DraftBasics(
+            title="角色压力观察",
+            background="安全版监狱角色压力实验，观察权力、规则和沟通。",
+            agent_count=2,
+        ),
+    )
+
+    first = draft["init_config"]["agents"][0]
+    assert first["kwargs"]["name"] != "Jiuwen Agent 1"
+    assert first["kwargs"]["profile"]["name"] == first["kwargs"]["name"]
+    assert first["kwargs"]["profile"]["role"] != "participant"
+
+
+def test_normalize_draft_backfills_scenario_specific_agents(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    monkeypatch.setattr(god_setup, "_known_location_ids", lambda: ["home", "school", "cafe", "market", "park"])
+
+    draft = god_setup._normalize_draft(
+        {"init_config": {"agents": []}},
+        DraftBasics(
+            title="早高峰协作实验",
+            background="小镇早高峰，居民需要在咖啡馆和市场之间协调采购清单和交接时间。",
+            agent_count=2,
+        ),
+    )
+
+    profiles = [agent["kwargs"]["profile"] for agent in draft["init_config"]["agents"]]
+    assert profiles[0]["skills"] != profiles[1]["skills"]
+    assert "库存盘点" in profiles[1]["skills"]
+    assert "采购" in profiles[1]["persona"]
 
 
 def test_generate_draft_accepts_empty_basics_with_defaults(monkeypatch, tmp_path):
@@ -203,3 +290,19 @@ def test_publish_writes_new_experiment_context_and_start_request(monkeypatch, tm
     assert current["hypothesis_id"] == "role_study"
     assert start_request["hypothesis_id"] == "role_study"
     assert "GOD_EXPERIMENT=role_study" in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+def test_start_default_experiment_writes_current_and_start_request(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    default_dir = tmp_path / "quick_experiments" / "hypothesis_god_town" / "experiment_1" / "init"
+    default_dir.mkdir(parents=True)
+    (default_dir / "init_config.json").write_text("{}", encoding="utf-8")
+
+    result = anyio.run(god_setup.start_default_experiment)
+
+    assert result["hypothesis_id"] == "god_town"
+    assert result["experiment_id"] == "1"
+    current = json.loads((tmp_path / ".god" / "current_experiment.json").read_text(encoding="utf-8"))
+    start_request = json.loads((tmp_path / ".god" / "run" / "start-request.json").read_text(encoding="utf-8"))
+    assert current["hypothesis_id"] == "god_town"
+    assert start_request["hypothesis_id"] == "god_town"

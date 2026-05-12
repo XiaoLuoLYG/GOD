@@ -182,10 +182,11 @@ def _write_env_values(values: dict[str, str]) -> None:
 
 
 def _merged_env() -> dict[str, str]:
-    env = {**ENV_DEFAULTS, **_read_env()}
+    env = dict(ENV_DEFAULTS)
     for key in MODEL_KEYS:
         if os.getenv(key):
             env[key] = os.environ[key]
+    env.update(_read_env())
     return env
 
 
@@ -252,6 +253,223 @@ def _fallback_location(index: int, known_locations: list[str]) -> str:
     return ordered[index % len(ordered)]
 
 
+_ZH_NAMES = [
+    "林若晨",
+    "陈明远",
+    "周安然",
+    "许嘉宁",
+    "沈知夏",
+    "赵远山",
+    "顾小满",
+    "梁一舟",
+    "韩清越",
+    "苏晚晴",
+    "马知行",
+    "何雨桐",
+]
+
+_EN_NAMES = [
+    "Maya Lin",
+    "Owen Chen",
+    "Nora Hale",
+    "Ethan Brooks",
+    "Iris Wang",
+    "Sam Rivera",
+    "Leah Park",
+    "Jonah Reed",
+    "Ava Morgan",
+    "Milo Tan",
+    "Grace Liu",
+    "Noah Patel",
+]
+
+
+def _language_is_zh(language: str) -> bool:
+    return not str(language or "").lower().startswith("en")
+
+
+def _scenario_templates(background: str, language: str) -> list[dict[str, Any]]:
+    text = background.lower()
+    zh = _language_is_zh(language)
+    if any(word in text for word in ("监狱", "prison", "权力", "authority", "规则", "role pressure")):
+        return [
+            {
+                "role": "规则协调员" if zh else "rules coordinator",
+                "scene_role": "coordinator",
+                "location": "school",
+                "skills": ["流程说明", "边界确认", "冲突降温", "记录共识", "公开沟通"] if zh else ["process briefing", "boundary setting", "de-escalation", "consensus notes", "public communication"],
+                "persona": "克制、重视程序，习惯把权力关系翻译成可讨论的规则。" if zh else "measured and process-minded, translates authority tension into discussable rules.",
+            },
+            {
+                "role": "权益观察员" if zh else "welfare observer",
+                "scene_role": "observer",
+                "location": "cafe",
+                "skills": ["情绪观察", "隐性压力识别", "私下询问", "风险记录", "同伴支持"] if zh else ["emotion observation", "pressure detection", "private check-ins", "risk notes", "peer support"],
+                "persona": "敏感但不夸张，能看见沉默成员的压力变化。" if zh else "sensitive without overreacting, notices pressure in quieter participants.",
+            },
+            {
+                "role": "生活组长" if zh else "daily-life lead",
+                "scene_role": "participant",
+                "location": "market",
+                "skills": ["资源分配", "排班协调", "日常采购", "简短协商", "秩序维护"] if zh else ["resource allocation", "shift coordination", "daily supplies", "brief negotiation", "order keeping"],
+                "persona": "务实、讲效率，但在紧张时会不自觉变得强势。" if zh else "practical and efficient, can become too forceful under tension.",
+            },
+            {
+                "role": "普通参与者" if zh else "ordinary participant",
+                "scene_role": "participant",
+                "location": "park",
+                "skills": ["自我表达", "观察规则变化", "寻求帮助", "同伴沟通", "保持边界"] if zh else ["self-expression", "rule-change awareness", "help seeking", "peer communication", "boundary keeping"],
+                "persona": "起初配合，遇到不公平规则时会犹豫是否提出异议。" if zh else "initially cooperative, hesitates before challenging unfair rules.",
+            },
+            {
+                "role": "安全记录员" if zh else "safety recorder",
+                "scene_role": "observer",
+                "location": "library",
+                "skills": ["事件记录", "中立复述", "提醒暂停", "资料整理", "风险标注"] if zh else ["event logging", "neutral summaries", "pause reminders", "document sorting", "risk marking"],
+                "persona": "安静、准确，优先保护实验边界和参与者尊严。" if zh else "quiet and precise, prioritizes boundaries and participant dignity.",
+            },
+        ]
+    if any(word in text for word in ("学校", "课堂", "教育", "student", "school", "class")):
+        return [
+            {
+                "role": "班级协调老师" if zh else "class coordinator",
+                "scene_role": "teacher",
+                "location": "school",
+                "skills": ["课堂节奏控制", "学生情绪观察", "公开提问引导", "课后反馈整理", "家校沟通"] if zh else ["class pacing", "student mood reading", "public questioning", "after-class feedback", "family communication"],
+                "persona": "温和但有原则，习惯用具体例子把抽象冲突拉回课堂日常。" if zh else "warm but principled, grounds abstract conflict in classroom routine.",
+            },
+            {
+                "role": "学生代表" if zh else "student representative",
+                "scene_role": "student",
+                "location": "school",
+                "skills": ["同伴转述", "学习计划协调", "压力表达", "小组分工", "求助判断"] if zh else ["peer relay", "study-plan coordination", "pressure articulation", "group assignment", "help-seeking judgment"],
+                "persona": "反应快、在意公平，愿意替同伴开口但不喜欢被推到台前太久。" if zh else "quick and fairness-minded, speaks for peers but dislikes staying in the spotlight too long.",
+            },
+            {
+                "role": "图书馆志愿者" if zh else "library volunteer",
+                "scene_role": "observer",
+                "location": "library",
+                "skills": ["资料检索", "安静提醒", "借阅记录", "冲突旁观记录", "学习空间维护"] if zh else ["reference lookup", "quiet reminders", "loan records", "conflict notes", "study-space care"],
+                "persona": "细心、怕打扰别人，会用低声提醒和记录来维护秩序。" if zh else "careful and disruption-averse, maintains order through quiet reminders and notes.",
+            },
+            {
+                "role": "家长联络人" if zh else "family liaison",
+                "scene_role": "resident",
+                "location": "cafe",
+                "skills": ["信息转达", "非正式谈话", "担忧识别", "时间协调", "社区资源连接"] if zh else ["information relay", "informal conversation", "concern spotting", "time coordination", "resource linking"],
+                "persona": "熟人多、说话圆融，常把校园问题带到咖啡馆的轻松谈话里消化。" if zh else "well-connected and tactful, processes school concerns through relaxed cafe conversations.",
+            },
+        ]
+    return [
+        {
+            "role": "社区协调员" if zh else "neighborhood coordinator",
+            "scene_role": "coordinator",
+            "location": "park",
+            "skills": ["晨间巡访", "邻里介绍", "公共公告整理", "临时调解", "活动排程"] if zh else ["morning check-ins", "neighbor introductions", "notice-board upkeep", "light mediation", "event scheduling"],
+            "persona": "外向、记得住别人的小习惯，喜欢先把冲突变成可安排的小任务。" if zh else "outgoing and detail-minded, turns friction into schedulable small tasks.",
+        },
+        {
+            "role": "市场店主" if zh else "market shop owner",
+            "scene_role": "shop_worker",
+            "location": "market",
+            "skills": ["库存盘点", "采购优先级判断", "熟客需求记忆", "摊位动线安排", "价格解释"] if zh else ["inventory checks", "purchase prioritization", "regular-customer memory", "stall flow planning", "price explanation"],
+            "persona": "务实、嘴上爽快但心里会照顾熟客，常通过采购清单判断小镇当天的情绪。" if zh else "practical and brisk, reads the town's mood through supply lists and regular customers.",
+        },
+        {
+            "role": "中学老师" if zh else "teacher",
+            "scene_role": "teacher",
+            "location": "school",
+            "skills": ["课堂引导", "个别谈话", "作业反馈", "迟到原因判断", "家校信息同步"] if zh else ["lesson guidance", "one-on-one talks", "homework feedback", "lateness diagnosis", "family-school updates"],
+            "persona": "耐心但时间紧，常在备课和照顾学生情绪之间切换。" if zh else "patient but time-pressed, switches between lesson prep and emotional care.",
+        },
+        {
+            "role": "药房护理员" if zh else "pharmacy care worker",
+            "scene_role": "care_worker",
+            "location": "pharmacy",
+            "skills": ["用药提醒", "排队秩序维护", "健康担忧倾听", "物资短缺上报", "隐私边界确认"] if zh else ["medication reminders", "queue care", "health-concern listening", "shortage reporting", "privacy boundaries"],
+            "persona": "说话轻、观察细，会把紧张的人先安顿下来再处理事务。" if zh else "soft-spoken and observant, settles anxious residents before handling tasks.",
+        },
+        {
+            "role": "咖啡馆老板" if zh else "cafe owner",
+            "scene_role": "resident",
+            "location": "cafe",
+            "skills": ["晨间备餐", "闲聊破冰", "座位协调", "小道消息筛选", "情绪缓冲"] if zh else ["morning prep", "small-talk icebreaking", "seat coordination", "rumor filtering", "mood buffering"],
+            "persona": "热情但不八卦，擅长让陌生人在点单和等咖啡之间自然开口。" if zh else "warm without gossiping, helps strangers talk while ordering and waiting.",
+        },
+        {
+            "role": "高中学生" if zh else "student",
+            "scene_role": "student",
+            "location": "school",
+            "skills": ["同伴观察", "作业安排", "社交试探", "公交时间规划", "压力表达"] if zh else ["peer observation", "homework planning", "social probing", "bus-time planning", "pressure expression"],
+            "persona": "好奇、略紧张，既想参与社区事务又怕被成年人当成小孩。" if zh else "curious and slightly nervous, wants to help without being treated like a child.",
+        },
+        {
+            "role": "退休居民" if zh else "retired resident",
+            "scene_role": "resident",
+            "location": "park",
+            "skills": ["散步社交", "往事参照", "邻里提醒", "节奏放慢", "冲突旁观劝解"] if zh else ["walk-and-talk socializing", "memory references", "neighbor reminders", "pace slowing", "bystander calming"],
+            "persona": "慢热、记忆力好，常用以前的小镇故事提醒别人别把问题放大。" if zh else "slow to warm but sharp, uses old town stories to deflate tension.",
+        },
+        {
+            "role": "远程工程师" if zh else "remote engineer",
+            "scene_role": "resident",
+            "location": "home",
+            "skills": ["异步沟通", "设备排查", "番茄钟工作", "线上会议协调", "邻里技术帮忙"] if zh else ["async communication", "device troubleshooting", "focus blocks", "meeting coordination", "neighbor tech help"],
+            "persona": "内向但可靠，常在工作间隙被邻居请去解决小技术问题。" if zh else "introverted but reliable, often solves small tech problems between work blocks.",
+        },
+        {
+            "role": "公共安全志愿者" if zh else "public safety volunteer",
+            "scene_role": "observer",
+            "location": "supply_store",
+            "skills": ["巡逻路线规划", "物资检查", "异常记录", "礼貌提醒", "应急联络"] if zh else ["patrol routing", "supply checks", "incident notes", "polite reminders", "emergency contact"],
+            "persona": "谨慎、避免夸张警报，喜欢用清单而不是权威压人。" if zh else "careful and anti-alarmist, prefers checklists over authority displays.",
+        },
+        {
+            "role": "蔬果摊主" if zh else "produce vendor",
+            "scene_role": "shop_worker",
+            "location": "market",
+            "skills": ["新鲜度判断", "顾客偏好记忆", "摊位补货", "邻摊协作", "天气影响预估"] if zh else ["freshness judgment", "customer preference memory", "stall restocking", "vendor cooperation", "weather impact estimates"],
+            "persona": "爽朗、会算账，也会从顾客买什么看出谁家今天可能需要帮忙。" if zh else "cheerful and numbers-savvy, infers who may need help from what customers buy.",
+        },
+    ]
+
+
+def _agent_name(index: int, language: str) -> str:
+    names = _ZH_NAMES if _language_is_zh(language) else _EN_NAMES
+    return names[index % len(names)]
+
+
+def _generic_profile_text(role: str, background: str, language: str) -> dict[str, str]:
+    zh = _language_is_zh(language)
+    if zh:
+        return {
+            "household": f"住在小镇里，与“{role}”身份相关的日常关系会影响他的选择。",
+            "daily_routine": f"根据{role}身份安排工作、休息和社交，在普通生活中逐步暴露实验设定带来的压力。",
+            "relationships": "与其他角色有明确但不夸张的熟人关系，会通过对话、协作和回避来回应压力。",
+            "goal": f"在实验设定中真实扮演{role}，同时维护个人边界和小镇日常秩序。",
+            "constraints": "不得羞辱、威胁、强迫或制造身体伤害；遇到压力时优先沟通、暂停和求助。",
+        }
+    return {
+        "household": f"Lives in town with daily ties shaped by the {role} role.",
+        "daily_routine": f"Balances {role} duties with meals, rest, errands, and grounded social contact.",
+        "relationships": "Has specific but non-melodramatic ties to the other roles and responds through talk, cooperation, or avoidance.",
+        "goal": f"Portray the {role} role believably while preserving personal boundaries and town routine.",
+        "constraints": "Do not humiliate, threaten, coerce, or cause physical harm; use communication, pauses, and help-seeking under pressure.",
+    }
+
+
+def _is_generic_agent_name(value: str, agent_id: int) -> bool:
+    lowered = value.strip().lower()
+    return lowered in {
+        "",
+        f"agent {agent_id}",
+        f"jiuwen agent {agent_id}",
+        f"jiuwen agent_{agent_id}",
+        f"generated agent {agent_id}",
+        f"participant {agent_id}",
+    } or bool(re.fullmatch(r"(jiuwen\s+)?agent[_\s-]*\d+", lowered))
+
+
 def _default_context(title: str, background: str) -> dict[str, Any]:
     return {
         "title": title,
@@ -267,22 +485,38 @@ def _default_context(title: str, background: str) -> dict[str, Any]:
     }
 
 
-def _default_agent(agent_id: int, title: str, background: str, known_locations: list[str]) -> dict[str, Any]:
-    name = f"Jiuwen Agent {agent_id}"
-    role = "participant" if agent_id > 1 else "coordinator"
+def _default_agent(
+    agent_id: int,
+    basics: DraftBasics,
+    known_locations: list[str],
+) -> dict[str, Any]:
+    title = basics.title
+    background = basics.background
+    templates = _scenario_templates(background, basics.language)
+    template = templates[(agent_id - 1) % len(templates)] if templates else {}
+    name = _agent_name(agent_id - 1, basics.language)
+    role = str(template.get("role") or ("participant" if agent_id > 1 else "coordinator"))
+    scenario_role = str(template.get("scene_role") or role)
+    profile_text = _generic_profile_text(role, background, basics.language)
+    skills = template.get("skills")
+    if not isinstance(skills, list) or not skills:
+        skills = ["观察沟通", "日程安排", "边界维护", "场景适应", "简短记录"] if _language_is_zh(basics.language) else ["observation", "routine planning", "boundary keeping", "scene adaptation", "brief notes"]
+    location = str(template.get("location") or "")
+    if location not in known_locations:
+        location = _fallback_location(agent_id - 1, known_locations)
     profile = {
         "name": name,
-        "age": 25 + agent_id,
+        "age": 22 + ((agent_id * 7) % 43),
         "role": role,
-        "household": "Lives in the simulated town for the duration of the experiment.",
-        "persona": "Observant, socially responsive, and consistent with the assigned scenario role.",
-        "skills": ["observation", "conversation", "routine planning"],
-        "daily_routine": "Follow the scenario role while preserving ordinary needs such as rest, food, and social contact.",
-        "relationships": "Knows the other participants through the shared experiment setting.",
-        "goal": f"Participate in {title} while staying within the scenario boundaries.",
-        "constraints": "Avoid harmful, coercive, or humiliating behavior.",
+        "household": profile_text["household"],
+        "persona": str(template.get("persona") or ("观察细致、反应自然，会把实验压力融入普通生活互动。" if _language_is_zh(basics.language) else "observant and natural, folds scenario pressure into ordinary town interactions.")),
+        "skills": skills,
+        "daily_routine": profile_text["daily_routine"],
+        "relationships": profile_text["relationships"],
+        "goal": profile_text["goal"],
+        "constraints": profile_text["constraints"],
         "scenario": background[:700],
-        "scenario_role": role,
+        "scenario_role": scenario_role,
     }
     return {
         "agent_id": agent_id,
@@ -302,7 +536,7 @@ def _default_agent(agent_id: int, title: str, background: str, known_locations: 
             "channel_id": "agentsociety",
             "experiment_context": _default_context(title, background),
         },
-        "_initial_location": _fallback_location(agent_id - 1, known_locations),
+        "_initial_location": location,
     }
 
 
@@ -332,20 +566,25 @@ def _normalize_draft(raw: dict[str, Any], basics: DraftBasics) -> dict[str, Any]
     normalized_agents: list[dict[str, Any]] = []
     for index in range(basics.agent_count):
         source = agents[index] if index < len(agents) and isinstance(agents[index], dict) else {}
-        default_agent = _default_agent(index + 1, basics.title, basics.background, known_locations)
+        default_agent = _default_agent(index + 1, basics, known_locations)
         merged = deepcopy(default_agent)
         merged.update({k: v for k, v in source.items() if k in {"agent_id", "agent_type", "kwargs"}})
-        merged["agent_id"] = int(merged.get("agent_id") or index + 1)
+        merged["agent_id"] = index + 1
         merged["agent_type"] = str(merged.get("agent_type") or "JiuwenClawAgent")
         kwargs = merged.get("kwargs") if isinstance(merged.get("kwargs"), dict) else {}
         default_kwargs = default_agent["kwargs"]
         profile = kwargs.get("profile") if isinstance(kwargs.get("profile"), dict) else {}
         default_profile = default_kwargs["profile"]
-        name = str(kwargs.get("name") or profile.get("name") or default_profile["name"])
+        raw_name = str(kwargs.get("name") or profile.get("name") or default_profile["name"])
+        name = default_profile["name"] if _is_generic_agent_name(raw_name, merged["agent_id"]) else raw_name
         profile = {
             **default_profile,
             **profile,
-            "name": str(profile.get("name") or name),
+            "name": (
+                name
+                if _is_generic_agent_name(str(profile.get("name") or ""), merged["agent_id"])
+                else str(profile.get("name") or name)
+            ),
             "scenario": str(profile.get("scenario") or context.get("background") or "")[:1200],
             "scenario_role": str(profile.get("scenario_role") or profile.get("role") or "participant"),
         }
@@ -449,6 +688,16 @@ def _readme_for_draft(context: dict[str, Any], init_config: dict[str, Any], step
     )
 
 
+def _sanitize_model_error(text: str, api_key: str) -> str:
+    sanitized = text
+    if api_key:
+        sanitized = sanitized.replace(api_key, "sk-...redacted")
+        if len(api_key) > 12:
+            sanitized = sanitized.replace(api_key[:8], "sk-...").replace(api_key[-4:], "****")
+    sanitized = re.sub(r"sk-[A-Za-z0-9_\-*]{8,}", "sk-...redacted", sanitized)
+    return sanitized[:800]
+
+
 async def _call_openai_compatible(
     *,
     api_key: str,
@@ -513,7 +762,8 @@ async def _call_openai_compatible(
         "Return only one strict JSON object. Do not use markdown. "
         "Use safe, bounded social-science simulation framing. For prison/authority scenarios, "
         "model role pressure and communication without abuse, humiliation, physical harm, or illegal acts. "
-        "v1 cannot generate a new map; choose only valid The Ville location ids."
+        "v1 cannot generate a new map; choose only valid The Ville location ids. "
+        "You must derive the cast from the operator scenario, not from a fixed template."
     )
     user_prompt = (
         f"Create a complete experiment draft.\n\n"
@@ -524,6 +774,14 @@ async def _call_openai_compatible(
         f"Run plan: {basics.num_steps} steps, tick {basics.tick} seconds\n"
         f"Operator scenario/background:\n{basics.background}\n\n"
         f"Available The Ville locations and interactions:\n{_map_location_prompt()}\n\n"
+        "Agent profile requirements:\n"
+        f"- Return exactly {basics.agent_count} agents.\n"
+        "- Every agent must have a realistic human name; do not use Agent 1, Jiuwen Agent 1, Participant 1, or numbered placeholders.\n"
+        "- Each profile must be scenario-specific: role, household, persona, skills, daily_routine, relationships, goal, constraints, and scenario_role.\n"
+        "- Relationships should reference other generated agent names or roles so the town has social texture.\n"
+        "- Skills are profile capabilities, not executable tools; make them concrete and role-specific.\n"
+        "- Initial locations must use valid location ids from the list above and should match each role's routine.\n"
+        "- Keep behavior safe and bounded; transform risky settings into observation, consent, rules, welfare, and communication dynamics.\n\n"
         f"Required JSON shape:\n{json.dumps(schema, ensure_ascii=False)}"
     )
     timeout_seconds = float(os.getenv("GOD_SETUP_DRAFT_TIMEOUT", "240"))
@@ -542,13 +800,19 @@ async def _call_openai_compatible(
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
-                    "temperature": 0.5,
+                    "temperature": 0.7,
                     "response_format": {"type": "json_object"},
                 },
             )
             text = await response.text()
             if response.status >= 400:
-                raise HTTPException(status_code=502, detail=f"Draft model request failed: {text[:600]}")
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        f"Draft model request failed via {url}: "
+                        f"{_sanitize_model_error(text, api_key)}"
+                    ),
+                )
             payload = json.loads(text)
     except asyncio.TimeoutError as exc:
         raise HTTPException(
@@ -628,6 +892,14 @@ async def setup_status() -> dict[str, Any]:
     workspace = Path((current or {}).get("workspace_path") or _workspace_path()).expanduser().resolve()
     config_path = _experiment_path(workspace, hypothesis_id, experiment_id) / "init" / "init_config.json"
     has_current = current is not None and config_path.exists()
+    default_hypothesis_id = ENV_DEFAULTS["GOD_EXPERIMENT"]
+    default_experiment_id = ENV_DEFAULTS["GOD_EXPERIMENT_RUN"]
+    default_workspace = _workspace_path()
+    default_config_path = (
+        _experiment_path(default_workspace, default_hypothesis_id, default_experiment_id)
+        / "init"
+        / "init_config.json"
+    )
     return {
         "god_root": str(_god_root()),
         "env_file": str(_env_file()),
@@ -636,9 +908,10 @@ async def setup_status() -> dict[str, Any]:
         "model_config": {key: _redact_value(key, env.get(key)) for key in MODEL_KEYS},
         "current_experiment": current,
         "default_experiment": {
-            "hypothesis_id": env.get("GOD_EXPERIMENT", "god_town"),
-            "experiment_id": env.get("GOD_EXPERIMENT_RUN", "1"),
-            "config_exists": config_path.exists(),
+            "hypothesis_id": default_hypothesis_id,
+            "experiment_id": default_experiment_id,
+            "workspace_path": str(default_workspace),
+            "config_exists": default_config_path.exists(),
         },
         "needs_setup": not bool(env.get("GOD_LLM_API_KEY")) or not has_current,
     }
@@ -784,3 +1057,25 @@ async def create_start_request(payload: StartRequestPayload) -> dict[str, Any]:
     if not hypothesis_id:
         raise HTTPException(status_code=400, detail="No current experiment is configured")
     return _write_start_request(str(hypothesis_id), str(experiment_id), workspace)
+
+
+@router.post("/start-default")
+async def start_default_experiment() -> dict[str, Any]:
+    hypothesis_id = ENV_DEFAULTS["GOD_EXPERIMENT"]
+    experiment_id = ENV_DEFAULTS["GOD_EXPERIMENT_RUN"]
+    workspace = _workspace_path()
+    config_path = _experiment_path(workspace, hypothesis_id, experiment_id) / "init" / "init_config.json"
+    if not config_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Default experiment config not found: {config_path}",
+        )
+    current = _write_current_experiment(hypothesis_id, experiment_id, workspace)
+    start_request = _write_start_request(hypothesis_id, experiment_id, workspace)
+    return {
+        "hypothesis_id": hypothesis_id,
+        "experiment_id": experiment_id,
+        "workspace_path": str(workspace),
+        "current_experiment": current,
+        "start_request": start_request,
+    }

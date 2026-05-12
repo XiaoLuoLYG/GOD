@@ -121,20 +121,33 @@ flowchart LR
 ## 🧪 Default Experiment
 
 ```text
-god_town
-├── 10 residents with distinct personas
-├── A pixel town: houses, paths, and a town square
-└── A scripted step plan you can intervene at any point
+god_town · The Ville ordinary weekday baseline
+├── environment: The Ville pixel town with 10 places (home / school / library / cafe /
+│   park / supply store / market / pharmacy / pub / dorm) and 65 location-scoped interactions
+├── shared world: experiment_context with title, background, date/weather/school-calendar,
+│   shared norms, town facts, and language preferences, injected into every step prompt
+├── personas: 10 residents, each profile has age / gender / family / housing /
+│   economic_status / health / needs / worries / secrets / social_network /
+│   emotional_baseline / language_style / detailed_routine / inventory /
+│   recent_history / triggers / dislikes / short_term_goals / long_term_goal /
+│   quirks / skills (JiuwenClaw-style ids)
+└── step plan: an experiment script you can intervene, branch, or replay at any step
 ```
 
 To run your own experiment, drop a new config under `quick_experiments/` and point `GOD_EXPERIMENT` at it.
 
 ## 🛣️ Roadmap
 
-- [ ] Multi-town experiments in one control room
-- [ ] Persistent operator notes per step
-- [ ] Pluggable map manifests
-- [ ] Hosted public demo
+- [ ] Multi-experiment orchestration: run experiments, control groups, and repeated trials in one control room.
+- [ ] Live map generation: update the map as events, resources, repairs, blocked roads, and crowds evolve.
+- [ ] Event-responsive worlds: weather, accidents, festivals, conflicts, rumors, and shortages affect decisions.
+- [ ] Pluggable agents: swap LLM runtimes, persona templates, skill packs, and decision policies.
+- [ ] Pluggable maps: load map manifests, place semantics, interactive objects, and navigation rules.
+- [ ] More realistic defaults: add needs, jobs, families, social networks, economic limits, emotion, and memory.
+- [ ] Large-scale simulation: integrate AgentSociety batching, sharded runs, sampled replay, and aggregate metrics.
+- [ ] Experiment evaluation: cross-run metrics, behavior diffs, intervention analysis, and reproducible snapshots.
+- [ ] Operator workflow: per-step notes, tags, bookmarks, and key-event summaries.
+- [ ] Hosted demo and scenario sharing: public demo, experiment templates, map templates, and reusable config packs.
 
 Have an idea? Open an issue or PR — see [Contributing](#-contributing).
 
