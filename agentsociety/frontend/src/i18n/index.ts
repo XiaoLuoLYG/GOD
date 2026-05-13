@@ -31,6 +31,8 @@ import enExperiment from './locales/en/experiment';
 import zhExperiment from './locales/zh/experiment';
 import enSkill from './locales/en/skill';
 import zhSkill from './locales/zh/skill';
+import enSetup from './locales/en/setup';
+import zhSetup from './locales/zh/setup';
 
 // Combine translations
 const resources = {
@@ -50,6 +52,7 @@ const resources = {
             profile: enProfile,
             experiment: enExperiment,
             skill: enSkill,
+            setup: enSetup,
         }
     },
     zh: {
@@ -68,6 +71,7 @@ const resources = {
             profile: zhProfile,
             experiment: zhExperiment,
             skill: zhSkill,
+            setup: zhSetup,
         }
     }
 };
@@ -84,4 +88,4 @@ i18n
         resources
     });
 
-export default i18n; 
+export default i18n;

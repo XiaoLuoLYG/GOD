@@ -25,6 +25,7 @@ def _configure_tmp_god(monkeypatch, tmp_path: Path) -> None:
         "GOD_LLM_MODEL",
         "GOD_EXPERIMENT",
         "GOD_EXPERIMENT_RUN",
+        "GOD_SETUP_MODE",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -97,6 +98,16 @@ def test_setup_status_redacts_api_key_and_requires_first_setup(monkeypatch, tmp_
     }
     assert status["model_config"]["GOD_LLM_MODEL"]["value"] == "gpt-test"
     assert status["needs_setup"] is True
+    assert status["setup_mode"] is False
+
+
+def test_setup_status_exposes_setup_mode(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    monkeypatch.setenv("GOD_SETUP_MODE", "1")
+
+    status = anyio.run(god_setup.setup_status)
+
+    assert status["setup_mode"] is True
 
 
 def test_merged_env_prefers_saved_env_file_over_stale_process_env(monkeypatch, tmp_path):

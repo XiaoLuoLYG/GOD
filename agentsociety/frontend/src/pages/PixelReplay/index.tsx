@@ -40,6 +40,8 @@ const CHARACTER_ROOT = '/pixel-town/characters';
 const DEFAULT_HYPOTHESIS_ID = import.meta.env.VITE_DEFAULT_REPLAY_HYPOTHESIS_ID ?? 'god_town';
 const DEFAULT_EXPERIMENT_ID = import.meta.env.VITE_DEFAULT_REPLAY_EXPERIMENT_ID ?? '1';
 const DEFAULT_WORKSPACE_PATH = import.meta.env.VITE_REPLAY_WORKSPACE_PATH ?? '';
+const INITIAL_REPLAY_READY_TIMEOUT_MS = 60_000;
+const INITIAL_REPLAY_RETRY_INTERVAL_MS = 1500;
 const HIDDEN_TILE_LAYER_NAMES = new Set([
     'AgentSociety Scene Footprints',
     'Collisions',
@@ -669,6 +671,36 @@ async function postJson<T>(url: string, body: Record<string, unknown> = {}): Pro
     return response.json();
 }
 
+const sleep = (ms: number) => new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+});
+
+const toErrorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+async function waitForInitialReplay<T>(
+    operation: () => Promise<T>,
+    onRetry: (error: unknown, attempt: number) => void,
+    shouldCancel: () => boolean,
+): Promise<T> {
+    const deadline = Date.now() + INITIAL_REPLAY_READY_TIMEOUT_MS;
+    let attempt = 0;
+    let lastError: unknown;
+    while (!shouldCancel()) {
+        try {
+            return await operation();
+        } catch (error) {
+            lastError = error;
+            if (Date.now() >= deadline) {
+                break;
+            }
+            attempt += 1;
+            onRetry(error, attempt);
+            await sleep(INITIAL_REPLAY_RETRY_INTERVAL_MS);
+        }
+    }
+    throw lastError ?? new Error('Replay loading was cancelled');
+}
+
 async function loadWalkableMap(mapInfo: ReplayMapInfo): Promise<WalkableMap> {
     const response = await fetchCustom(mapInfo.tiled_map_url);
     if (!response.ok) {
@@ -1070,6 +1102,7 @@ export default function PixelReplay() {
     const [agentDetailOpen, setAgentDetailOpen] = useState(false);
     const [agentRuntimeById, setAgentRuntimeById] = useState<Record<number, AgentRuntimeState>>({});
     const [agentRuntimeLoadingId, setAgentRuntimeLoadingId] = useState<number | undefined>();
+    const [loadingDetail, setLoadingDetail] = useState<string | undefined>();
 
     const replayBaseUrl = useMemo(() => {
         if (!effectiveHypothesisId || !effectiveExperimentId || !workspacePath) {
@@ -1126,38 +1159,51 @@ export default function PixelReplay() {
 
             setLoading(true);
             setError(undefined);
+            setLoadingDetail(undefined);
+            setCurrentIndex(0);
             try {
-                const mapInfo = await fetchJson<ReplayMapInfo>(withWorkspace('/map'));
-                const nextMap = await loadWalkableMap(mapInfo);
-                if (liveBaseUrl) {
-                    try {
-                        const status = await postJson<LiveStatus>(withLiveWorkspace('/sessions'));
-                        if (!cancelled) {
-                            setLiveStatus(status);
+                const { nextMap, nextLiveStatus } = await waitForInitialReplay(
+                    async () => {
+                        const mapInfo = await fetchJson<ReplayMapInfo>(withWorkspace('/map'));
+                        const loadedMap = await loadWalkableMap(mapInfo);
+                        let loadedLiveStatus: LiveStatus | undefined;
+                        if (liveBaseUrl) {
+                            try {
+                                loadedLiveStatus = await postJson<LiveStatus>(withLiveWorkspace('/sessions'));
+                            } catch (err) {
+                                console.info('Live session unavailable; falling back to replay-only mode.', err);
+                            }
                         }
-                    } catch (err) {
-                        console.info('Live session unavailable; falling back to replay-only mode.', err);
+                        await refreshReplayData(true);
+                        return { nextMap: loadedMap, nextLiveStatus: loadedLiveStatus };
+                    },
+                    (err, attempt) => {
                         if (!cancelled) {
-                            setLiveStatus(undefined);
+                            setLoadingDetail(`GOD 正在准备小镇回放，等待服务和第一帧数据就绪... 第 ${attempt} 次重试：${toErrorMessage(err)}`);
                         }
-                    }
-                }
+                    },
+                    () => cancelled,
+                );
                 if (cancelled) {
                     return;
+                }
+                if (nextLiveStatus) {
+                    setLiveStatus(nextLiveStatus);
+                } else {
+                    setLiveStatus(undefined);
                 }
                 setWalkableMap(nextMap);
                 setSelectedAgentId(undefined);
                 setAgentDetailOpen(false);
                 setAgentRuntimeById({});
-                setCurrentIndex(0);
                 setFollowLatest(true);
-                await refreshReplayData(true);
             } catch (err) {
                 if (!cancelled) {
-                    setError(err instanceof Error ? err.message : String(err));
+                    setError(toErrorMessage(err));
                 }
             } finally {
                 if (!cancelled) {
+                    setLoadingDetail(undefined);
                     setLoading(false);
                 }
             }
@@ -1533,7 +1579,10 @@ export default function PixelReplay() {
         return (
             <div className="pixel-replay-loading">
                 <Spin size="large" />
-                <Text>正在加载小镇回放...</Text>
+                <Space direction="vertical" size={4} align="center">
+                    <Text>正在加载小镇回放...</Text>
+                    {loadingDetail && <Text type="secondary">{loadingDetail}</Text>}
+                </Space>
             </div>
         );
     }

@@ -38,6 +38,7 @@ GOD_EXPERIMENT_RUN="${GOD_EXPERIMENT_RUN:-1}"
 GOD_BACKEND_HOST="${GOD_BACKEND_HOST:-127.0.0.1}"
 GOD_BACKEND_PORT="${GOD_BACKEND_PORT:-8001}"
 GOD_FRONTEND_PORT="${GOD_FRONTEND_PORT:-5174}"
+GOD_LIVE_STEP_TIMEOUT="${GOD_LIVE_STEP_TIMEOUT:-${AGENTSOCIETY_LIVE_STEP_TIMEOUT:-900}}"
 
 backend_url=""
 frontend_url=""
@@ -152,6 +153,7 @@ export_internal_env() {
   GOD_EMBEDDING_MODEL="${GOD_EMBEDDING_MODEL:-${AGENTSOCIETY_EMBEDDING_MODEL:-${JIUWENCLAW_EMBED_MODEL:-}}}"
   GOD_BACKEND_PORT="${GOD_BACKEND_PORT:-${BACKEND_PORT:-8001}}"
   GOD_FRONTEND_PORT="${GOD_FRONTEND_PORT:-${AGENTSOCIETY_FRONTEND_PORT:-5174}}"
+  GOD_LIVE_STEP_TIMEOUT="${GOD_LIVE_STEP_TIMEOUT:-${AGENTSOCIETY_LIVE_STEP_TIMEOUT:-900}}"
   GOD_EXPERIMENT="${GOD_EXPERIMENT:-${GOD_HYPOTHESIS_ID:-god_town}}"
   GOD_EXPERIMENT_RUN="${GOD_EXPERIMENT_RUN:-${GOD_EXPERIMENT_ID:-1}}"
 
@@ -862,6 +864,7 @@ start_backend() {
   backend_cmd+=" && export AGENTSOCIETY_EMBEDDING_MODEL=\"\${GOD_EMBEDDING_MODEL:-text-embedding-3-large}\""
   backend_cmd+=" && export BACKEND_HOST=$(shell_quote "$GOD_BACKEND_HOST")"
   backend_cmd+=" && export BACKEND_PORT=$(shell_quote "$GOD_BACKEND_PORT")"
+  backend_cmd+=" && export AGENTSOCIETY_LIVE_STEP_TIMEOUT=$(shell_quote "$GOD_LIVE_STEP_TIMEOUT")"
   backend_cmd+=" && export BACKEND_LOG_LEVEL=$(shell_quote "$backend_log_level")"
   backend_cmd+=" && exec uv run python -m agentsociety2.backend.run --log-level $(shell_quote "$backend_log_level") >> $(shell_quote "$LOG_DIR/backend.log") 2>&1"
   start_detached_service "god-backend" "$BACKEND_PID_FILE" "$backend_cmd"

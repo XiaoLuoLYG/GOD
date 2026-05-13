@@ -1,30 +1,32 @@
 <h1 align="center">
   <img src="docs/assets/brand/logo.png" alt="GOD logo" height="32" />
-  GOD · Govern · Observe · Direct
+  &nbsp;GOD · Govern · Observe · Direct
 </h1>
 
 <p align="center">
   <img src="docs/assets/screenshots/00-hero.png" alt="GOD — Govern · Observe · Direct" width="100%" />
 </p>
-
 <p align="center">
-  <b>面向 Agent 社会实验的实时控制台。</b><br/>
-  在像素小镇里实时观察 LLM Agent，给任意一个 Agent 提问，逐步引导整个模拟。
+  <b>🌩️ 像神一样，俯瞰一座由 Agent 组成的小镇。</b><br/>
+  暂停时间。操控环境。对某个灵魂发问。一键重置 —— 全部在一个屏幕里完成。
 </p>
 
+
 <p align="center">
-  <a href="#-快速开始"><b>快速开始</b></a> ·
+  <a href="#-快速开始"><b>🚀 快速开始</b></a> ·
   <a href="#-亮点">亮点</a> ·
   <a href="#-核心能力">核心能力</a> ·
   <a href="#%EF%B8%8F-架构">架构</a> ·
+  <a href="#-默认实验">默认实验</a> ·
   <a href="#%EF%B8%8F-roadmap">Roadmap</a> ·
-  <a href="README.md">English</a>
+  <a href="README.md">🌏 English</a>
 </p>
 
 <p align="center">
   <img alt="Python" src="https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white" />
   <img alt="React" src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black" />
   <img alt="Vite" src="https://img.shields.io/badge/Vite-6-646CFF?style=flat-square&logo=vite&logoColor=white" />
+  <img alt="No-Code Setup" src="https://img.shields.io/badge/setup-no--code-22c55e?style=flat-square&logo=googlechrome&logoColor=white" />
   <img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square" />
   <img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-14b8a6?style=flat-square" />
   <img alt="Status" src="https://img.shields.io/badge/status-alpha-orange?style=flat-square" />
@@ -32,16 +34,23 @@
 
 ---
 
-> 大多数 generative-agent 项目都在做更大的模拟、更好的 replay。
-> **GOD 补上的是「操作台」这一层** —— 一个屏幕里就能暂停、提问、干预、重置一整个 LLM Agent 社会。
+> 别的 generative-agent 项目只让你 **观察**。
+> **GOD 让你掌控一切**
+>
+> 一个屏幕。暂停时间。灵魂发问。操控环境。重启世界。
+> 它是缺失的那一层操作台 —— 让一座 Agent 社会在你手中实时运转。
 
 ## ✨ 亮点
 
-- 🎮 &nbsp;**像素小镇实时控制台**：任意 step replay，可暂停、加速、自动推进。
-- 💬 &nbsp;**对 Agent 精准提问**：在 live session 里给某个居民或全镇发问题。
-- 🎛️ &nbsp;**干预下一步**：把指令注入即将执行的 step，Agent 立刻响应。
-- 🔄 &nbsp;**一键重置**：清掉旧 replay，重新开一个干净实验。
-- 🧱 &nbsp;**本地、可改、单一配置**：一个 `.env`、一个脚本，不需要 Docker。
+<table>
+<tr>
+  <td align="center" width="20%">⏯️<br/><b>暂停时间</b><br/><sub>任意 step replay、暂停、加速、自动推进。</sub></td>
+  <td align="center" width="20%">💬<br/><b>对任意人耳语</b><br/><sub>在 live session 里向某个居民、群组或全镇发问。</sub></td>
+  <td align="center" width="20%">🎛️<br/><b>改写下一步</b><br/><sub>注入指令，Agent 在下一回合立刻响应。</sub></td>
+  <td align="center" width="20%">🪄<br/><b>零代码上手</b><br/><sub>浏览器配置向导：模型、剧本、Agent 一站搞定。</sub></td>
+  <td align="center" width="20%">🔄<br/><b>重启世界</b><br/><sub>一条命令清掉旧数据，重新孵化一座干净的小镇。</sub></td>
+</tr>
+</table>
 
 ## 🖼️ 截图
 
@@ -49,7 +58,7 @@
   <img src="docs/assets/screenshots/01-control-room.png" alt="GOD 控制台" width="94%" />
 </p>
 
-<p align="center"><sub>实时控制台：像素小镇、step 控制、定向提问、居民列表，全在一个界面。</sub></p>
+<p align="center"><sub>实时控制台：像素小镇、step 控制、定向提问、居民列表 —— 全在一个界面里。</sub></p>
 
 ## 🚀 快速开始
 
@@ -59,17 +68,27 @@ cd GOD
 ./scripts/god.sh start
 ```
 
-首次运行会先打开 `/setup` 配置向导，不会立刻创建 live session。你可以在页面里配置模型、填写实验背景，让 GOD agent 生成实验草案，再编辑 agent profile / steps，最后保存为新的实验副本并启动。
+就这么简单。首次启动会自动装好依赖，打开 **浏览器中的实验配置向导**，然后等你完成。不用改 `.env`、不用命令行参数、不用胶水脚本。
 
-| 变量 | 示例 |
-| --- | --- |
-| `GOD_LLM_API_KEY` | `sk-...` |
-| `GOD_LLM_API_BASE` | `https://api.openai.com/v1` |
-| `GOD_LLM_MODEL` | `gpt-5.4` |
+<p align="center">
+  <img src="docs/assets/screenshots/02-setup-wizard-zh.png" alt="GOD 实验配置向导" width="100%" />
+</p>
 
-任意 OpenAI 兼容接口都可以。启动完成后打开脚本打印的地址，例如：
+<p align="center"><sub>实验配置向导 —— 五步从安装到一座活生生的小镇。</sub></p>
 
-```
+<table>
+<tr>
+  <td align="center" width="20%">🔌<br/><b>1. 模型</b><br/><sub>填入 OpenAI 兼容的 API key、base URL 和模型名。</sub></td>
+  <td align="center" width="20%">🧪<br/><b>2. 剧本</b><br/><sub>用自然语言描述世界：日期、天气、氛围、规则。</sub></td>
+  <td align="center" width="20%">🤖<br/><b>3. 生成</b><br/><sub>GOD agent 自动起草 agent profile 和 step 计划。</sub></td>
+  <td align="center" width="20%">✏️<br/><b>4. 编辑</b><br/><sub>调整人物性格、关系、地点、步骤。</sub></td>
+  <td align="center" width="20%">▶️<br/><b>5. 启动</b><br/><sub>保存为新实验副本，直接进入控制台。</sub></td>
+</tr>
+</table>
+
+任意 OpenAI 兼容接口都可以。向导收尾后，脚本会打印类似这样的地址：
+
+```text
 http://127.0.0.1:5174/pixel-replay/god_town/1
 ```
 
@@ -77,33 +96,51 @@ http://127.0.0.1:5174/pixel-replay/god_town/1
 
 ## 🧩 核心能力
 
-|     | 能力 | 解决什么 |
+|     | 能力 | 你得到什么 |
 | --- | --- | --- |
-| 🎬 | **Replay 控制** | 在 live 或回放里按 step 拖动、暂停、自动推进。 |
-| 💬 | **定向提问** | 用自然语言向某个 Agent 或所有居民提问。 |
-| 🎛️ | **Step 干预** | 给下一个 step 注入指令，立即生效。 |
-| 🧪 | **实验配置向导** | 在浏览器里配置模型和背景设定，生成可编辑 agent profiles，再启动新实验副本。 |
-| 🧼 | **重新开跑** | 一条命令清掉旧数据，重新种一个干净实验。 |
-| 🗺️ | **像素小镇世界** | 地点、行为、消息、状态都是 replay 友好的结构化数据。 |
-| 🛠️ | **单一配置** | 一个 `.env`、一个脚本，默认值已经够用。 |
+| 🎬 | **Replay 控制** | 按 step 拖动、暂停、跳转、自动推进，live 或 replay 都行。 |
+| 💬 | **定向提问** | 用自然语言向某个 Agent、某组人或全镇提问。 |
+| 🎛️ | **实时干预** | 给即将执行的 step 注入指令，Agent 下一回合就读得到。 |
+| 🪄 | **零代码配置向导** | 浏览器里配置模型 + 剧本，让 GOD 生成 Agent 和 step，编辑后启动。 |
+| 🧼 | **一键重开** | 一条命令清掉 replay 数据，孵化一座干净的小镇。 |
+| 🗺️ | **像素小镇世界** | 地点、动作、消息、状态都是结构化、replay 友好的。 |
+| 🧱 | **单一配置 · 可改** | 一个 `.env`、一个脚本，没有 Docker，改完就跑。 |
 
 ## 🏗️ 架构
 
 ```mermaid
 flowchart LR
-  Op["Operator"] --> UI["Control Room<br/>React + Vite"]
-  UI <--> Backend["GOD Backend<br/>FastAPI · live + replay"]
-  Backend --> Town["Pixel Town<br/>init config + step plan"]
-  Backend --> Store[("Replay Store")]
-  Backend <--> Runtime["Agent Runtime<br/>LLM-backed agents"]
+  O["Operator"]:::operator
+  UI["Control Room"]:::surface
+  API["Live API"]:::core
+  RT["Agent Runtime"]:::runtime
+  TOWN["Pixel Town"]:::world
+  CFG[["Experiment Files"]]:::data
+  DB[("Replay Store")]:::data
+
+  O --> UI
+  UI <-->|"commands / updates"| API
+  API -->|"prompts"| RT
+  RT -->|"actions"| TOWN
+  TOWN -->|"frames"| DB
+  CFG -->|"scenario"| API
+
+  classDef operator fill:#fff7ed,stroke:#f59e0b,color:#7c2d12,stroke-width:2px;
+  classDef surface fill:#eef2ff,stroke:#6366f1,color:#312e81,stroke-width:2px;
+  classDef core fill:#ecfeff,stroke:#0891b2,color:#164e63,stroke-width:2px;
+  classDef runtime fill:#f0fdf4,stroke:#22c55e,color:#14532d,stroke-width:2px;
+  classDef world fill:#fefce8,stroke:#ca8a04,color:#713f12,stroke-width:2px;
+  classDef data fill:#fdf2f8,stroke:#db2777,color:#831843,stroke-width:2px;
 ```
+
+GOD 是 local-first：控制台、后端、runtime bridge、实验文件和 replay store 都运行在本机。唯一外部服务是你选择的模型接口。
 
 | 层 | 职责 |
 | --- | --- |
-| **Control Room** | React/Vite 控制台，负责 replay、ask、intervention、status。 |
-| **Backend** | 本地 FastAPI，提供 live 和 replay API。 |
-| **Pixel Town** | 像素小镇社会状态：地点、动作、消息、Agent 状态。 |
-| **Agent Runtime** | 独立进程的 LLM Agent，通过本地 WebSocket 连接。 |
+| 🎮 **Control Room** | React/Vite 控制台 —— replay、ask、intervention、status 都在这里。 |
+| ⚙️ **Backend** | 本地 FastAPI，提供 live 和 replay API。 |
+| 🗺️ **Pixel Town** | 像素小镇社会状态：地点、动作、消息、Agent 状态。 |
+| 🤖 **Agent Runtime** | 独立进程的 LLM Agent，通过本地 WebSocket 连接。 |
 
 ## ⚙️ 常用命令
 
@@ -115,41 +152,72 @@ flowchart LR
 ./scripts/god.sh status     # 查看端口、URL、模型状态
 ./scripts/god.sh stop       # 停止所有服务
 ./scripts/god.sh tail       # 跟随日志
-./scripts/god.sh open       # 在浏览器里打开控制台
+./scripts/god.sh open       # 在浏览器里打开前端页面
 ```
 
 ## 🧪 默认实验
 
-```text
-god_town · The Ville 普通工作日基线
-├── environment：The Ville 像素小镇，10 个地点（家 / 学校 / 图书馆 / 咖啡馆 / 公园 /
-│   供给店 / 市场 / 药房 / 酒馆 / 宿舍）+ 共 65 个 location-scoped interaction
-├── shared world：experiment_context 共享标题、背景、日期/天气/校历、镇上规则、
-│   公共事实和语言偏好，每个 agent 每步都看得到
-├── personas：10 位居民，profile 包含 age / gender / family / housing /
-│   economic_status / health / needs / worries / secrets / social_network /
-│   emotional_baseline / language_style / detailed_routine / inventory /
-│   recent_history / triggers / dislikes / short_term_goals / long_term_goal /
-│   quirks / skills（JiuwenClaw 风格命名）
-└── step plan：可在任意 step 介入、分叉或重放的实验脚本
-```
 
-如果要跑自己的实验，把新的 config 放到 `quick_experiments/`，让 `GOD_EXPERIMENT` 指过去就行。
+### 🏘️ The Ville 的一个普通工作日
+
+晚春的工作日清晨 8:20，晴朗微风，气温 18°C。一座 200 多人的小镇，**10 位常住居民彼此熟识但保持距离** —— 一段反映自然节奏的日常切片，不是任务驱动的剧本。
+
+➡️ **想改任何细节？打开配置向导，或把新 config 丢到 `quick_experiments/` 让 `GOD_EXPERIMENT` 指过去就行。**
+
+➡️ 完整的地点 / 居民 / 交互拆解见 [`hypothesis_god_town/experiment_1/`](agentsociety/quick_experiments/hypothesis_god_town/experiment_1/README.md)。
+
+<table>
+<tr><td colspan="5" align="center"><b>🗺️ 10 个地点 · 65 个 location-scoped 交互</b></td></tr>
+<tr>
+  <td align="center" width="20%">🏠<br/><b>家</b><br/><sub>做饭 · 睡觉 · 整理 · 阅读 · 居家办公 · 视频家人</sub></td>
+  <td align="center" width="20%">🏫<br/><b>学校</b><br/><sub>上课 / 教书 · 批改 · 课后答疑</sub></td>
+  <td align="center" width="20%">📚<br/><b>图书馆</b><br/><sub>阅读 · 学习 · 查资料 · 借还书</sub></td>
+  <td align="center" width="20%">☕<br/><b>Hobbs Cafe</b><br/><sub>简餐 · 咖啡聊天 · 值班 · 随性碰头</sub></td>
+  <td align="center" width="20%">🌳<br/><b>Johnson Park</b><br/><sub>散步 · 见友 · 晨练 · 公共播报</sub></td>
+</tr>
+<tr>
+  <td align="center" width="20%">🛠️<br/><b>供给店</b><br/><sub>修理 · 上货 · 借工具 · 顾客接待</sub></td>
+  <td align="center" width="20%">🛒<br/><b>市场</b><br/><sub>买食物 · 议价 · 送单 · 和老客闲聊</sub></td>
+  <td align="center" width="20%">💊<br/><b>药房</b><br/><sub>买药 · 续方 · 量血压 · 上门准备</sub></td>
+  <td align="center" width="20%">🍻<br/><b>酒馆</b><br/><sub>社交 · 看比赛 · 主持小活动</sub></td>
+  <td align="center" width="20%">🛏️<br/><b>宿舍</b><br/><sub>休息 · 自习 · 公共区休闲 · 视频家里</sub></td>
+</tr>
+</table>
+
+<table>
+<tr><td colspan="5" align="center"><b>👥 10 位居民 —— 每个人都有真实生活</b></td></tr>
+<tr>
+  <td align="center" width="20%">🧭<br/><b>Alice</b> · 34<br/><sub>社区协调员</sub></td>
+  <td align="center" width="20%">🛠️<br/><b>Bob</b> · 45<br/><sub>市场五金店主</sub></td>
+  <td align="center" width="20%">📖<br/><b>Charlie</b> · 39<br/><sub>中学历史老师</sub></td>
+  <td align="center" width="20%">💊<br/><b>Dana</b> · 41<br/><sub>社区药房护理员</sub></td>
+  <td align="center" width="20%">☕<br/><b>Elena</b> · 36<br/><sub>咖啡馆老板</sub></td>
+</tr>
+<tr>
+  <td align="center" width="20%">🎒<br/><b>Farah</b> · 16<br/><sub>高中学生</sub></td>
+  <td align="center" width="20%">📮<br/><b>George</b> · 68<br/><sub>退休邮递员</sub></td>
+  <td align="center" width="20%">💻<br/><b>Hana</b> · 28<br/><sub>远程软件工程师</sub></td>
+  <td align="center" width="20%">🦺<br/><b>Ivan</b> · 52<br/><sub>社区安全志愿者</sub></td>
+  <td align="center" width="20%">🍅<br/><b>Mei</b> · 47<br/><sub>市场蔬果摊主</sub></td>
+</tr>
+</table>
+
+<sub>每位居民都有完整 profile：年龄、家庭、住房、经济状况、健康、日常作息、技能、需求、担忧、秘密、社交圈、语言风格、小怪癖、短期/长期目标。</sub>
 
 ## 🛣️ Roadmap
 
-- [ ] 多实验编排：在同一个控制台里运行多个实验、对照组和重复试验，支持横向对比。
-- [ ] 实时地图生成：地图可随事件、资源变化、建筑修复、道路阻断和人群活动动态更新。
-- [ ] 事件响应世界：天气、事故、节日、冲突、谣言、供应短缺等事件能改变环境和 agent 决策。
-- [ ] 可插拔 agent：支持替换不同 LLM agent runtime、persona 模板、skill 包和决策策略。
-- [ ] 可插拔地图：支持加载不同地图 manifest、地点语义、交互对象和导航规则。
-- [ ] 更真实的默认实验：扩展需求、职业、家庭、社交网络、经济约束、情绪和长期记忆。
-- [ ] 大规模仿真：接入 AgentSociety 的批量 agent、分片运行、采样 replay 和聚合指标。
-- [ ] 实验评估：跨实验指标、行为差异分析、干预效果评估和可复现实验快照。
-- [ ] 操作员工作流：每个 step 的操作员笔记、标签、书签和关键事件摘要。
-- [ ] 公开 demo 与场景分享：托管 demo、实验模板、地图模板和可复用配置包。
+| | |
+| --- | --- |
+| 🧪 **多实验编排** | 在同一个控制台里跑多个实验、对照组和重复试验。 |
+| 🗺️ **实时地图生成** | 地图随事件、修缮、阻塞、人群动态演化。 |
+| 🌦️ **事件响应世界** | 天气、事故、节日、谣言、供应短缺。 |
+| 🔌 **可插拔 Agent 与地图** | 替换不同的 LLM runtime、persona 模板、地图 manifest。 |
+| 🌐 **大规模仿真** | 接入 AgentSociety 的批量 Agent、分片运行、采样 replay。 |
+| 📊 **实验评估** | 跨实验指标、行为差异、干预效果分析。 |
+| 📝 **操作员工作流** | 每个 step 的笔记、标签、书签、关键事件摘要。 |
+| 🌍 **公开 Demo & 场景分享** | 托管 demo、实验和地图模板。 |
 
-有想法？欢迎来 issue 和 PR 聊。
+有想法？欢迎来 [issue 和 PR](#-参与开发) 聊。
 
 ## 🤝 参与开发
 

@@ -26,6 +26,7 @@ import {
     DeleteOutlined,
     EditOutlined,
     ExperimentOutlined,
+    GlobalOutlined,
     PlayCircleOutlined,
     QuestionCircleOutlined,
     RobotOutlined,
@@ -34,6 +35,7 @@ import {
     UserAddOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { fetchCustom } from '../../components/fetch';
 import { AgentEditorModal } from '../AgentBuilder/AgentEditorModal';
 import {
@@ -67,6 +69,7 @@ type SetupStatus = {
         experiment_id?: string;
         workspace_path?: string;
     } | null;
+    setup_mode?: boolean;
     default_experiment?: {
         hypothesis_id?: string;
         experiment_id?: string;
@@ -87,6 +90,12 @@ type DraftPayload = {
     steps: Record<string, any>;
     readme: string;
     warnings: string[];
+};
+
+type LaunchResult = {
+    hypothesis_id: string;
+    experiment_id: string;
+    workspace_path: string;
 };
 
 type ModelForm = {
@@ -121,6 +130,8 @@ const fetchJson = async <T,>(url: string, options?: RequestInit): Promise<T> => 
     return response.json();
 };
 
+const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
 const compactJson = (value: any, length = 140) => {
     const text = JSON.stringify(value ?? {});
     return text.length > length ? `${text.slice(0, length)}...` : text;
@@ -149,7 +160,7 @@ const cloneDraft = (draft: DraftPayload): DraftPayload => JSON.parse(JSON.string
 
 const BASICS_STORAGE_KEY = 'god.setup.basics';
 
-const defaultBasics: BasicsForm = {
+const defaultBasicsZh: BasicsForm = {
     title: '斯坦福监狱实验适配模拟',
     background: '请生成一个安全、边界清晰的社会角色压力模拟：参与者被分配为管理者、观察者、普通参与者等角色，重点观察权力、规则、协作和情绪变化，不允许羞辱、伤害或强迫行为。',
     agent_count: 10,
@@ -161,31 +172,52 @@ const defaultBasics: BasicsForm = {
     movement_min_steps_per_trip: 3,
 };
 
-const normalizeBasicsValues = (values: Partial<BasicsForm> = {}): BasicsForm => ({
-    title: String(values.title || defaultBasics.title).trim() || defaultBasics.title,
-    background: String(values.background || defaultBasics.background).trim() || defaultBasics.background,
-    agent_count: Number(values.agent_count || defaultBasics.agent_count),
-    language: values.language || defaultBasics.language,
-    start_t: String(values.start_t || defaultBasics.start_t).trim() || defaultBasics.start_t,
-    num_steps: Number(values.num_steps || defaultBasics.num_steps),
-    tick: Number(values.tick || defaultBasics.tick),
+const defaultBasicsEn: BasicsForm = {
+    title: 'Stanford Prison Adaptation',
+    background: 'Generate a safe, bounded social role-pressure simulation. Participants are assigned roles such as coordinators, observers, and ordinary participants. Focus on power, rules, cooperation, and emotional changes without humiliation, harm, threats, or coercion.',
+    agent_count: 10,
+    language: 'en',
+    start_t: '2026-05-11T08:20:00+08:00',
+    num_steps: 4,
+    tick: 1800,
+    movement_tiles_per_second: 8,
+    movement_min_steps_per_trip: 3,
+};
+
+const defaultBasics = defaultBasicsZh;
+
+const defaultBasicsForLanguage = (language?: string) => (
+    language?.startsWith('en') ? defaultBasicsEn : defaultBasicsZh
+);
+
+const normalizeBasicsValues = (
+    values: Partial<BasicsForm> = {},
+    defaults: BasicsForm = defaultBasics
+): BasicsForm => ({
+    title: String(values.title || defaults.title).trim() || defaults.title,
+    background: String(values.background || defaults.background).trim() || defaults.background,
+    agent_count: Number(values.agent_count || defaults.agent_count),
+    language: values.language || defaults.language,
+    start_t: String(values.start_t || defaults.start_t).trim() || defaults.start_t,
+    num_steps: Number(values.num_steps || defaults.num_steps),
+    tick: Number(values.tick || defaults.tick),
     movement_tiles_per_second: Number(
-        values.movement_tiles_per_second || defaultBasics.movement_tiles_per_second
+        values.movement_tiles_per_second || defaults.movement_tiles_per_second
     ),
     movement_min_steps_per_trip: Number(
-        values.movement_min_steps_per_trip || defaultBasics.movement_min_steps_per_trip
+        values.movement_min_steps_per_trip || defaults.movement_min_steps_per_trip
     ),
 });
 
-const loadStoredBasics = (): BasicsForm => {
+const loadStoredBasics = (defaults: BasicsForm = defaultBasics): BasicsForm => {
     if (typeof window === 'undefined') {
-        return defaultBasics;
+        return defaults;
     }
     try {
         const raw = window.localStorage.getItem(BASICS_STORAGE_KEY);
-        return raw ? normalizeBasicsValues(JSON.parse(raw)) : defaultBasics;
+        return raw ? normalizeBasicsValues(JSON.parse(raw), defaults) : defaults;
     } catch {
-        return defaultBasics;
+        return defaults;
     }
 };
 
@@ -196,8 +228,32 @@ const saveStoredBasics = (values: BasicsForm) => {
     window.localStorage.setItem(BASICS_STORAGE_KEY, JSON.stringify(values));
 };
 
+const replayPathForLaunch = (result: LaunchResult) => (
+    `/pixel-replay/${encodeURIComponent(result.hypothesis_id)}/${encodeURIComponent(result.experiment_id)}?workspace_path=${encodeURIComponent(result.workspace_path)}`
+);
+
+const basicsMatch = (left: BasicsForm, right: BasicsForm) => (
+    left.title === right.title
+    && left.background === right.background
+    && left.agent_count === right.agent_count
+    && left.language === right.language
+    && left.start_t === right.start_t
+    && left.num_steps === right.num_steps
+    && left.tick === right.tick
+    && left.movement_tiles_per_second === right.movement_tiles_per_second
+    && left.movement_min_steps_per_trip === right.movement_min_steps_per_trip
+);
+
 export default function SetupPage() {
     const navigate = useNavigate();
+    const { t, i18n } = useTranslation();
+    const copy = (key: string, values?: Record<string, unknown>) => (
+        t(`setup.${key}`, values) as string
+    );
+    const localizedDefaultBasics = useMemo(
+        () => defaultBasicsForLanguage(i18n.language),
+        [i18n.language]
+    );
     const [messageApi, messageContextHolder] = message.useMessage();
     const [status, setStatus] = useState<SetupStatus | null>(null);
     const [currentStep, setCurrentStep] = useState(0);
@@ -207,13 +263,16 @@ export default function SetupPage() {
     const [generating, setGenerating] = useState(false);
     const [publishing, setPublishing] = useState(false);
     const [startingDefault, setStartingDefault] = useState(false);
+    const [launchPending, setLaunchPending] = useState<LaunchResult | null>(null);
     const [agentModalOpen, setAgentModalOpen] = useState(false);
     const [editingAgentId, setEditingAgentId] = useState<number | null>(null);
-    const [basicsValues, setBasicsValues] = useState<BasicsForm>(() => loadStoredBasics());
+    const [basicsValues, setBasicsValues] = useState<BasicsForm>(() => loadStoredBasics(localizedDefaultBasics));
     const basicsRef = useRef<BasicsForm>(basicsValues);
+    const previousDefaultBasicsRef = useRef<BasicsForm>(localizedDefaultBasics);
     const [agentForm] = Form.useForm<AgentFormValues>();
     const [modelForm] = Form.useForm<ModelForm>();
     const [basicsForm] = Form.useForm<BasicsForm>();
+    const nextLanguage = i18n.language?.startsWith('en') ? 'zh' : 'en';
 
     const locationOptions = useMemo(() => (
         (status?.map_locations || []).map((location) => ({
@@ -237,7 +296,7 @@ export default function SetupPage() {
                 GOD_FRONTEND_PORT: payload.model_config.GOD_FRONTEND_PORT?.value || '5174',
             });
         } catch (error) {
-            messageApi.error(`读取 setup 状态失败: ${error instanceof Error ? error.message : String(error)}`);
+            messageApi.error(copy('messages.loadStatusFailed', { error: errorText(error) }));
         } finally {
             setLoadingStatus(false);
         }
@@ -262,10 +321,10 @@ export default function SetupPage() {
         try {
             const payload = await persistModelConfig(values);
             setStatus(payload);
-            messageApi.success('模型配置已保存到本地 .env。');
+            messageApi.success(copy('messages.modelSaved'));
             setCurrentStep(1);
         } catch (error) {
-            messageApi.error(`保存模型配置失败: ${error instanceof Error ? error.message : String(error)}`);
+            messageApi.error(copy('messages.saveModelFailed', { error: errorText(error) }));
         } finally {
             setSavingModel(false);
         }
@@ -281,13 +340,34 @@ export default function SetupPage() {
         body: JSON.stringify(cleanModelValues(values)),
     });
 
+    const completeLaunch = (result: LaunchResult, setupMode: boolean, delayMs: number) => {
+        if (setupMode) {
+            setLaunchPending(result);
+            return;
+        }
+        window.setTimeout(() => {
+            navigate(replayPathForLaunch(result));
+        }, delayMs);
+    };
+
     const syncBasicsValues = (values: Partial<BasicsForm>) => {
-        const normalized = normalizeBasicsValues(values);
+        const normalized = normalizeBasicsValues(values, localizedDefaultBasics);
         basicsRef.current = normalized;
         setBasicsValues(normalized);
         saveStoredBasics(normalized);
         return normalized;
     };
+
+    useEffect(() => {
+        const previousDefaults = previousDefaultBasicsRef.current;
+        if (basicsMatch(basicsRef.current, previousDefaults)) {
+            basicsRef.current = localizedDefaultBasics;
+            setBasicsValues(localizedDefaultBasics);
+            saveStoredBasics(localizedDefaultBasics);
+            basicsForm.setFieldsValue(localizedDefaultBasics);
+        }
+        previousDefaultBasicsRef.current = localizedDefaultBasics;
+    }, [basicsForm, localizedDefaultBasics]);
 
     const persistBasicsFromForm = async () => {
         const values = await basicsForm.validateFields();
@@ -324,9 +404,9 @@ export default function SetupPage() {
             });
             setDraft(payload);
             setCurrentStep(3);
-            messageApi.success('GOD agent 已生成实验草案，可以继续编辑。');
+            messageApi.success(copy('messages.draftGenerated'));
         } catch (error) {
-            messageApi.error(`生成实验草案失败: ${error instanceof Error ? error.message : String(error)}`);
+            messageApi.error(copy('messages.generateDraftFailed', { error: errorText(error) }));
         } finally {
             setGenerating(false);
         }
@@ -335,27 +415,22 @@ export default function SetupPage() {
     const startDefaultExperiment = async () => {
         const modelValues = await modelForm.validateFields();
         if (!status?.model_config.GOD_LLM_API_KEY?.configured && !String(modelValues.GOD_LLM_API_KEY || '').trim()) {
-            messageApi.error('请先填写并保存 API key，或在本地 .env 中配置 GOD_LLM_API_KEY。');
+            messageApi.error(copy('messages.apiKeyRequired'));
             return;
         }
         setStartingDefault(true);
         try {
             const nextStatus = await persistModelConfig(modelValues);
             setStatus(nextStatus);
-            const result = await fetchJson<{
-                hypothesis_id: string;
-                experiment_id: string;
-                workspace_path: string;
-            }>('/api/v1/god/setup/start-default', {
+            const result = await fetchJson<LaunchResult>('/api/v1/god/setup/start-default', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
             });
-            messageApi.success('默认实验已设为当前实验，并已请求 GOD 启动。');
-            window.setTimeout(() => {
-                navigate(`/pixel-replay/${encodeURIComponent(result.hypothesis_id)}/${encodeURIComponent(result.experiment_id)}?workspace_path=${encodeURIComponent(result.workspace_path)}`);
-            }, 700);
+            const setupMode = Boolean(nextStatus.setup_mode || status?.setup_mode);
+            messageApi.success(setupMode ? copy('messages.defaultQueued') : copy('messages.defaultStarted'));
+            completeLaunch(result, setupMode, 700);
         } catch (error) {
-            messageApi.error(`启动默认实验失败: ${error instanceof Error ? error.message : String(error)}`);
+            messageApi.error(copy('messages.defaultStartFailed', { error: errorText(error) }));
         } finally {
             setStartingDefault(false);
         }
@@ -378,9 +453,9 @@ export default function SetupPage() {
                 },
             }));
             setDraft(next);
-            messageApi.success('实验背景已更新。');
+            messageApi.success(copy('messages.contextUpdated'));
         } catch (error) {
-            messageApi.error(error instanceof Error ? error.message : String(error));
+            messageApi.error(errorText(error));
         }
     };
 
@@ -390,9 +465,9 @@ export default function SetupPage() {
             const next = cloneDraft(draft);
             next.steps = parseJsonObject(text, 'steps');
             setDraft(next);
-            messageApi.success('Steps 已更新。');
+            messageApi.success(copy('messages.stepsUpdated'));
         } catch (error) {
-            messageApi.error(error instanceof Error ? error.message : String(error));
+            messageApi.error(errorText(error));
         }
     };
 
@@ -440,7 +515,7 @@ export default function SetupPage() {
                 profile_json: jsonStringify({
                     name: `Jiuwen Agent ${nextId}`,
                     role: 'participant',
-                    persona: '观察、沟通，并遵守实验边界。',
+                    persona: copy('edit.defaultPersona'),
                     skills: ['observation', 'conversation'],
                     scenario: draft.experiment_context.background || '',
                     scenario_role: 'participant',
@@ -510,12 +585,7 @@ export default function SetupPage() {
         const modelValues = await modelForm.validateFields();
         setPublishing(true);
         try {
-            const result = await fetchJson<{
-                hypothesis_id: string;
-                experiment_id: string;
-                workspace_path: string;
-                warnings?: string[];
-            }>('/api/v1/god/setup/publish', {
+            const result = await fetchJson<LaunchResult & { warnings?: string[] }>('/api/v1/god/setup/publish', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -524,28 +594,27 @@ export default function SetupPage() {
                     start_immediately: true,
                 }),
             });
-            messageApi.success('实验已保存，并已请求 GOD 启动。');
+            const setupMode = Boolean(status?.setup_mode);
+            messageApi.success(setupMode ? copy('messages.publishedQueued') : copy('messages.published'));
             setCurrentStep(4);
-            window.setTimeout(() => {
-                navigate(`/pixel-replay/${encodeURIComponent(result.hypothesis_id)}/${encodeURIComponent(result.experiment_id)}?workspace_path=${encodeURIComponent(result.workspace_path)}`);
-            }, 1000);
+            completeLaunch(result, setupMode, 1000);
         } catch (error) {
-            messageApi.error(`保存并启动失败: ${error instanceof Error ? error.message : String(error)}`);
+            messageApi.error(copy('messages.publishFailed', { error: errorText(error) }));
         } finally {
             setPublishing(false);
         }
     };
 
     const agentColumns: ColumnsType<AgentRecord> = [
-        { title: 'ID', dataIndex: 'agent_id', width: 70 },
-        { title: 'Name', render: (_, record) => agentName(record), width: 180 },
+        { title: copy('edit.table.id'), dataIndex: 'agent_id', width: 70 },
+        { title: copy('edit.table.name'), render: (_, record) => agentName(record), width: 180 },
         {
-            title: 'Role',
+            title: copy('edit.table.role'),
             render: (_, record) => String(record.kwargs?.profile?.role || record.kwargs?.profile?.scenario_role || '-'),
             width: 180,
         },
         {
-            title: 'Initial location',
+            title: copy('edit.table.initialLocation'),
             width: 260,
             render: (_, record) => (
                 <Select
@@ -557,7 +626,7 @@ export default function SetupPage() {
             ),
         },
         {
-            title: 'Profile',
+            title: copy('edit.table.profile'),
             render: (_, record) => (
                 <Tooltip title={<pre className="setup-json-preview">{jsonStringify(record.kwargs?.profile)}</pre>}>
                     <Text code>{compactJson(record.kwargs?.profile)}</Text>
@@ -565,7 +634,7 @@ export default function SetupPage() {
             ),
         },
         {
-            title: 'Actions',
+            title: copy('edit.table.actions'),
             width: 104,
             render: (_, record) => (
                 <Space size={6}>
@@ -577,27 +646,43 @@ export default function SetupPage() {
     ];
 
     const renderModelStep = () => (
-        <Card className="setup-card" title={<Space><ApiOutlined />模型与端口配置</Space>}>
+        <Card className="setup-card" title={<Space><ApiOutlined />{copy('model.title')}</Space>}>
             <Alert
                 type="info"
                 showIcon
-                message="API key 只会保存到本地 .env；状态接口只返回脱敏结果，不会把明文 key 传回前端。"
+                message={copy('model.notice')}
                 style={{ marginBottom: 18 }}
             />
+            {launchPending && (
+                <Alert
+                    type="success"
+                    showIcon
+                    message={copy('launchPending.title')}
+                    description={(
+                        <Space direction="vertical" size={4}>
+                            <Text>{copy('launchPending.description')}</Text>
+                            <Text code>
+                                {launchPending.hypothesis_id} / experiment_{launchPending.experiment_id}
+                            </Text>
+                        </Space>
+                    )}
+                    style={{ marginBottom: 18 }}
+                />
+            )}
             <Form form={modelForm} layout="vertical">
                 <Row gutter={16}>
                     <Col xs={24} lg={8}>
                         <Form.Item
                             name="GOD_LLM_API_KEY"
-                            label={formLabel('API key', 'OpenAI-compatible 服务的密钥；留空表示沿用本地 .env 已保存的值。')}
+                            label={formLabel('API key', copy('model.apiKeyTooltip'))}
                         >
-                            <Input.Password placeholder={status?.model_config.GOD_LLM_API_KEY?.configured ? '已配置，留空不修改' : 'sk-...'} />
+                            <Input.Password placeholder={status?.model_config.GOD_LLM_API_KEY?.configured ? copy('model.apiKeyConfiguredPlaceholder') : copy('model.apiKeyPlaceholder')} />
                         </Form.Item>
                     </Col>
                     <Col xs={24} lg={8}>
                         <Form.Item
                             name="GOD_LLM_API_BASE"
-                            label={formLabel('API base URL', 'OpenAI-compatible /v1 地址；用于草案生成、Agent 推理和后端 summary。')}
+                            label={formLabel('API base URL', copy('model.apiBaseTooltip'))}
                             rules={[{ required: true }]}
                         >
                             <Input />
@@ -606,7 +691,7 @@ export default function SetupPage() {
                     <Col xs={24} lg={8}>
                         <Form.Item
                             name="GOD_LLM_MODEL"
-                            label={formLabel('Model', '默认主模型名；也会同步给 JiuwenClaw runtime。')}
+                            label={formLabel('Model', copy('model.modelTooltip'))}
                             rules={[{ required: true }]}
                         >
                             <Input />
@@ -615,15 +700,15 @@ export default function SetupPage() {
                     <Col xs={24} lg={8}>
                         <Form.Item
                             name="GOD_EMBEDDING_API_KEY"
-                            label={formLabel('Embedding key', '可选；留空时复用主 API key。')}
+                            label={formLabel('Embedding key', copy('model.embeddingKeyTooltip'))}
                         >
-                            <Input.Password placeholder={status?.model_config.GOD_EMBEDDING_API_KEY?.configured ? '已配置，留空不修改' : 'optional'} />
+                            <Input.Password placeholder={status?.model_config.GOD_EMBEDDING_API_KEY?.configured ? copy('model.embeddingConfiguredPlaceholder') : copy('model.embeddingPlaceholder')} />
                         </Form.Item>
                     </Col>
                     <Col xs={24} lg={8}>
                         <Form.Item
                             name="GOD_EMBEDDING_API_BASE"
-                            label={formLabel('Embedding base URL', '可选；留空时复用主 API base。')}
+                            label={formLabel('Embedding base URL', copy('model.embeddingBaseTooltip'))}
                         >
                             <Input />
                         </Form.Item>
@@ -631,52 +716,62 @@ export default function SetupPage() {
                     <Col xs={24} lg={8}>
                         <Form.Item
                             name="GOD_EMBEDDING_MODEL"
-                            label={formLabel('Embedding model', '用于长期记忆/向量检索的 embedding 模型。')}
+                            label={formLabel('Embedding model', copy('model.embeddingModelTooltip'))}
                         >
                             <Input />
                         </Form.Item>
                     </Col>
                     <Col xs={24} lg={8}>
-                        <Form.Item name="GOD_BACKEND_HOST" label={formLabel('Backend host', '后端绑定地址，本地默认 127.0.0.1。')}>
+                        <Form.Item name="GOD_BACKEND_HOST" label={formLabel('Backend host', copy('model.backendHostTooltip'))}>
                             <Input />
                         </Form.Item>
                     </Col>
                     <Col xs={12} lg={8}>
-                        <Form.Item name="GOD_BACKEND_PORT" label={formLabel('Backend port', 'FastAPI 后端端口。')}>
+                        <Form.Item name="GOD_BACKEND_PORT" label={formLabel('Backend port', copy('model.backendPortTooltip'))}>
                             <Input />
                         </Form.Item>
                     </Col>
                     <Col xs={12} lg={8}>
-                        <Form.Item name="GOD_FRONTEND_PORT" label={formLabel('Frontend port', 'GOD 控制台 Vite 端口。')}>
+                        <Form.Item name="GOD_FRONTEND_PORT" label={formLabel('Frontend port', copy('model.frontendPortTooltip'))}>
                             <Input />
                         </Form.Item>
                     </Col>
                 </Row>
             </Form>
-            <Space>
-                <Button type="primary" icon={<SaveOutlined />} loading={savingModel} onClick={saveModelConfig}>
-                    保存模型配置
+            <Alert
+                type="success"
+                showIcon
+                message={copy('model.fastPathTitle')}
+                description={copy('model.fastPathDescription')}
+                action={(
+                    <Button
+                        type="primary"
+                        icon={<PlayCircleOutlined />}
+                        loading={startingDefault}
+                        disabled={status?.default_experiment?.config_exists === false}
+                        onClick={startDefaultExperiment}
+                    >
+                        {copy('model.runDefault')}
+                    </Button>
+                )}
+                style={{ marginBottom: 16 }}
+            />
+            <Space wrap>
+                <Button icon={<SaveOutlined />} loading={savingModel} onClick={saveModelConfig}>
+                    {copy('model.save')}
                 </Button>
-                <Button
-                    icon={<PlayCircleOutlined />}
-                    loading={startingDefault}
-                    disabled={status?.default_experiment?.config_exists === false}
-                    onClick={startDefaultExperiment}
-                >
-                    直接运行默认实验
-                </Button>
-                <Tag>{status?.model_config.GOD_LLM_API_KEY?.configured ? 'API key configured' : 'API key missing'}</Tag>
+                <Tag>{status?.model_config.GOD_LLM_API_KEY?.configured ? copy('model.apiKeyConfigured') : copy('model.apiKeyMissing')}</Tag>
                 <Text type="secondary">{status?.env_file}</Text>
             </Space>
         </Card>
     );
 
     const renderBasicsStep = () => (
-        <Card className="setup-card" title={<Space><ExperimentOutlined />实验基础参数</Space>}>
+        <Card className="setup-card" title={<Space><ExperimentOutlined />{copy('basics.title')}</Space>}>
             <Alert
                 type="warning"
                 showIcon
-                message="实验参数都是可选的；留空会使用默认 GOD Town 参数。当前版本不会生成新地图，会把设定映射到 The Ville 的已知地点。"
+                message={copy('basics.notice')}
                 style={{ marginBottom: 18 }}
             />
             <Form
@@ -691,15 +786,15 @@ export default function SetupPage() {
                     <Col xs={24} lg={12}>
                         <Form.Item
                             name="title"
-                            label={formLabel('实验标题', '用于生成目录、README、实验背景标题。默认：斯坦福监狱实验适配模拟。格式：短标题，后端会据此生成 hypothesis 目录名。')}
+                            label={formLabel(copy('basics.experimentTitle'), copy('basics.experimentTitleTooltip'))}
                         >
-                            <Input placeholder="例如：斯坦福监狱实验适配模拟" />
+                            <Input placeholder={copy('basics.experimentTitlePlaceholder')} />
                         </Form.Item>
                     </Col>
                     <Col xs={12} lg={4}>
                         <Form.Item
                             name="agent_count"
-                            label={formLabel('Agent 个数', 'GOD agent 会生成对应数量的角色、人设和初始位置。默认：10。格式：1-50 的整数。')}
+                            label={formLabel(copy('basics.agentCount'), copy('basics.agentCountTooltip'))}
                         >
                             <InputNumber min={1} max={50} placeholder="10" style={{ width: '100%' }} />
                         </Form.Item>
@@ -707,7 +802,7 @@ export default function SetupPage() {
                     <Col xs={12} lg={4}>
                         <Form.Item
                             name="num_steps"
-                            label={formLabel('初始 steps', 'steps.yaml 中默认 run step 数。默认：4。格式：1-100 的整数，表示初始 run 计划包含多少步。')}
+                            label={formLabel(copy('basics.initialSteps'), copy('basics.initialStepsTooltip'))}
                         >
                             <InputNumber min={1} max={100} placeholder="4" style={{ width: '100%' }} />
                         </Form.Item>
@@ -715,7 +810,7 @@ export default function SetupPage() {
                     <Col xs={12} lg={4}>
                         <Form.Item
                             name="tick"
-                            label={formLabel('Tick 秒数', '每个 step 推进的仿真秒数。默认：1800。格式：正整数秒，1800 表示每步推进 30 分钟。')}
+                            label={formLabel(copy('basics.tick'), copy('basics.tickTooltip'))}
                         >
                             <InputNumber min={1} placeholder="1800" style={{ width: '100%' }} />
                         </Form.Item>
@@ -723,7 +818,7 @@ export default function SetupPage() {
                     <Col xs={24} lg={8}>
                         <Form.Item
                             name="start_t"
-                            label={formLabel('开始时间', 'ISO 时间，决定 agent 的日程判断。默认：2026-05-11T08:20:00+08:00。格式：ISO 8601，包含时区。')}
+                            label={formLabel(copy('basics.startTime'), copy('basics.startTimeTooltip'))}
                         >
                             <Input placeholder="2026-05-11T08:20:00+08:00" />
                         </Form.Item>
@@ -731,7 +826,7 @@ export default function SetupPage() {
                     <Col xs={12} lg={4}>
                         <Form.Item
                             name="movement_tiles_per_second"
-                            label={formLabel('移动速度', 'PixelTownSocialEnv 每秒推进的 tile 数。默认：8。格式：正数，越大地图移动越快。')}
+                            label={formLabel(copy('basics.movementSpeed'), copy('basics.movementSpeedTooltip'))}
                         >
                             <InputNumber min={0.1} step={0.5} placeholder="8" style={{ width: '100%' }} />
                         </Form.Item>
@@ -739,7 +834,7 @@ export default function SetupPage() {
                     <Col xs={12} lg={4}>
                         <Form.Item
                             name="movement_min_steps_per_trip"
-                            label={formLabel('最短步数', '移动路径至少分几步完成，用于避免瞬移。默认：3。格式：正整数，越大越能拉长移动过程。')}
+                            label={formLabel(copy('basics.minSteps'), copy('basics.minStepsTooltip'))}
                         >
                             <InputNumber min={1} placeholder="3" style={{ width: '100%' }} />
                         </Form.Item>
@@ -747,26 +842,26 @@ export default function SetupPage() {
                     <Col xs={24} lg={8}>
                         <Form.Item
                             name="language"
-                            label={formLabel('输出语言', '生成 agent profile 和 README 的主要语言。默认：中文。可选：中文 / English。')}
+                            label={formLabel(copy('basics.outputLanguage'), copy('basics.outputLanguageTooltip'))}
                         >
-                            <Select options={[{ value: 'zh', label: '中文' }, { value: 'en', label: 'English' }]} />
+                            <Select options={[{ value: 'zh', label: copy('basics.chinese') }, { value: 'en', label: copy('basics.english') }]} />
                         </Form.Item>
                     </Col>
                     <Col span={24}>
                         <Form.Item
                             name="background"
-                            label={formLabel('实验背景 / 设定', '格式：自然语言。建议写清角色、场景、观察目标、禁止行为。默认会生成一个安全版权力/角色压力模拟。')}
+                            label={formLabel(copy('basics.background'), copy('basics.backgroundTooltip'))}
                         >
                             <Input.TextArea
                                 rows={8}
-                                placeholder="例如：模拟一个安全版斯坦福监狱实验。角色包括观察者、规则维护者、普通参与者；目标是观察权力分配、规则遵守、情绪变化和合作，不允许羞辱、伤害、威胁或强迫。"
+                                placeholder={copy('basics.backgroundPlaceholder')}
                             />
                         </Form.Item>
                     </Col>
                 </Row>
             </Form>
             <Space>
-                <Button onClick={() => setCurrentStep(0)}>上一步</Button>
+                <Button onClick={() => setCurrentStep(0)}>{copy('basics.back')}</Button>
                 <Button
                     type="primary"
                     onClick={async () => {
@@ -778,24 +873,24 @@ export default function SetupPage() {
                         }
                     }}
                 >
-                    继续生成
+                    {copy('basics.continue')}
                 </Button>
             </Space>
         </Card>
     );
 
     const renderGenerateStep = () => (
-        <Card className="setup-card" title={<Space><RobotOutlined />GOD agent 生成草案</Space>}>
+        <Card className="setup-card" title={<Space><RobotOutlined />{copy('generate.title')}</Space>}>
             <div className="setup-generate-panel">
                 <div>
-                    <Title level={4}>生成完整实验草案</Title>
+                    <Title level={4}>{copy('generate.heading')}</Title>
                     <Paragraph type="secondary">
-                        GOD agent 会生成实验背景、伦理边界、agent profiles、初始位置、环境参数和 steps。生成后不会立刻启动，你可以继续编辑。
+                        {copy('generate.description')}
                     </Paragraph>
                     <Space wrap>
-                        <Tag color="blue">The Ville map only</Tag>
-                        <Tag color="green">可编辑 profiles</Tag>
-                        <Tag color="purple">保存为新实验副本</Tag>
+                        <Tag color="blue">{copy('generate.tagMap')}</Tag>
+                        <Tag color="green">{copy('generate.tagProfiles')}</Tag>
+                        <Tag color="purple">{copy('generate.tagCopy')}</Tag>
                     </Space>
                 </div>
                 <Button
@@ -805,27 +900,41 @@ export default function SetupPage() {
                     loading={generating}
                     onClick={generateDraft}
                 >
-                    生成实验草案
+                    {copy('generate.generate')}
                 </Button>
             </div>
             <Divider />
             <Alert
                 type="info"
                 showIcon
-                message="本次将用于生成的参数"
+                message={copy('generate.previewTitle')}
                 description={(
                     <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                        <Text>标题：{basicsValues.title}</Text>
-                        <Text>Agent：{basicsValues.agent_count} 个；Steps：{basicsValues.num_steps}；Tick：{basicsValues.tick} 秒；开始时间：{basicsValues.start_t}</Text>
-                        <Text>移动速度：{basicsValues.movement_tiles_per_second} tiles/s；最短步数：{basicsValues.movement_min_steps_per_trip}</Text>
-                        <Paragraph style={{ marginBottom: 0 }}>背景：{basicsValues.background}</Paragraph>
+                        <Text>{copy('generate.previewExperimentTitle', { title: basicsValues.title })}</Text>
+                        <Text>
+                            {copy('generate.previewSchedule', {
+                                agents: basicsValues.agent_count,
+                                steps: basicsValues.num_steps,
+                                tick: basicsValues.tick,
+                                start: basicsValues.start_t,
+                            })}
+                        </Text>
+                        <Text>
+                            {copy('generate.previewMovement', {
+                                speed: basicsValues.movement_tiles_per_second,
+                                minSteps: basicsValues.movement_min_steps_per_trip,
+                            })}
+                        </Text>
+                        <Paragraph style={{ marginBottom: 0 }}>
+                            {copy('generate.previewBackground', { background: basicsValues.background })}
+                        </Paragraph>
                     </Space>
                 )}
                 style={{ marginBottom: 16 }}
             />
             <Space>
-                <Button onClick={() => setCurrentStep(1)}>上一步</Button>
-                <Button disabled={!draft} onClick={() => setCurrentStep(3)}>查看已有草案</Button>
+                <Button onClick={() => setCurrentStep(1)}>{copy('generate.back')}</Button>
+                <Button disabled={!draft} onClick={() => setCurrentStep(3)}>{copy('generate.viewDraft')}</Button>
             </Space>
         </Card>
     );
@@ -834,18 +943,18 @@ export default function SetupPage() {
         if (!draft) {
             return (
                 <Card className="setup-card">
-                    <Alert type="info" showIcon message="还没有草案，请先让 GOD agent 生成。" />
+                    <Alert type="info" showIcon message={copy('generate.noDraft')} />
                 </Card>
             );
         }
         const env = getEnvModule(draft);
         return (
-            <Card className="setup-card" title={<Space><EditOutlined />编辑草案</Space>}>
+            <Card className="setup-card" title={<Space><EditOutlined />{copy('edit.title')}</Space>}>
                 {draft.warnings?.length > 0 && (
                     <Alert
                         type="warning"
                         showIcon
-                        message="地图适配提示"
+                        message={copy('edit.mapWarning')}
                         description={draft.warnings.join(' ')}
                         style={{ marginBottom: 16 }}
                     />
@@ -854,13 +963,13 @@ export default function SetupPage() {
                     items={[
                         {
                             key: 'context',
-                            label: '实验背景',
+                            label: copy('edit.contextTab'),
                             children: (
                                 <Space direction="vertical" style={{ width: '100%' }}>
                                     <Alert
                                         type="info"
                                         showIcon
-                                        message="当前旧实验没有独立 scenario 字段；这里会保存为 init/experiment_context.json，并同步注入每个 agent profile 与 prompt。"
+                                        message={copy('edit.contextNotice')}
                                     />
                                     <Input.TextArea
                                         rows={16}
@@ -873,12 +982,12 @@ export default function SetupPage() {
                         },
                         {
                             key: 'agents',
-                            label: `Agents (${draft.init_config.agents.length})`,
+                            label: copy('edit.agentsTab', { count: draft.init_config.agents.length }),
                             children: (
                                 <>
                                     <Space style={{ marginBottom: 12 }}>
                                         <Button type="primary" icon={<UserAddOutlined />} onClick={() => openAgentModal()}>
-                                            Add Agent
+                                            {copy('edit.addAgent')}
                                         </Button>
                                     </Space>
                                     <Table
@@ -892,11 +1001,11 @@ export default function SetupPage() {
                         },
                         {
                             key: 'env',
-                            label: '环境参数',
+                            label: copy('edit.envTab'),
                             children: (
                                 <Row gutter={16}>
                                     <Col xs={24} lg={8}>
-                                        <Text strong>群聊名称</Text>
+                                        <Text strong>{copy('edit.groupName')}</Text>
                                         <Input
                                             value={env.kwargs.default_group_name}
                                             onChange={(event) => updateEnvField('default_group_name', event.target.value)}
@@ -904,7 +1013,7 @@ export default function SetupPage() {
                                         />
                                     </Col>
                                     <Col xs={12} lg={8}>
-                                        <Text strong>移动速度</Text>
+                                        <Text strong>{copy('edit.movementSpeed')}</Text>
                                         <InputNumber
                                             value={env.kwargs.movement_tiles_per_second}
                                             min={0.1}
@@ -914,7 +1023,7 @@ export default function SetupPage() {
                                         />
                                     </Col>
                                     <Col xs={12} lg={8}>
-                                        <Text strong>最短步数</Text>
+                                        <Text strong>{copy('edit.minSteps')}</Text>
                                         <InputNumber
                                             value={env.kwargs.movement_min_steps_per_trip}
                                             min={1}
@@ -927,7 +1036,7 @@ export default function SetupPage() {
                         },
                         {
                             key: 'steps',
-                            label: 'Steps',
+                            label: copy('edit.stepsTab'),
                             children: (
                                 <Input.TextArea
                                     rows={16}
@@ -941,62 +1050,62 @@ export default function SetupPage() {
                 />
                 <Divider />
                 <Space>
-                    <Button onClick={() => setCurrentStep(2)}>返回生成</Button>
-                    <Button type="primary" onClick={() => setCurrentStep(4)}>确认启动</Button>
+                    <Button onClick={() => setCurrentStep(2)}>{copy('edit.backToGenerate')}</Button>
+                    <Button type="primary" onClick={() => setCurrentStep(4)}>{copy('edit.confirmLaunch')}</Button>
                 </Space>
             </Card>
         );
     };
 
     const renderConfirmStep = () => (
-        <Card className="setup-card" title={<Space><CheckCircleOutlined />保存并启动</Space>}>
+        <Card className="setup-card" title={<Space><CheckCircleOutlined />{copy('confirm.title')}</Space>}>
             {draft ? (
                 <>
                     <div className="setup-confirm-grid">
                         <div>
-                            <Text type="secondary">实验标题</Text>
-                            <Title level={4}>{String(draft.experiment_context.title || 'Custom GOD Experiment')}</Title>
+                            <Text type="secondary">{copy('confirm.experimentTitle')}</Text>
+                            <Title level={4}>{String(draft.experiment_context.title || copy('confirm.customExperiment'))}</Title>
                         </div>
                         <div>
-                            <Text type="secondary">Agent 数量</Text>
+                            <Text type="secondary">{copy('confirm.agentCount')}</Text>
                             <Title level={4}>{draft.init_config.agents.length}</Title>
                         </div>
                         <div>
-                            <Text type="secondary">Workspace</Text>
+                            <Text type="secondary">{copy('confirm.workspace')}</Text>
                             <Paragraph copyable>{status?.workspace_path}</Paragraph>
                         </div>
                     </div>
                     <Alert
                         type="success"
                         showIcon
-                        message="不会覆盖默认 GOD Town"
-                        description="发布会写入新的 hypothesis_<slug>/experiment_1，并更新 .env 与 .god/current_experiment.json。"
+                        message={copy('confirm.safeCopyTitle')}
+                        description={copy('confirm.safeCopyDescription')}
                         style={{ marginBottom: 16 }}
                     />
                     <Space>
-                        <Button onClick={() => setCurrentStep(3)}>继续编辑</Button>
+                        <Button onClick={() => setCurrentStep(3)}>{copy('confirm.keepEditing')}</Button>
                         <Button
                             type="primary"
                             icon={<PlayCircleOutlined />}
                             loading={publishing}
                             onClick={publishAndStart}
                         >
-                            保存并启动
+                            {copy('confirm.saveAndLaunch')}
                         </Button>
                     </Space>
                 </>
             ) : (
-                <Alert type="info" showIcon message="还没有可发布的草案。" />
+                <Alert type="info" showIcon message={copy('confirm.noPublishableDraft')} />
             )}
         </Card>
     );
 
     const stepItems = [
-        { title: '模型', icon: <ApiOutlined /> },
-        { title: '参数', icon: <ExperimentOutlined /> },
-        { title: '生成', icon: <RobotOutlined /> },
-        { title: '编辑', icon: <EditOutlined /> },
-        { title: '启动', icon: <PlayCircleOutlined /> },
+        { title: copy('steps.model'), icon: <ApiOutlined /> },
+        { title: copy('steps.params'), icon: <ExperimentOutlined /> },
+        { title: copy('steps.generate'), icon: <RobotOutlined /> },
+        { title: copy('steps.edit'), icon: <EditOutlined /> },
+        { title: copy('steps.launch'), icon: <PlayCircleOutlined /> },
     ];
 
     const content = [
@@ -1014,18 +1123,26 @@ export default function SetupPage() {
             <div className="setup-shell">
                 <div className="setup-header">
                     <div>
-                        <Title level={2}>GOD 实验初始化</Title>
+                        <Title level={2}>{copy('header.title')}</Title>
                         <Text type="secondary">
-                            配置模型、生成实验设定、编辑 agent profiles，然后启动一个新的 live experiment。
+                            {copy('header.subtitle')}
                         </Text>
                     </div>
                     <Space>
+                        <Button
+                            icon={<GlobalOutlined />}
+                            onClick={() => {
+                                void i18n.changeLanguage(nextLanguage);
+                            }}
+                        >
+                            {copy('header.language')}
+                        </Button>
                         {status?.current_experiment?.hypothesis_id && (
                             <Button onClick={() => navigate(`/pixel-replay/${status.current_experiment?.hypothesis_id}/${status.current_experiment?.experiment_id || '1'}?workspace_path=${encodeURIComponent(status.current_experiment?.workspace_path || status.workspace_path)}`)}>
-                                打开当前实验
+                                {copy('header.openCurrent')}
                             </Button>
                         )}
-                        <Button onClick={loadStatus} loading={loadingStatus}>刷新状态</Button>
+                        <Button onClick={loadStatus} loading={loadingStatus}>{copy('header.refreshStatus')}</Button>
                     </Space>
                 </div>
                 <Card className="setup-step-card" variant="borderless">

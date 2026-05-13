@@ -3,7 +3,9 @@ import './index.css'
 import './i18n'
 import { Navigate, RouterProvider, createBrowserRouter } from 'react-router-dom'
 import { ConfigProvider, ThemeConfig } from 'antd'
+import enUS from 'antd/locale/en_US'
 import zhCN from 'antd/locale/zh_CN'
+import { useTranslation } from 'react-i18next'
 import PixelReplay from './pages/PixelReplay'
 import AgentBuilder from './pages/AgentBuilder'
 import SetupPage from './pages/Setup'
@@ -58,11 +60,16 @@ const theme: ThemeConfig = {
     }
 };
 
-const App = () => (
-    <ConfigProvider theme={theme} locale={zhCN}>
-        <RouterProvider router={router} />
-    </ConfigProvider>
-)
+const App = () => {
+    const { i18n } = useTranslation();
+    const antdLocale = i18n.language?.startsWith('en') ? enUS : zhCN;
+
+    return (
+        <ConfigProvider theme={theme} locale={antdLocale}>
+            <RouterProvider router={router} />
+        </ConfigProvider>
+    );
+}
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
     <App />

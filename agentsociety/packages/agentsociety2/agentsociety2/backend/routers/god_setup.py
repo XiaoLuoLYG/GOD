@@ -907,6 +907,7 @@ async def setup_status() -> dict[str, Any]:
         "map_locations": _map_locations_for_status(),
         "model_config": {key: _redact_value(key, env.get(key)) for key in MODEL_KEYS},
         "current_experiment": current,
+        "setup_mode": os.environ.get("GOD_SETUP_MODE") == "1",
         "default_experiment": {
             "hypothesis_id": default_hypothesis_id,
             "experiment_id": default_experiment_id,
