@@ -7,7 +7,7 @@ name = "agentsociety2"
 version = "2.2.0"
 description = "A modern, LLM-native agent simulation platform for social science research"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 license = { text = "Apache-2.0" }
 authors = [
     { name = "Jun Zhang", email = "zhangjun990222@gmail.com" },

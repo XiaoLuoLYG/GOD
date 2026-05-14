@@ -360,6 +360,11 @@ print_wait_timeout_context() {
     printf '[GOD] recent runtime log:\n' >&2
     tail -n 80 "$LOG_DIR/runtime.log" >&2 || true
   fi
+
+  if [[ "$label" == "Backend" && -f "$LOG_DIR/backend.log" ]]; then
+    printf '[GOD] recent backend log:\n' >&2
+    tail -n 80 "$LOG_DIR/backend.log" >&2 || true
+  fi
 }
 
 urlencode() {
