@@ -1,0 +1,35 @@
+{
+  "skill_id": "radio.comms",
+  "name": "Radio Comms",
+  "description": "Coordinate concise radio-style communications.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "park",
+    "supply_store"
+  ],
+  "target_interactions": [
+    "public_announcement",
+    "coordinate_group"
+  ],
+  "status": "radio_comms",
+  "emotion": "clear",
+  "speech": "我用最短的信息说明位置、需求和下一步。",
+  "memory_template": "Used radio.comms: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use radio.comms in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

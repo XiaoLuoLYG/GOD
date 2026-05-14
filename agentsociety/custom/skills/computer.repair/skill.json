@@ -1,0 +1,35 @@
+{
+  "skill_id": "computer.repair",
+  "name": "Computer Repair",
+  "description": "Diagnose and repair a computer or small device.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "home",
+    "supply_store"
+  ],
+  "target_interactions": [
+    "work_from_home",
+    "repair_tools"
+  ],
+  "status": "repairing_computer",
+  "emotion": "focused",
+  "speech": "我先检查设备问题，再决定要不要拿工具处理。",
+  "memory_template": "Used computer.repair: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use computer.repair in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

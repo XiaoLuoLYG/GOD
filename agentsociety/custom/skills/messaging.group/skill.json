@@ -1,0 +1,37 @@
+{
+  "skill_id": "messaging.group",
+  "name": "Messaging Group",
+  "description": "Send a concise practical group update.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "home",
+    "cafe",
+    "park"
+  ],
+  "target_interactions": [
+    "video_call_family",
+    "chat_over_coffee",
+    "public_announcement"
+  ],
+  "status": "messaging_group",
+  "emotion": "clear",
+  "speech": "我把这件事简短同步到群里，方便大家配合。",
+  "memory_template": "Used messaging.group: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use messaging.group in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

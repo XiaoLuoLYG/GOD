@@ -1,0 +1,37 @@
+{
+  "skill_id": "emotion.calm",
+  "name": "Emotion Calm",
+  "description": "Regulate tension and calm the nearby social mood.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "park",
+    "cafe",
+    "home"
+  ],
+  "target_interactions": [
+    "rest_on_bench",
+    "chat_over_coffee",
+    "relax_at_home"
+  ],
+  "status": "calming",
+  "emotion": "calm",
+  "speech": "我先让气氛慢下来，大家才好做决定。",
+  "memory_template": "Used emotion.calm: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use emotion.calm in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

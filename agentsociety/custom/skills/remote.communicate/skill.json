@@ -1,0 +1,35 @@
+{
+  "skill_id": "remote.communicate",
+  "name": "Remote Communicate",
+  "description": "Communicate with someone who is not physically nearby.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "home",
+    "cafe"
+  ],
+  "target_interactions": [
+    "video_call_family",
+    "chat_over_coffee"
+  ],
+  "status": "remote_comms",
+  "emotion": "warm",
+  "speech": "我先远程确认对方情况，再决定下一步。",
+  "memory_template": "Used remote.communicate: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use remote.communicate in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

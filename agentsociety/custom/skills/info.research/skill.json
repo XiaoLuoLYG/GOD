@@ -1,0 +1,35 @@
+{
+  "skill_id": "info.research",
+  "name": "Info Research",
+  "description": "Research a topic before acting or advising.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "library",
+    "home"
+  ],
+  "target_interactions": [
+    "research_topic",
+    "work_from_home"
+  ],
+  "status": "researching",
+  "emotion": "focused",
+  "speech": "我先查清楚，再给出更可靠的建议。",
+  "memory_template": "Used info.research: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use info.research in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

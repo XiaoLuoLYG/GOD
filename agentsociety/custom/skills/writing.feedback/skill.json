@@ -1,0 +1,35 @@
+{
+  "skill_id": "writing.feedback",
+  "name": "Writing Feedback",
+  "description": "Give clear feedback on a piece of writing.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "library",
+    "school"
+  ],
+  "target_interactions": [
+    "quiet_work",
+    "hold_office_hours"
+  ],
+  "status": "giving_feedback",
+  "emotion": "focused",
+  "speech": "我把反馈说具体一点，让对方知道怎么改。",
+  "memory_template": "Used writing.feedback: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use writing.feedback in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "skill_id": "story.localpast",
+  "name": "Story Localpast",
+  "description": "Share a story from the local past.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "library",
+    "park"
+  ],
+  "target_interactions": [
+    "research_topic",
+    "meet_friend"
+  ],
+  "status": "telling_story",
+  "emotion": "warm",
+  "speech": "我讲一个和这个地方有关的旧故事。",
+  "memory_template": "Used story.localpast: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use story.localpast in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

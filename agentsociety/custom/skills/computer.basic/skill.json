@@ -1,0 +1,35 @@
+{
+  "skill_id": "computer.basic",
+  "name": "Computer Basic",
+  "description": "Use basic computer work to prepare messages or records.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "home",
+    "library"
+  ],
+  "target_interactions": [
+    "work_from_home",
+    "quiet_work"
+  ],
+  "status": "computing",
+  "emotion": "focused",
+  "speech": "我先用电脑把这件事整理成可执行的信息。",
+  "memory_template": "Used computer.basic: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use computer.basic in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

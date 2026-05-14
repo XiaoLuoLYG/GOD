@@ -1,0 +1,35 @@
+{
+  "skill_id": "gossip.filter",
+  "name": "Gossip Filter",
+  "description": "Separate useful neighborhood signals from idle gossip.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "cafe",
+    "market"
+  ],
+  "target_interactions": [
+    "chat_over_coffee",
+    "chat_with_regular"
+  ],
+  "status": "filtering_news",
+  "emotion": "curious",
+  "speech": "我会听听大家在说什么，只留下真正有用的信息。",
+  "memory_template": "Used gossip.filter: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use gossip.filter in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

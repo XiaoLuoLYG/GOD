@@ -1,0 +1,37 @@
+{
+  "skill_id": "route.recall",
+  "name": "Route Recall",
+  "description": "Recall familiar routes from memory for grounded movement.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "home",
+    "park",
+    "market"
+  ],
+  "target_interactions": [
+    "read_at_home",
+    "take_walk",
+    "buy_food"
+  ],
+  "status": "recalling_route",
+  "emotion": "thoughtful",
+  "speech": "我想想平常怎么走最稳妥。",
+  "memory_template": "Used route.recall: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use route.recall in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

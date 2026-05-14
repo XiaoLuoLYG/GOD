@@ -1,0 +1,35 @@
+{
+  "skill_id": "community.observe",
+  "name": "Community Observe",
+  "description": "Observe community activity and notice practical changes.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "park",
+    "market"
+  ],
+  "target_interactions": [
+    "take_walk",
+    "chat_with_regular"
+  ],
+  "status": "observing",
+  "emotion": "curious",
+  "speech": "我顺路观察一下大家今天的状态。",
+  "memory_template": "Used community.observe: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use community.observe in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

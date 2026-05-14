@@ -1,0 +1,35 @@
+{
+  "skill_id": "writing.hand",
+  "name": "Writing Hand",
+  "description": "Write something by hand with care and attention.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "home",
+    "library"
+  ],
+  "target_interactions": [
+    "read_at_home",
+    "quiet_work"
+  ],
+  "status": "handwriting",
+  "emotion": "calm",
+  "speech": "我慢慢写，确保内容清楚。",
+  "memory_template": "Used writing.hand: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use writing.hand in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

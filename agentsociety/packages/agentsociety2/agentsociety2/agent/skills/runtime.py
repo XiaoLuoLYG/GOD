@@ -266,6 +266,16 @@ class AgentSkillRuntime:
             "activated_skills": sorted(activated_skills or set()),
             "token_usage": token_usage or {},
         }
+        if runtime_snapshot:
+            for key in (
+                "mounted_skill_ids",
+                "last_skill_decision",
+                "last_skill_result",
+                "last_environment_effects",
+                "skill_states",
+            ):
+                if key in runtime_snapshot:
+                    state[key] = runtime_snapshot[key]
         snapshot = {
             **state,
             **(runtime_snapshot or {}),

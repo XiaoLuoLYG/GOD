@@ -1,0 +1,35 @@
+{
+  "skill_id": "chronic.followup",
+  "name": "Chronic Followup",
+  "description": "Follow up on recurring health needs and medication routines.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "pharmacy",
+    "home"
+  ],
+  "target_interactions": [
+    "refill_prescription",
+    "blood_pressure_check"
+  ],
+  "status": "following_up",
+  "emotion": "careful",
+  "speech": "我会把长期需要跟进的事项记清楚。",
+  "memory_template": "Used chronic.followup: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use chronic.followup in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

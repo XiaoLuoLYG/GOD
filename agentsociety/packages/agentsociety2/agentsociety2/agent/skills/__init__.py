@@ -112,6 +112,10 @@ class SkillInfo:
     inputs: list[str] = field(default_factory=list)
     outputs: list[str] = field(default_factory=list)
     priority: int = 0
+    effects: list[str] = field(default_factory=list)
+    args_schema: dict[str, Any] = field(default_factory=dict)
+    trigger_examples: list[str] = field(default_factory=list)
+    shared: bool = False
     skill_md: str = ""
     skill_md_loaded: bool = field(default=False, repr=False)
 
@@ -137,6 +141,10 @@ class SkillInfo:
             inputs=list(self.inputs),
             outputs=list(self.outputs),
             priority=self.priority,
+            effects=list(self.effects),
+            args_schema=dict(self.args_schema),
+            trigger_examples=list(self.trigger_examples),
+            shared=self.shared,
             skill_md=self.skill_md,
             skill_md_loaded=self.skill_md_loaded,
         )
@@ -315,6 +323,13 @@ class SkillRegistry:
                 entry["outputs"] = list(info.outputs)
             if info.priority:
                 entry["priority"] = info.priority
+            if info.effects:
+                entry["effects"] = list(info.effects)
+            if info.args_schema:
+                entry["args_schema"] = dict(info.args_schema)
+            if info.trigger_examples:
+                entry["trigger_examples"] = list(info.trigger_examples)
+            entry["shared"] = bool(info.shared)
             result.append(entry)
         return result
 
@@ -499,6 +514,12 @@ class SkillRegistry:
         info.inputs = _to_list(meta.get("inputs"))
         info.outputs = _to_list(meta.get("outputs"))
         info.priority = int(meta.get("priority", 0))
+        info.effects = _to_list(meta.get("effects"))
+        info.args_schema = _to_dict(meta.get("args_schema", meta.get("args-schema")))
+        info.trigger_examples = _to_list(
+            meta.get("trigger_examples", meta.get("trigger-examples"))
+        )
+        info.shared = _to_bool(meta.get("shared", info.shared))
         info.skill_md_loaded = False
         info.skill_md = ""
         return True
@@ -671,6 +692,12 @@ def _discover_skills(root: Path, source: str) -> list[SkillInfo]:
             inputs=_to_list(meta.get("inputs")),
             outputs=_to_list(meta.get("outputs")),
             priority=int(meta.get("priority", 0)),
+            effects=_to_list(meta.get("effects")),
+            args_schema=_to_dict(meta.get("args_schema", meta.get("args-schema"))),
+            trigger_examples=_to_list(
+                meta.get("trigger_examples", meta.get("trigger-examples"))
+            ),
+            shared=_to_bool(meta.get("shared", False)),
             skill_md_loaded=False,
         )
         result.append(info)
@@ -702,6 +729,21 @@ def _to_list(raw: Any) -> list[str]:
             return [part.strip() for part in s.split(",") if part.strip()]
         return [s]
     return []
+
+
+def _to_dict(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return dict(raw)
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return {}
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
 
 
 def _ensure_skill_md_loaded(info: SkillInfo) -> str:

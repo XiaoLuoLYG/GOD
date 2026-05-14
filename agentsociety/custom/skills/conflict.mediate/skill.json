@@ -1,0 +1,35 @@
+{
+  "skill_id": "conflict.mediate",
+  "name": "Conflict Mediate",
+  "description": "Mediate disagreement through calm conversation.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "cafe",
+    "park"
+  ],
+  "target_interactions": [
+    "casual_meetup",
+    "meet_friend"
+  ],
+  "status": "mediating",
+  "emotion": "patient",
+  "speech": "我先听双方怎么说，再帮大家把话说稳。",
+  "memory_template": "Used conflict.mediate: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use conflict.mediate in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

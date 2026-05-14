@@ -1,0 +1,35 @@
+{
+  "skill_id": "ledger.basic",
+  "name": "Ledger Basic",
+  "description": "Keep a simple ledger for shop or shared resources.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "market",
+    "supply_store"
+  ],
+  "target_interactions": [
+    "work_shop_shift",
+    "customer_service"
+  ],
+  "status": "ledgering",
+  "emotion": "focused",
+  "speech": "我把收支和物资变动记下来。",
+  "memory_template": "Used ledger.basic: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use ledger.basic in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

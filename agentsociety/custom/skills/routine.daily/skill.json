@@ -1,0 +1,41 @@
+{
+  "skill_id": "routine.daily",
+  "name": "Routine Daily",
+  "description": "Choose a natural daily movement, interaction, or state from time, role, and current town context.",
+  "shared": true,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "remember"
+  ],
+  "target_locations": [
+    "home",
+    "school",
+    "market",
+    "cafe",
+    "park",
+    "library"
+  ],
+  "target_interactions": [
+    "cook_meal",
+    "attend_class",
+    "work_shop_shift",
+    "eat_light_meal",
+    "take_walk",
+    "read_book"
+  ],
+  "status": "active",
+  "emotion": "calm",
+  "speech": "",
+  "memory_template": "Followed a daily routine: {summary}.",
+  "failure_strategy": "set_state",
+  "strategy": "routine_time_role",
+  "trigger_examples": [
+    "morning, lunch, work, school, evening, or sleep routine is the most natural next step"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

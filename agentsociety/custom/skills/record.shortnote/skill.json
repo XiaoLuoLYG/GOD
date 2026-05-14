@@ -1,0 +1,35 @@
+{
+  "skill_id": "record.shortnote",
+  "name": "Record Shortnote",
+  "description": "Write a brief useful note about the current situation.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "library",
+    "home"
+  ],
+  "target_interactions": [
+    "quiet_work",
+    "read_at_home"
+  ],
+  "status": "short_note",
+  "emotion": "focused",
+  "speech": "我会把这一点记成短句，之后容易查。",
+  "memory_template": "Used record.shortnote: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use record.shortnote in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

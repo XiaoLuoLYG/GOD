@@ -1,0 +1,37 @@
+{
+  "skill_id": "neighbor.support",
+  "name": "Neighbor Support",
+  "description": "Offer practical support to a nearby neighbor.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "home",
+    "park",
+    "market"
+  ],
+  "target_interactions": [
+    "home_visit_prep",
+    "meet_friend",
+    "deliver_order"
+  ],
+  "status": "supporting_neighbor",
+  "emotion": "helpful",
+  "speech": "我看看附近有没有人需要顺手帮一把。",
+  "memory_template": "Used neighbor.support: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use neighbor.support in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

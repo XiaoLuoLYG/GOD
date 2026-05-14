@@ -1,0 +1,35 @@
+{
+  "skill_id": "class.learn",
+  "name": "Class Learn",
+  "description": "Attend class or study using the school and library workflow.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "school",
+    "library"
+  ],
+  "target_interactions": [
+    "attend_class",
+    "study_after_class"
+  ],
+  "status": "learning",
+  "emotion": "focused",
+  "speech": "我先把今天该学的内容跟上。",
+  "memory_template": "Used class.learn: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use class.learn in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

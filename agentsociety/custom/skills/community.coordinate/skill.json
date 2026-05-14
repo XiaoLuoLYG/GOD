@@ -1,0 +1,35 @@
+{
+  "skill_id": "community.coordinate",
+  "name": "Community Coordinate",
+  "description": "Coordinate neighbors and shared town information.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "park",
+    "supply_store"
+  ],
+  "target_interactions": [
+    "coordinate_group",
+    "public_announcement"
+  ],
+  "status": "coordinating",
+  "emotion": "focused",
+  "speech": "我会把当前情况整理清楚，并同步给需要知道的人。",
+  "memory_template": "Used community.coordinate: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use community.coordinate in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

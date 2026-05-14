@@ -1,0 +1,35 @@
+{
+  "skill_id": "garden.basic",
+  "name": "Garden Basic",
+  "description": "Tend plants and quiet outdoor/domestic care.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "home",
+    "park"
+  ],
+  "target_interactions": [
+    "water_plants",
+    "bird_watch"
+  ],
+  "status": "gardening",
+  "emotion": "calm",
+  "speech": "我去照看一下植物，也顺便让自己安静下来。",
+  "memory_template": "Used garden.basic: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use garden.basic in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

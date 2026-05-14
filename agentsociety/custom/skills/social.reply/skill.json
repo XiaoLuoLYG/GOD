@@ -1,0 +1,27 @@
+{
+  "skill_id": "social.reply",
+  "name": "Social Reply",
+  "description": "Reply to a recent direct or group message without inventing unrelated movement.",
+  "shared": true,
+  "effects": [
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [],
+  "target_interactions": [],
+  "status": "available",
+  "emotion": "warm",
+  "speech": "我收到了，会结合当前情况继续处理。",
+  "memory_template": "Handled social message: {message}",
+  "failure_strategy": "set_state",
+  "strategy": "reply_recent_message",
+  "trigger_examples": [
+    "another agent or user has sent a message that deserves a response"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

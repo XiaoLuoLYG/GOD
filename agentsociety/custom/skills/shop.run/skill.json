@@ -1,0 +1,35 @@
+{
+  "skill_id": "shop.run",
+  "name": "Shop Run",
+  "description": "Run ordinary shop work and customer service.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "supply_store",
+    "market"
+  ],
+  "target_interactions": [
+    "customer_service",
+    "work_shop_shift"
+  ],
+  "status": "shop_working",
+  "emotion": "attentive",
+  "speech": "我先把顾客和货架都照看好。",
+  "memory_template": "Used shop.run: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use shop.run in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "skill_id": "phone.photolog",
+  "name": "Phone Photolog",
+  "description": "Take a simple phone photo note for later recall.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "park",
+    "market",
+    "library"
+  ],
+  "target_interactions": [
+    "bird_watch",
+    "chat_with_regular",
+    "quiet_work"
+  ],
+  "status": "photologging",
+  "emotion": "observant",
+  "speech": "我拍一张有用的记录，之后好回忆细节。",
+  "memory_template": "Used phone.photolog: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use phone.photolog in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "skill_id": "price.negotiate",
+  "name": "Price Negotiate",
+  "description": "Negotiate market price with practical tradeoffs.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "market"
+  ],
+  "target_interactions": [
+    "haggle_price",
+    "buy_food"
+  ],
+  "status": "negotiating",
+  "emotion": "sharp",
+  "speech": "我先问清价格和数量，再试着谈一个双方都能接受的价。",
+  "memory_template": "Used price.negotiate: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use price.negotiate in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "skill_id": "tools.repair",
+  "name": "Tools Repair",
+  "description": "Inspect and repair a practical tool or device.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "supply_store",
+    "home"
+  ],
+  "target_interactions": [
+    "repair_tools",
+    "inspect_supplies"
+  ],
+  "status": "repairing",
+  "emotion": "focused",
+  "speech": "我先找工具检查问题，再决定怎么修。",
+  "memory_template": "Used tools.repair: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use tools.repair in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

@@ -48,6 +48,22 @@ import './style.css';
 
 const { Text, Title, Paragraph } = Typography;
 
+const DEFAULT_COMMON_SKILL_IDS = [
+    'routine.daily',
+    'social.reply',
+    'memory.record',
+    'map.navigate',
+    'safety.respond',
+];
+
+const DEFAULT_PERSONAL_SKILL_IDS = [
+    'community.coordinate',
+    'conflict.mediate',
+    'first_aid.basic',
+    'notice.write',
+    'messaging.group',
+];
+
 type RedactedValue = {
     configured: boolean;
     value: string;
@@ -516,7 +532,6 @@ export default function SetupPage() {
                     name: `Jiuwen Agent ${nextId}`,
                     role: 'participant',
                     persona: copy('edit.defaultPersona'),
-                    skills: ['observation', 'conversation'],
                     scenario: draft.experiment_context.background || '',
                     scenario_role: 'participant',
                 }),
@@ -526,8 +541,9 @@ export default function SetupPage() {
                     mode: 'agent.plan',
                     trusted_dirs: [],
                     enable_memory: true,
-                    enable_daily_life: true,
                     enable_skill_runtime: true,
+                    common_skill_ids: DEFAULT_COMMON_SKILL_IDS,
+                    skill_ids: DEFAULT_PERSONAL_SKILL_IDS,
                     request_timeout: 900,
                     channel_id: 'agentsociety',
                     experiment_context: draft.experiment_context,
@@ -542,13 +558,22 @@ export default function SetupPage() {
         const profile = baseAgent.kwargs?.profile && typeof baseAgent.kwargs.profile === 'object'
             ? baseAgent.kwargs.profile
             : {};
+        const profileWithoutSkills = { ...profile };
+        delete profileWithoutSkills.skills;
+        const cleanKwargs = { ...(baseAgent.kwargs || {}) };
+        delete cleanKwargs.enable_daily_life;
+        delete cleanKwargs.daily_life_skill_path;
+        delete cleanKwargs.skill_runtime_skill_names;
         const agent: AgentRecord = {
             ...baseAgent,
             kwargs: {
-                ...baseAgent.kwargs,
+                ...cleanKwargs,
                 experiment_context: draft.experiment_context,
+                enable_skill_runtime: true,
+                common_skill_ids: Array.isArray(cleanKwargs.common_skill_ids) ? cleanKwargs.common_skill_ids : DEFAULT_COMMON_SKILL_IDS,
+                skill_ids: Array.isArray(cleanKwargs.skill_ids) ? cleanKwargs.skill_ids : DEFAULT_PERSONAL_SKILL_IDS,
                 profile: {
-                    ...profile,
+                    ...profileWithoutSkills,
                     scenario: profile.scenario || String(draft.experiment_context.background || ''),
                     scenario_role: profile.scenario_role || profile.role || 'participant',
                 },

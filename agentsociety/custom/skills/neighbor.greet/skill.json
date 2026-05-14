@@ -1,0 +1,37 @@
+{
+  "skill_id": "neighbor.greet",
+  "name": "Neighbor Greet",
+  "description": "Greet neighbors and maintain ordinary social warmth.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "park",
+    "market",
+    "cafe"
+  ],
+  "target_interactions": [
+    "meet_friend",
+    "chat_with_regular",
+    "casual_meetup"
+  ],
+  "status": "greeting",
+  "emotion": "warm",
+  "speech": "我顺路问候一下，看看大家今天过得怎么样。",
+  "memory_template": "Used neighbor.greet: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use neighbor.greet in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}
