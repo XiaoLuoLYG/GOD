@@ -1,0 +1,35 @@
+{
+  "skill_id": "privacy.protect",
+  "name": "Privacy Protect",
+  "description": "Protect private information before sharing or recording.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "home",
+    "library"
+  ],
+  "target_interactions": [
+    "work_from_home",
+    "quiet_work"
+  ],
+  "status": "protecting_privacy",
+  "emotion": "careful",
+  "speech": "我先确认哪些信息不能随便说出去。",
+  "memory_template": "Used privacy.protect: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use privacy.protect in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

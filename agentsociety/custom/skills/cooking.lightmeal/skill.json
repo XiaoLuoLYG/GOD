@@ -1,0 +1,37 @@
+{
+  "skill_id": "cooking.lightmeal",
+  "name": "Cooking Lightmeal",
+  "description": "Prepare or choose a simple everyday meal.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "cafe",
+    "home",
+    "market"
+  ],
+  "target_interactions": [
+    "eat_light_meal",
+    "cook_meal",
+    "buy_food"
+  ],
+  "status": "preparing_food",
+  "emotion": "content",
+  "speech": "我去准备一点简单但合适的吃的。",
+  "memory_template": "Used cooking.lightmeal: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use cooking.lightmeal in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

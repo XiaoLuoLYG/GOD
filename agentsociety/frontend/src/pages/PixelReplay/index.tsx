@@ -24,6 +24,7 @@ import {
     SettingOutlined,
     StepBackwardOutlined,
     StepForwardOutlined,
+    ThunderboltOutlined,
     UserAddOutlined,
     ZoomInOutlined,
     ZoomOutOutlined,
@@ -245,12 +246,26 @@ type WalkableMap = {
     walkableKeys: Set<string>;
 };
 
+type AgentMessage = {
+    type?: string;
+    sender_id?: number;
+    sender_name?: string;
+    receiver_id?: number;
+    receiver_name?: string;
+    group_id?: number;
+    group_name?: string;
+    recipient_count?: number;
+    content?: string;
+    timestamp?: string;
+};
+
 type PixelAgent = {
     id: number;
     name: string;
     spriteKey: string;
     tile: Tile;
     action: string;
+    status?: string;
     location: string;
     locationId?: string;
     movementStatus?: string;
@@ -259,6 +274,10 @@ type PixelAgent = {
     emotion?: string;
     lastMessage?: string;
     messageCount: number;
+    currentPhase?: string;
+    latestEvent?: string;
+    sentMessages: AgentMessage[];
+    stepCommunications: Communication[];
     availableInteractions: ReplayMapInteraction[];
 };
 
@@ -269,20 +288,40 @@ type PixelFrame = {
     agents: PixelAgent[];
 };
 
+type AgentHoverState = {
+    agentId: number;
+    x: number;
+    y: number;
+};
+
+type AgentScreenPosition = {
+    x: number;
+    y: number;
+};
+
+type CanvasSize = {
+    width: number;
+    height: number;
+};
+
 type PhaserBridge = {
     scene?: Phaser.Scene;
     mapWidthPixels?: number;
     mapHeightPixels?: number;
     sprites: Map<number, Phaser.GameObjects.Sprite>;
     labels: Map<number, Phaser.GameObjects.Text>;
+    hitZones: Map<number, Phaser.GameObjects.Zone>;
     locationMarkers?: Phaser.GameObjects.GameObject[];
     selectedId?: number;
 };
 
 type Communication = {
     type?: string;
+    sender_id?: number;
     sender_name?: string;
+    receiver_id?: number;
     receiver_name?: string;
+    group_id?: number;
     group_name?: string;
     recipient_count?: number;
     content?: string;
@@ -490,6 +529,7 @@ function buildAgentSummary(agent: PixelAgent | undefined): Record<string, unknow
     }
     return {
         action: agent.action,
+        status: agent.status,
         location: agent.location,
         location_id: agent.locationId,
         movement_status: agent.movementStatus,
@@ -498,6 +538,8 @@ function buildAgentSummary(agent: PixelAgent | undefined): Record<string, unknow
         emotion: agent.emotion,
         last_message: agent.lastMessage,
         message_count: agent.messageCount,
+        current_phase: agent.currentPhase,
+        latest_event: agent.latestEvent,
     };
 }
 
@@ -544,6 +586,56 @@ function parseInteractionList(value: unknown): ReplayMapInteraction[] {
     }
 }
 
+function normalizeAgentId(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value;
+    }
+    if (typeof value === 'string') {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
+}
+
+function normalizeAgentMessage(value: unknown): AgentMessage | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return undefined;
+    }
+    const row = value as Record<string, unknown>;
+    const content = pickDisplayValue(row, ['content', 'message', 'text']);
+    if (!content) {
+        return undefined;
+    }
+    return {
+        type: pickDisplayValue(row, ['type', 'message_type']),
+        sender_id: normalizeAgentId(row.sender_id),
+        sender_name: pickDisplayValue(row, ['sender_name']),
+        receiver_id: normalizeAgentId(row.receiver_id),
+        receiver_name: pickDisplayValue(row, ['receiver_name']),
+        group_id: normalizeAgentId(row.group_id),
+        group_name: pickDisplayValue(row, ['group_name']),
+        recipient_count: normalizeAgentId(row.recipient_count),
+        content,
+        timestamp: pickDisplayValue(row, ['timestamp', 't', 'time']),
+    };
+}
+
+function parseAgentMessages(value: unknown): AgentMessage[] {
+    if (Array.isArray(value)) {
+        return value
+            .map(normalizeAgentMessage)
+            .filter((item): item is AgentMessage => Boolean(item));
+    }
+    if (typeof value !== 'string' || value.trim() === '') {
+        return [];
+    }
+    try {
+        return parseAgentMessages(JSON.parse(value));
+    } catch {
+        return [];
+    }
+}
+
 function firstEnvRow(bundle: ReplayStepBundle | undefined): Record<string, unknown> | undefined {
     const datasets = bundle?.env_state_rows ?? {};
     for (const dataset of Object.values(datasets)) {
@@ -561,10 +653,34 @@ function parseCommunications(row: Record<string, unknown> | undefined): Communic
     }
     try {
         const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed.slice(0, 8) : [];
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+        return parsed
+            .slice(0, 8)
+            .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+            .map((item) => ({
+                type: pickDisplayValue(item, ['type', 'message_type']),
+                sender_id: normalizeAgentId(item.sender_id),
+                sender_name: pickDisplayValue(item, ['sender_name']),
+                receiver_id: normalizeAgentId(item.receiver_id),
+                receiver_name: pickDisplayValue(item, ['receiver_name']),
+                group_id: normalizeAgentId(item.group_id),
+                group_name: pickDisplayValue(item, ['group_name']),
+                recipient_count: normalizeAgentId(item.recipient_count),
+                content: pickDisplayValue(item, ['content', 'message', 'text']),
+            }));
     } catch {
         return [];
     }
+}
+
+function filterAgentSentMessages(agentId: number, messages: AgentMessage[]): AgentMessage[] {
+    return messages.filter((item) => item.sender_id === agentId).slice(-3);
+}
+
+function filterAgentStepCommunications(agentId: number, communications: Communication[]): Communication[] {
+    return communications.filter((item) => item.sender_id === agentId).slice(0, 3);
 }
 
 function findAgentRow(bundle: ReplayStepBundle | undefined, agentId: number): Record<string, unknown> | undefined {
@@ -614,20 +730,28 @@ function buildPixelFrame(
     step: number,
     walkableMap: WalkableMap,
 ): PixelFrame {
+    const envRow = firstEnvRow(bundle);
+    const stepCommunications = parseCommunications(envRow);
     return {
         step,
         t: bundle?.t,
         map: walkableMap,
         agents: profiles.map((profile, index) => {
             const row = findAgentRow(bundle, profile.id);
-            const rawDescription = row ? pickDisplayValue(row, ['description', 'action', 'status', 'activity', 'state']) : undefined;
+            const rawDescription = row ? pickDisplayValue(row, ['description', 'action', 'activity', 'state', 'status']) : undefined;
+            const status = row ? pickDisplayValue(row, ['status']) : undefined;
             const location = row ? pickDisplayValue(row, ['location', 'target_address', 'place', 'address']) : undefined;
             const lastMessage = row ? pickDisplayValue(row, ['last_message']) : undefined;
             const emotion = row ? pickDisplayValue(row, ['emotion']) : undefined;
+            const currentPhase = row ? pickDisplayValue(row, ['current_phase']) : undefined;
+            const latestEvent = row ? pickDisplayValue(row, ['latest_event']) : undefined;
             const tileX = pickOptionalNumberValue(row, 'tile_x');
             const tileY = pickOptionalNumberValue(row, 'tile_y');
             const hasReplayTile = tileX !== undefined && tileY !== undefined;
             const fallbackTile = getAutoTile(profile.id, step, walkableMap);
+            const sentMessages = row
+                ? filterAgentSentMessages(profile.id, parseAgentMessages(row.recent_messages))
+                : [];
             const availableInteractions = row
                 ? parseInteractionList(row.available_interactions_json)
                 : [];
@@ -637,6 +761,7 @@ function buildPixelFrame(
                 spriteKey: CHARACTER_NAMES[index % CHARACTER_NAMES.length],
                 tile: hasReplayTile ? { x: tileX, y: tileY } : fallbackTile,
                 action: rawDescription ?? 'idle',
+                status,
                 location: location ?? '小镇',
                 locationId: row ? pickDisplayValue(row, ['location_id']) : undefined,
                 movementStatus: row ? pickDisplayValue(row, ['movement_status']) : undefined,
@@ -645,6 +770,10 @@ function buildPixelFrame(
                 emotion,
                 lastMessage,
                 messageCount: pickNumberValue(row, 'message_count'),
+                currentPhase: currentPhase ?? pickDisplayValue(envRow ?? {}, ['current_phase']),
+                latestEvent: latestEvent ?? pickDisplayValue(envRow ?? {}, ['latest_event']),
+                sentMessages,
+                stepCommunications: filterAgentStepCommunications(profile.id, stepCommunications),
                 availableInteractions,
             };
         }),
@@ -776,6 +905,132 @@ function zoomCameraAtCenter(scene: Phaser.Scene, delta: number) {
     camera.scrollY += before.y - after.y;
 }
 
+function getFitScreenPosition(agent: PixelAgent, map: WalkableMap, canvasSize: CanvasSize): AgentScreenPosition | undefined {
+    if (canvasSize.width <= 0 || canvasSize.height <= 0) {
+        return undefined;
+    }
+    const tileSize = map.tileSize || TILE_SIZE;
+    const mapWidth = map.width * tileSize;
+    const mapHeight = map.height * tileSize;
+    if (mapWidth <= 0 || mapHeight <= 0) {
+        return undefined;
+    }
+    const zoom = Phaser.Math.Clamp(
+        Math.min(canvasSize.width / mapWidth, canvasSize.height / mapHeight) * 0.88,
+        0.16,
+        0.92,
+    );
+    const scrollX = mapWidth / 2 - canvasSize.width / (2 * zoom);
+    const scrollY = mapHeight / 2 - canvasSize.height / (2 * zoom);
+    const worldX = agent.tile.x * tileSize + tileSize / 2;
+    const worldY = agent.tile.y * tileSize + tileSize / 2;
+    return {
+        x: (worldX - scrollX) * zoom,
+        y: (worldY - scrollY) * zoom,
+    };
+}
+
+function formatSentMessageTarget(item: AgentMessage | Communication): string {
+    if (item.type === 'direct') {
+        return `发给 ${item.receiver_name ?? `Agent ${item.receiver_id ?? ''}`.trim()}`;
+    }
+    if (item.type === 'group') {
+        return `发到 ${item.group_name ?? '群组'}${item.recipient_count ? `（${item.recipient_count} 人）` : ''}`;
+    }
+    if (item.type === 'system_event') {
+        return '发布系统事件';
+    }
+    return item.type ?? '发出消息';
+}
+
+function PixelAgentHoverCard({
+    agent,
+    frame,
+}: {
+    agent: PixelAgent;
+    frame: PixelFrame;
+}) {
+    const outgoingItems = agent.stepCommunications.length > 0
+        ? agent.stepCommunications
+        : agent.sentMessages;
+    const hasOutgoingItems = outgoingItems.length > 0;
+
+    return (
+        <div className="pixel-agent-hover-card">
+            <div className="pixel-agent-hover-header">
+                <div className="pixel-agent-hover-title">
+                    <Text strong>{agent.name}</Text>
+                    <Text type="secondary">#{agent.id} · 第 {frame.step + 1} 步</Text>
+                </div>
+                <Tag className="pixel-agent-hover-status" color={agent.movementStatus === 'moving' ? 'blue' : 'green'}>
+                    {agent.movementStatus ?? agent.status ?? 'idle'}
+                </Tag>
+            </div>
+
+            <div className="pixel-agent-hover-grid">
+                <Text type="secondary">时间</Text>
+                <Text>{formatTime(frame.t)}</Text>
+                <Text type="secondary">动作</Text>
+                <Text>{agent.action}</Text>
+                <Text type="secondary">位置</Text>
+                <Text>
+                    {agent.location}
+                    {agent.locationId ? ` · ${agent.locationId}` : ''}
+                </Text>
+                {agent.targetLocationId && (
+                    <>
+                        <Text type="secondary">目标</Text>
+                        <Text>{agent.targetLocationId}</Text>
+                    </>
+                )}
+                {agent.emotion && (
+                    <>
+                        <Text type="secondary">情绪</Text>
+                        <Text>{agent.emotion}</Text>
+                    </>
+                )}
+                {agent.currentPhase && (
+                    <>
+                        <Text type="secondary">阶段</Text>
+                        <Text>{formatPhase(agent.currentPhase)}</Text>
+                    </>
+                )}
+                {agent.latestEvent && (
+                    <>
+                        <Text type="secondary">事件</Text>
+                        <Text className="pixel-agent-hover-text">{agent.latestEvent}</Text>
+                    </>
+                )}
+                <Text type="secondary">交互</Text>
+                {agent.availableInteractions.length === 0 ? (
+                    <Text className="pixel-agent-hover-muted">暂无可交互动作</Text>
+                ) : (
+                    <div className="pixel-agent-hover-tags">
+                        {agent.availableInteractions.slice(0, 4).map((interaction) => (
+                            <Tag color="cyan" key={interaction.id}>{interaction.name}</Tag>
+                        ))}
+                    </div>
+                )}
+                <Text type="secondary">
+                    {agent.stepCommunications.length > 0 ? '本步发言' : '最近发言'}
+                </Text>
+                {!hasOutgoingItems ? (
+                    <Text className="pixel-agent-hover-muted">暂无该居民发出的消息</Text>
+                ) : (
+                    <div className="pixel-agent-hover-message-list">
+                        {outgoingItems.slice(0, 3).map((item, index) => (
+                            <div className="pixel-agent-hover-message" key={`${item.content}-${index}`}>
+                                <Text type="secondary">{formatSentMessageTarget(item)}</Text>
+                                <Text className="pixel-agent-hover-text">{item.content ?? ''}</Text>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
 function PixelTownCanvas({
     frame,
     map,
@@ -789,9 +1044,53 @@ function PixelTownCanvas({
 }) {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const gameRef = useRef<Phaser.Game | null>(null);
-    const bridgeRef = useRef<PhaserBridge>({ sprites: new Map(), labels: new Map(), locationMarkers: [] });
+    const bridgeRef = useRef<PhaserBridge>({
+        sprites: new Map(),
+        labels: new Map(),
+        hitZones: new Map(),
+        locationMarkers: [],
+    });
     const frameRef = useRef<PixelFrame | undefined>(frame);
     const onSelectAgentRef = useRef(onSelectAgent);
+    const [hoverState, setHoverState] = useState<AgentHoverState | undefined>();
+    const [agentScreenPositions, setAgentScreenPositions] = useState<Record<number, AgentScreenPosition>>({});
+    const [canvasSize, setCanvasSize] = useState<CanvasSize>({ width: 0, height: 0 });
+    const hoveredAgent = frame?.agents.find((agent) => agent.id === hoverState?.agentId);
+
+    const clampHoverPosition = useCallback((rawX: number, rawY: number): [number, number] => {
+        const width = containerRef.current?.clientWidth ?? 0;
+        const height = containerRef.current?.clientHeight ?? 0;
+        const cardWidth = 270;
+        const cardHeight = 230;
+        const gap = 10;
+        const maxX = Math.max(gap, width - cardWidth - gap);
+        const maxY = Math.max(gap, height - cardHeight - gap);
+        return [
+            Phaser.Math.Clamp(rawX + 16, gap, maxX),
+            Phaser.Math.Clamp(rawY + 16, gap, maxY),
+        ];
+    }, []);
+
+    const syncAgentScreenPositions = useCallback(() => {
+        const scene = bridgeRef.current.scene;
+        const currentFrame = frameRef.current;
+        if (!scene || !currentFrame) {
+            setAgentScreenPositions({});
+            return;
+        }
+        const camera = scene.cameras.main;
+        const tileSize = currentFrame.map.tileSize || TILE_SIZE;
+        const next: Record<number, AgentScreenPosition> = {};
+        currentFrame.agents.forEach((agent) => {
+            const worldX = agent.tile.x * tileSize + tileSize / 2;
+            const worldY = agent.tile.y * tileSize + tileSize / 2;
+            next[agent.id] = {
+                x: (worldX - camera.scrollX) * camera.zoom + camera.x,
+                y: (worldY - camera.scrollY) * camera.zoom + camera.y,
+            };
+        });
+        setAgentScreenPositions(next);
+    }, []);
 
     useEffect(() => {
         frameRef.current = frame;
@@ -800,6 +1099,44 @@ function PixelTownCanvas({
     useEffect(() => {
         onSelectAgentRef.current = onSelectAgent;
     }, [onSelectAgent]);
+
+    useEffect(() => {
+        const element = containerRef.current;
+        if (!element) {
+            return undefined;
+        }
+        const updateSize = () => {
+            setCanvasSize({
+                width: element.clientWidth,
+                height: element.clientHeight,
+            });
+        };
+        updateSize();
+        const observer = new ResizeObserver(updateSize);
+        observer.observe(element);
+        return () => observer.disconnect();
+    }, []);
+
+    const handleHoverAgent = useCallback((agentId: number | undefined, pointer?: Phaser.Input.Pointer) => {
+        if (agentId === undefined || !pointer) {
+            setHoverState(undefined);
+            return;
+        }
+        const [x, y] = clampHoverPosition(pointer.x, pointer.y);
+        setHoverState({ agentId, x, y });
+    }, [clampHoverPosition]);
+
+    const handleDomHoverAgent = useCallback((agentId: number, event: React.MouseEvent<HTMLDivElement>) => {
+        const bounds = containerRef.current?.getBoundingClientRect();
+        if (!bounds) {
+            return;
+        }
+        const [x, y] = clampHoverPosition(
+            event.clientX - bounds.left,
+            event.clientY - bounds.top,
+        );
+        setHoverState({ agentId, x, y });
+    }, [clampHoverPosition]);
 
     useEffect(() => {
         if (!containerRef.current || gameRef.current) {
@@ -869,12 +1206,14 @@ function PixelTownCanvas({
                     }
                     this.cameras.main.scrollX = dragStart.scrollX - (pointer.x - dragStart.x) / this.cameras.main.zoom;
                     this.cameras.main.scrollY = dragStart.scrollY - (pointer.y - dragStart.y) / this.cameras.main.zoom;
+                    syncAgentScreenPositions();
                 });
                 this.input.on('pointerup', () => {
                     dragStart = undefined;
                 });
                 this.input.on('pointerout', () => {
                     dragStart = undefined;
+                    handleHoverAgent(undefined);
                 });
                 this.input.on('wheel', (pointer: Phaser.Input.Pointer, _objects: unknown[], _dx: number, dy: number) => {
                     const before = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
@@ -883,10 +1222,15 @@ function PixelTownCanvas({
                     const after = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
                     this.cameras.main.scrollX += before.x - after.x;
                     this.cameras.main.scrollY += before.y - after.y;
+                    syncAgentScreenPositions();
                 });
-                this.scale.on('resize', () => fitCameraToMap(this, bridgeRef.current));
+                this.scale.on('resize', () => {
+                    fitCameraToMap(this, bridgeRef.current);
+                    syncAgentScreenPositions();
+                });
                 this.input.keyboard?.createCursorKeys();
-                renderFrame(this, frameRef.current, bridgeRef.current, onSelectAgentRef.current);
+                renderFrame(this, frameRef.current, bridgeRef.current, onSelectAgentRef.current, handleHoverAgent);
+                syncAgentScreenPositions();
             }
         }
 
@@ -911,15 +1255,52 @@ function PixelTownCanvas({
         return () => {
             gameRef.current?.destroy(true);
             gameRef.current = null;
-            bridgeRef.current = { sprites: new Map(), labels: new Map(), locationMarkers: [] };
+            bridgeRef.current = {
+                sprites: new Map(),
+                labels: new Map(),
+                hitZones: new Map(),
+                locationMarkers: [],
+            };
         };
-    }, [map]);
+    }, [handleHoverAgent, map, syncAgentScreenPositions]);
 
     useEffect(() => {
         if (bridgeRef.current.scene) {
-            renderFrame(bridgeRef.current.scene, frame, bridgeRef.current, onSelectAgentRef.current);
+            renderFrame(bridgeRef.current.scene, frame, bridgeRef.current, onSelectAgentRef.current, handleHoverAgent);
+            syncAgentScreenPositions();
         }
-    }, [frame]);
+    }, [frame, handleHoverAgent, syncAgentScreenPositions]);
+
+    useEffect(() => {
+        if (hoverState && !hoveredAgent) {
+            setHoverState(undefined);
+        }
+    }, [hoverState, hoveredAgent]);
+
+    useEffect(() => {
+        if (!frame) {
+            setAgentScreenPositions({});
+            return undefined;
+        }
+        let attempts = 0;
+        const timer = window.setInterval(() => {
+            if (bridgeRef.current.scene) {
+                renderFrame(
+                    bridgeRef.current.scene,
+                    frame,
+                    bridgeRef.current,
+                    onSelectAgentRef.current,
+                    handleHoverAgent,
+                );
+            }
+            syncAgentScreenPositions();
+            attempts += 1;
+            if (attempts >= 10 && (frameRef.current?.agents.length ?? 0) > 0) {
+                window.clearInterval(timer);
+            }
+        }, 120);
+        return () => window.clearInterval(timer);
+    }, [frame, handleHoverAgent, syncAgentScreenPositions]);
 
     useEffect(() => {
         bridgeRef.current.selectedId = selectedAgentId;
@@ -933,24 +1314,70 @@ function PixelTownCanvas({
                     <Button
                         shape="circle"
                         icon={<AimOutlined />}
-                        onClick={() => bridgeRef.current.scene && fitCameraToMap(bridgeRef.current.scene, bridgeRef.current)}
+                        onClick={() => {
+                            if (bridgeRef.current.scene) {
+                                fitCameraToMap(bridgeRef.current.scene, bridgeRef.current);
+                                syncAgentScreenPositions();
+                            }
+                        }}
                     />
                 </Tooltip>
                 <Tooltip title="放大地图">
                     <Button
                         shape="circle"
                         icon={<ZoomInOutlined />}
-                        onClick={() => bridgeRef.current.scene && zoomCameraAtCenter(bridgeRef.current.scene, 0.1)}
+                        onClick={() => {
+                            if (bridgeRef.current.scene) {
+                                zoomCameraAtCenter(bridgeRef.current.scene, 0.1);
+                                syncAgentScreenPositions();
+                            }
+                        }}
                     />
                 </Tooltip>
                 <Tooltip title="缩小地图">
                     <Button
                         shape="circle"
                         icon={<ZoomOutOutlined />}
-                        onClick={() => bridgeRef.current.scene && zoomCameraAtCenter(bridgeRef.current.scene, -0.1)}
+                        onClick={() => {
+                            if (bridgeRef.current.scene) {
+                                zoomCameraAtCenter(bridgeRef.current.scene, -0.1);
+                                syncAgentScreenPositions();
+                            }
+                        }}
                     />
                 </Tooltip>
             </div>
+            {frame?.agents.map((agent) => {
+                const position = agentScreenPositions[agent.id] ?? getFitScreenPosition(agent, map, canvasSize);
+                if (!position) {
+                    return null;
+                }
+                return (
+                    <div
+                        aria-label={`${agent.name} hover target`}
+                        className="pixel-agent-hover-target"
+                        key={agent.id}
+                        role="button"
+                        tabIndex={-1}
+                        style={{
+                            left: position.x,
+                            top: position.y,
+                        }}
+                        onClick={() => onSelectAgent(agent.id)}
+                        onMouseEnter={(event) => handleDomHoverAgent(agent.id, event)}
+                        onMouseMove={(event) => handleDomHoverAgent(agent.id, event)}
+                        onMouseLeave={() => setHoverState(undefined)}
+                    />
+                );
+            })}
+            {hoverState && hoveredAgent && frame && (
+                <div
+                    className="pixel-agent-hover-layer"
+                    style={{ left: hoverState.x, top: hoverState.y }}
+                >
+                    <PixelAgentHoverCard agent={hoveredAgent} frame={frame} />
+                </div>
+            )}
         </div>
     );
 }
@@ -991,6 +1418,7 @@ function renderFrame(
     frame: PixelFrame | undefined,
     bridge: PhaserBridge,
     onSelectAgent: (agentId: number) => void,
+    onHoverAgent: (agentId: number | undefined, pointer?: Phaser.Input.Pointer) => void,
 ) {
     if (!frame) {
         return;
@@ -1003,6 +1431,8 @@ function renderFrame(
             bridge.sprites.delete(agentId);
             bridge.labels.get(agentId)?.destroy();
             bridge.labels.delete(agentId);
+            bridge.hitZones.get(agentId)?.destroy();
+            bridge.hitZones.delete(agentId);
         }
     }
 
@@ -1012,13 +1442,22 @@ function renderFrame(
         const y = agent.tile.y * tileSize + tileSize / 2;
         let sprite = bridge.sprites.get(agent.id);
         let label = bridge.labels.get(agent.id);
+        let hitZone = bridge.hitZones.get(agent.id);
 
         if (!sprite) {
             sprite = scene.add.sprite(x, y, agent.spriteKey, 1);
             sprite.setDepth(10);
-            sprite.setInteractive({ useHandCursor: true });
-            sprite.on('pointerdown', () => onSelectAgent(agent.id));
             bridge.sprites.set(agent.id, sprite);
+        }
+        if (!hitZone) {
+            hitZone = scene.add.zone(x, y, tileSize * 5, tileSize * 5);
+            hitZone.setDepth(40);
+            hitZone.setInteractive({ useHandCursor: true });
+            hitZone.on('pointerdown', () => onSelectAgent(agent.id));
+            hitZone.on('pointerover', (pointer: Phaser.Input.Pointer) => onHoverAgent(agent.id, pointer));
+            hitZone.on('pointermove', (pointer: Phaser.Input.Pointer) => onHoverAgent(agent.id, pointer));
+            hitZone.on('pointerout', () => onHoverAgent(undefined));
+            bridge.hitZones.set(agent.id, hitZone);
         }
         if (!label) {
             label = scene.add.text(x, y - tileSize * 0.75, agent.name, {
@@ -1034,7 +1473,7 @@ function renderFrame(
         }
 
         const duration = Math.hypot(sprite.x - x, sprite.y - y) > 1 ? 240 : 0;
-        scene.tweens.killTweensOf([sprite, label]);
+        scene.tweens.killTweensOf([sprite, label, hitZone]);
         scene.tweens.add({
             targets: sprite,
             x,
@@ -1046,6 +1485,13 @@ function renderFrame(
             targets: label,
             x,
             y: y - tileSize * 0.75,
+            duration,
+            ease: 'Linear',
+        });
+        scene.tweens.add({
+            targets: hitZone,
+            x,
+            y,
             duration,
             ease: 'Linear',
         });
@@ -1556,6 +2002,12 @@ export default function PixelReplay() {
     const selectedAgentSnapshot = selectedAgentRuntime?.agent_state_snapshot;
     const selectedSnapshotProfile = asRecord(selectedAgentSnapshot?.profile);
     const selectedSkillStates = asRecord(selectedAgentSnapshot?.skill_states);
+    const selectedSkillRuntimeSummary = selectedAgentSnapshot ? {
+        mounted_skill_ids: selectedAgentSnapshot.mounted_skill_ids,
+        last_skill_decision: selectedAgentSnapshot.last_skill_decision,
+        last_skill_result: selectedAgentSnapshot.last_skill_result,
+        last_environment_effects: selectedAgentSnapshot.last_environment_effects,
+    } : undefined;
     const envSnapshot = firstEnvRow(bundle);
     const communications = parseCommunications(envSnapshot);
     const missingReplayTileCount = frame?.agents.filter((agent) => !agent.hasReplayTile).length ?? 0;
@@ -1687,6 +2139,11 @@ export default function PixelReplay() {
                     <Tooltip title="创建或配置一个新的实验副本">
                         <Button icon={<SettingOutlined />} onClick={() => navigate('/setup')}>
                             新实验
+                        </Button>
+                    </Tooltip>
+                    <Tooltip title="查看和创建真实可执行 Skills">
+                        <Button icon={<ThunderboltOutlined />} onClick={() => navigate('/skills')}>
+                            Skills
                         </Button>
                     </Tooltip>
                 </Space>
@@ -1987,6 +2444,7 @@ export default function PixelReplay() {
                                 : '暂无可交互动作',
                         )}
                         {renderPlainDetail('人物背景设定', formatInlineFields(selectedProfile?.profile ?? selectedSnapshotProfile, '暂无人物背景'))}
+                        {renderPlainDetail('Skill Runtime', formatInlineFields(selectedSkillRuntimeSummary, '暂无 skill runtime'))}
                         {renderPlainDetail('会话状态', joinDetailBlocks([
                             ['session_state', formatInlineFields(selectedAgentRuntime?.session_state, '暂无会话状态')],
                             ['agent_state_snapshot', formatInlineFields(selectedAgentSnapshot, '暂无快照状态')],

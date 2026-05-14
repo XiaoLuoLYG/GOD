@@ -1,0 +1,35 @@
+{
+  "skill_id": "listen.relay",
+  "name": "Listen Relay",
+  "description": "Listen carefully and relay a message faithfully.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "cafe",
+    "park"
+  ],
+  "target_interactions": [
+    "chat_over_coffee",
+    "meet_friend"
+  ],
+  "status": "relaying",
+  "emotion": "attentive",
+  "speech": "我会先听完整，再转述给该知道的人。",
+  "memory_template": "Used listen.relay: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use listen.relay in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

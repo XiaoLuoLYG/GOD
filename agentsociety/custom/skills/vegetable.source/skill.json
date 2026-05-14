@@ -1,0 +1,35 @@
+{
+  "skill_id": "vegetable.source",
+  "name": "Vegetable Source",
+  "description": "Source vegetables and practical food supplies.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "market",
+    "supply_store"
+  ],
+  "target_interactions": [
+    "restock_vegetables",
+    "buy_food"
+  ],
+  "status": "sourcing_vegetables",
+  "emotion": "practical",
+  "speech": "我先看今天哪些菜新鲜、数量够不够。",
+  "memory_template": "Used vegetable.source: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use vegetable.source in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

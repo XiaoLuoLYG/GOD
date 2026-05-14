@@ -1,0 +1,37 @@
+{
+  "skill_id": "map.navigate",
+  "name": "Map Navigate",
+  "description": "Move toward a requested target location or perform a requested interaction if already there.",
+  "shared": true,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "remember"
+  ],
+  "target_locations": [
+    "park",
+    "cafe",
+    "market",
+    "home"
+  ],
+  "target_interactions": [
+    "take_walk",
+    "chat_over_coffee",
+    "buy_food",
+    "relax_at_home"
+  ],
+  "status": "moving",
+  "emotion": "focused",
+  "speech": "",
+  "memory_template": "Navigation target resolved to {target}.",
+  "failure_strategy": "set_state",
+  "strategy": "navigate_args",
+  "trigger_examples": [
+    "the decision includes a specific target location or map interaction"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

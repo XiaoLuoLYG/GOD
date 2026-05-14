@@ -12,7 +12,7 @@ import json
 import re
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
 from urllib.parse import urlsplit
@@ -25,13 +25,14 @@ from agentsociety2.agent.skills.runtime import AgentSkillRuntime
 DEFAULT_JIUWENCLAW_WS_URL = "ws://127.0.0.1:18092"
 DEFAULT_CHANNEL_ID = "agentsociety"
 DEFAULT_MODE = "agent.plan"
-DEFAULT_RUNTIME_SKILLS = [
-    "routine_schedule",
-    "daily_life",
-    "map_navigation",
-    "social_interaction",
-    "memory_maintenance",
+DEFAULT_COMMON_SKILLS = [
+    "routine.daily",
+    "social.reply",
+    "memory.record",
+    "map.navigate",
+    "safety.respond",
 ]
+SKILL_RESULT_SCHEMA_VERSION = "agent_skill_result.v1"
 URGENT_INTERVENTION_KEYWORDS = (
     "火山",
     "爆发",
@@ -95,6 +96,8 @@ class JiuwenClawAgent(AgentBase):
         enable_daily_life: bool = True,
         daily_life_skill_path: str | None = None,
         enable_skill_runtime: bool = True,
+        common_skill_ids: list[str] | None = None,
+        skill_ids: list[str] | None = None,
         skill_runtime_skill_names: list[str] | None = None,
         experiment_context: Any | None = None,
     ) -> None:
@@ -106,23 +109,20 @@ class JiuwenClawAgent(AgentBase):
         self._request_timeout = float(request_timeout)
         self._enable_memory = bool(enable_memory)
         self._channel_id = channel_id or DEFAULT_CHANNEL_ID
-        self._enable_daily_life = bool(enable_daily_life)
-        self._daily_life_skill_path = daily_life_skill_path
+        # Legacy constructor fields are accepted for old configs, but daily
+        # behavior now comes only from executable common_skill_ids.
+        _ = (enable_daily_life, daily_life_skill_path, skill_runtime_skill_names)
         self._enable_skill_runtime = bool(enable_skill_runtime)
         self._experiment_context = experiment_context
-        self._skill_runtime_skill_names = list(
-            skill_runtime_skill_names or DEFAULT_RUNTIME_SKILLS
+        self._common_skill_ids = self._normalize_skill_ids(
+            common_skill_ids or DEFAULT_COMMON_SKILLS
         )
+        self._skill_ids = self._normalize_skill_ids(skill_ids or [])
         self._skill_registry = SkillRegistry()
         self._skill_registry.scan_custom(_workspace_root_from_file())
         self._skill_runtime = AgentSkillRuntime(
             agent_id=id,
             registry=self._skill_registry,
-        )
-        self._daily_life_skill_text = (
-            self._load_daily_life_skill_text(daily_life_skill_path)
-            if self._enable_daily_life
-            else ""
         )
         self._ws: Any = None
         self._ws_lock = asyncio.Lock()
@@ -136,6 +136,9 @@ class JiuwenClawAgent(AgentBase):
         self._last_skill_results: list[dict[str, Any]] = []
         self._last_action_proposal: dict[str, Any] = {}
         self._last_social_action_proposal: dict[str, Any] = {}
+        self._last_skill_decision: dict[str, Any] = {}
+        self._last_skill_result: dict[str, Any] = {}
+        self._last_environment_effects: list[dict[str, Any]] = []
 
     @classmethod
     def mcp_description(cls) -> str:
@@ -161,11 +164,27 @@ Initialization example:
   "mode": "agent.plan",
   "trusted_dirs": ["/Users/luoyige/Documents/projects/GOD/agentsociety"],
   "enable_memory": true,
-  "enable_daily_life": true,
-  "enable_skill_runtime": true
+  "enable_skill_runtime": true,
+  "common_skill_ids": ["routine.daily", "social.reply", "memory.record", "map.navigate", "safety.respond"],
+  "skill_ids": ["community.coordinate", "tools.repair"]
 }
 ```
 """
+
+    @staticmethod
+    def _normalize_skill_ids(values: list[str] | None) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+        for value in values or []:
+            skill_id = str(value or "").strip()
+            if skill_id and skill_id not in seen:
+                seen.add(skill_id)
+                result.append(skill_id)
+        return result
+
+    def _mounted_skill_ids(self) -> list[str]:
+        mounted = self._normalize_skill_ids(self._common_skill_ids + self._skill_ids)
+        return mounted or list(DEFAULT_COMMON_SKILLS)
 
     async def init(self, env: Any) -> None:
         await super().init(env)
@@ -194,10 +213,10 @@ Initialization example:
                 "trusted_dirs": list(self._trusted_dirs),
                 "request_timeout": self._request_timeout,
                 "enable_memory": self._enable_memory,
-                "enable_daily_life": self._enable_daily_life,
-                "daily_life_skill_path": self._daily_life_skill_path,
                 "enable_skill_runtime": self._enable_skill_runtime,
-                "skill_runtime_skill_names": list(self._skill_runtime_skill_names),
+                "common_skill_ids": list(self._common_skill_ids),
+                "skill_ids": list(self._skill_ids),
+                "mounted_skill_ids": self._mounted_skill_ids(),
                 "experiment_context": _json_safe(self._experiment_context),
             },
         )
@@ -251,24 +270,42 @@ Initialization example:
 
     async def step(self, tick: int, t: datetime) -> str:
         observation = await self._observe_environment()
-        skill_runtime_result = await self._run_skill_runtime(
-            tick=tick,
-            t=t,
-            observation=observation,
-        )
-
         pending_interventions = list(self._pending_interventions)
         self._pending_interventions = []
         broadcast_result = await self._broadcast_urgent_interventions(
             pending_interventions
         )
+
+        if self._enable_skill_runtime and self._agent_work_dir is not None:
+            result = await self._run_skill_runtime(
+                tick=tick,
+                t=t,
+                observation=observation,
+                pending_interventions=pending_interventions,
+                broadcast_result=broadcast_result,
+            )
+            status = "completed" if result.get("ok", True) else "error"
+            self._last_environment_result = json.dumps(
+                result.get("environment_effects") or [],
+                ensure_ascii=False,
+            )
+            self._persist_runtime_state(tick=tick, t=t, status=status)
+            public_summary = str(result.get("public_summary") or "Skill step completed.")
+            environment_summary = result.get("environment_effects") or []
+            if environment_summary:
+                return (
+                    f"{public_summary}\n\n"
+                    f"Environment result: {json.dumps(environment_summary, ensure_ascii=False)}"
+                )
+            return public_summary
+
         prompt = self._build_step_prompt(
             tick=tick,
             t=t,
             observation=str(observation),
             pending_interventions=pending_interventions,
             broadcast_result=broadcast_result,
-            skill_runtime_result=skill_runtime_result,
+            skill_runtime_result=None,
         )
         try:
             raw_decision = await self._send_jiuwenclaw_request(prompt)
@@ -290,8 +327,6 @@ Initialization example:
             decision.get("environment_instruction") or ""
         ).strip()
         action_proposal = self._action_proposal_from_decision(decision)
-        if not action_proposal:
-            action_proposal = skill_runtime_result.get("action_proposal") or {}
 
         if not decision.get("_parsed"):
             if action_proposal:
@@ -363,6 +398,8 @@ Initialization example:
         tick: int,
         t: datetime,
         observation: Any,
+        pending_interventions: list[str] | None = None,
+        broadcast_result: str = "",
     ) -> dict[str, Any]:
         if (
             not self._enable_skill_runtime
@@ -373,8 +410,12 @@ Initialization example:
             self._last_skill_results = []
             self._last_action_proposal = {}
             self._last_social_action_proposal = {}
+            self._last_skill_decision = {}
+            self._last_skill_result = {}
+            self._last_environment_effects = []
             return {}
 
+        pending_interventions = pending_interventions or []
         runtime_args = {
             "agent_id": self.id,
             "agent_name": self.name,
@@ -383,6 +424,8 @@ Initialization example:
             "time": t.isoformat(),
             "observation": _json_safe(observation),
             "agent_work_dir": str(self._agent_work_dir),
+            "pending_interventions": list(pending_interventions),
+            "broadcast_result": broadcast_result,
         }
         self._skill_runtime.workspace_write(
             "state/observation.json",
@@ -400,64 +443,500 @@ Initialization example:
                 indent=2,
             ),
         )
-
-        metadata = self._skill_runtime.skill_list(self._skill_runtime_skill_names)
-        selected = {str(item["name"]) for item in metadata if item.get("name")}
-        ordered = self._skill_registry.get_dependency_order(
-            [name for name in self._skill_runtime_skill_names if name in selected]
+        self._skill_runtime.workspace_write(
+            "state/mounted_skills.json",
+            json.dumps(self._mounted_skill_ids(), ensure_ascii=False, indent=2),
         )
-        self._last_selected_skills = set(ordered)
-        activated: set[str] = set()
-        results: list[dict[str, Any]] = []
 
-        for skill_name in ordered:
-            activated.add(skill_name)
-            self._skill_runtime.skill_activate(skill_name)
-            try:
-                result = await self._skill_runtime.execute(
-                    skill_name,
-                    runtime_args,
-                )
-            except Exception as exc:
-                result = {
-                    "ok": False,
-                    "exit_code": -1,
-                    "stdout": "",
-                    "stderr": str(exc),
-                    "error_type": type(exc).__name__,
-                    "artifacts": [],
-                }
-            entry = {
-                "tick": tick,
-                "time": t.isoformat(),
-                "tool": "execute_skill",
-                "skill_name": skill_name,
-                "result": result,
+        requested_skill_ids = self._mounted_skill_ids()
+        metadata = self._skill_runtime.skill_list(requested_skill_ids)
+        discovered = {str(item["name"]) for item in metadata if item.get("name")}
+        mounted = [skill_id for skill_id in requested_skill_ids if skill_id in discovered]
+        self._last_selected_skills = set(mounted)
+        self._last_activated_skills = set()
+        self._last_skill_results = []
+        self._last_action_proposal = {}
+        self._last_social_action_proposal = {}
+        self._last_skill_decision = {}
+        self._last_skill_result = {}
+        self._last_environment_effects = []
+
+        decision = await self._select_next_skill(
+            tick=tick,
+            t=t,
+            observation=observation,
+            catalog=[item for item in metadata if str(item.get("name") or "") in mounted],
+            mounted_skill_ids=mounted,
+            pending_interventions=pending_interventions,
+            broadcast_result=broadcast_result,
+        )
+        selected_skill_id = str(decision.get("selected_skill_id") or "").strip()
+        if selected_skill_id not in mounted:
+            decision = self._fallback_skill_decision(
+                mounted_skill_ids=mounted,
+                observation=observation,
+                pending_interventions=pending_interventions,
+                reason=f"Invalid or unavailable selected skill: {selected_skill_id}",
+            )
+            selected_skill_id = str(decision.get("selected_skill_id") or "").strip()
+
+        self._last_skill_decision = dict(decision)
+        if not selected_skill_id:
+            return {
+                "ok": False,
+                "public_summary": "No executable skill is mounted for this agent.",
+                "mounted_skill_ids": mounted,
+                "last_skill_decision": dict(decision),
             }
-            results.append(entry)
-            self._skill_runtime.append_tool_log(entry)
 
-        self._last_activated_skills = activated
-        self._last_skill_results = results
-        self._last_action_proposal = self._skill_runtime.read_json(
-            "state/action_proposal.json",
-            {},
+        self._last_activated_skills = {selected_skill_id}
+        self._skill_runtime.skill_activate(selected_skill_id)
+        runtime_args["selected_skill_id"] = selected_skill_id
+        runtime_args["skill_args"] = (
+            decision.get("args") if isinstance(decision.get("args"), dict) else {}
         )
-        self._last_social_action_proposal = self._skill_runtime.read_json(
-            "state/social_action_proposal.json",
-            {},
+        runtime_args["skill_decision"] = dict(decision)
+        try:
+            raw_result = await self._skill_runtime.execute(
+                selected_skill_id,
+                runtime_args,
+            )
+        except Exception as exc:
+            raw_result = {
+                "ok": False,
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": str(exc),
+                "error_type": type(exc).__name__,
+                "artifacts": [],
+            }
+
+        skill_result = self._parse_skill_result(raw_result, selected_skill_id)
+        validation = self._validate_skill_result(
+            selected_skill_id=selected_skill_id,
+            skill_result=skill_result,
+            observation=observation,
         )
-        proposal = dict(self._last_action_proposal or {})
-        social = dict(self._last_social_action_proposal or {})
-        if not proposal and social.get("action_type") not in {None, "", "none"}:
-            proposal = social
-        return {
-            "selected_skills": sorted(self._last_selected_skills),
-            "activated_skills": sorted(self._last_activated_skills),
-            "skill_results": results,
-            "action_proposal": proposal,
-            "social_action_proposal": social,
+        skill_result["validation"] = validation
+        environment_effects = await self._apply_skill_result(skill_result, validation)
+        self._last_skill_result = dict(skill_result)
+        self._last_environment_effects = list(environment_effects)
+        self._last_action_proposal = self._legacy_action_from_skill_result(skill_result)
+        entry = {
+            "tick": tick,
+            "time": t.isoformat(),
+            "tool": "execute_skill",
+            "skill_name": selected_skill_id,
+            "decision": dict(decision),
+            "result": raw_result,
+            "skill_result": skill_result,
+            "environment_effects": environment_effects,
         }
+        self._last_skill_results = [entry]
+        self._skill_runtime.append_tool_log(entry)
+
+        public_summary = str(
+            decision.get("public_summary")
+            or skill_result.get("summary")
+            or f"{self.name} used {selected_skill_id}."
+        )
+        return {
+            "ok": bool(raw_result.get("ok")) and not validation.get("errors"),
+            "public_summary": public_summary,
+            "mounted_skill_ids": mounted,
+            "selected_skills": mounted,
+            "activated_skills": sorted(self._last_activated_skills),
+            "last_skill_decision": dict(decision),
+            "last_skill_result": skill_result,
+            "environment_effects": environment_effects,
+            "skill_results": [entry],
+        }
+
+    async def _select_next_skill(
+        self,
+        *,
+        tick: int,
+        t: datetime,
+        observation: Any,
+        catalog: list[dict[str, Any]],
+        mounted_skill_ids: list[str],
+        pending_interventions: list[str],
+        broadcast_result: str,
+    ) -> dict[str, Any]:
+        if not mounted_skill_ids:
+            return self._fallback_skill_decision(
+                mounted_skill_ids=[],
+                observation=observation,
+                pending_interventions=pending_interventions,
+                reason="No mounted skills are available.",
+            )
+        prompt = self._build_skill_selection_prompt(
+            tick=tick,
+            t=t,
+            observation=observation,
+            catalog=catalog,
+            pending_interventions=pending_interventions,
+            broadcast_result=broadcast_result,
+        )
+        try:
+            raw = await self._send_jiuwenclaw_request(prompt)
+            self._last_response = raw
+            self._append_thread_message("user", prompt, tick=tick, t=t)
+            self._append_thread_message("assistant", raw, tick=tick, t=t)
+            decision = self._parse_step_decision(raw)
+            if isinstance(decision, dict) and decision.get("_parsed"):
+                decision.pop("_parsed", None)
+                return decision
+            return self._fallback_skill_decision(
+                mounted_skill_ids=mounted_skill_ids,
+                observation=observation,
+                pending_interventions=pending_interventions,
+                reason="JiuwenClaw returned a non-JSON skill decision.",
+            )
+        except Exception as exc:
+            self._last_response = f"JiuwenClaw skill selection failed: {exc}"
+            return self._fallback_skill_decision(
+                mounted_skill_ids=mounted_skill_ids,
+                observation=observation,
+                pending_interventions=pending_interventions,
+                reason=str(exc),
+            )
+
+    def _build_skill_selection_prompt(
+        self,
+        *,
+        tick: int,
+        t: datetime,
+        observation: Any,
+        catalog: list[dict[str, Any]],
+        pending_interventions: list[str],
+        broadcast_result: str,
+    ) -> str:
+        compact_catalog = [
+            {
+                "name": item.get("name"),
+                "description": item.get("description"),
+                "effects": item.get("effects", []),
+                "args_schema": item.get("args_schema", {}),
+                "trigger_examples": item.get("trigger_examples", []),
+                "shared": item.get("shared", False),
+            }
+            for item in catalog
+        ]
+        return (
+            "You are choosing exactly one executable skill for this AgentSociety simulation agent.\n"
+            f"Agent id: {self.id}\n"
+            f"Agent name: {self.name}\n"
+            f"Profile: {json.dumps(_json_safe(self.get_profile()), ensure_ascii=False)}\n"
+            f"{self._experiment_context_text()}"
+            f"Simulation time: {t.isoformat()}\n"
+            f"Tick seconds: {tick}\n"
+            f"Environment observation JSON:\n{json.dumps(_json_safe(observation), ensure_ascii=False, indent=2)}\n"
+            f"Pending live interventions: {json.dumps(pending_interventions, ensure_ascii=False)}\n"
+            f"Automatic urgent handling result: {broadcast_result}\n"
+            f"Mounted executable skill catalog:\n{json.dumps(compact_catalog, ensure_ascii=False, indent=2)}\n\n"
+            "Choose one skill from the mounted catalog. Return only one JSON object:\n"
+            "{\n"
+            '  "selected_skill_id": "one mounted skill name",\n'
+            '  "args": {"optional": "skill arguments matching args_schema"},\n'
+            '  "reason": "why this skill fits the current state",\n'
+            '  "public_summary": "short public description of what the agent is trying to do"\n'
+            "}\n"
+            "Do not return environment_instruction or action_proposal. The selected skill script will produce effects."
+        )
+
+    def _fallback_skill_decision(
+        self,
+        *,
+        mounted_skill_ids: list[str],
+        observation: Any,
+        pending_interventions: list[str],
+        reason: str,
+    ) -> dict[str, Any]:
+        observation_dict = observation if isinstance(observation, dict) else {}
+        text = " ".join(
+            [
+                str(observation_dict.get("latest_event") or ""),
+                str(observation_dict.get("last_message") or ""),
+                " ".join(pending_interventions),
+                json.dumps(observation_dict.get("recent_messages") or [], ensure_ascii=False),
+            ]
+        ).lower()
+        def available(skill_id: str) -> bool:
+            return skill_id in mounted_skill_ids
+
+        if any(keyword.lower() in text for keyword in URGENT_INTERVENTION_KEYWORDS) and available("safety.respond"):
+            selected = "safety.respond"
+        elif observation_dict.get("recent_messages") and available("social.reply"):
+            selected = "social.reply"
+        elif available("routine.daily"):
+            selected = "routine.daily"
+        elif mounted_skill_ids:
+            selected = mounted_skill_ids[0]
+        else:
+            selected = ""
+        return {
+            "selected_skill_id": selected,
+            "args": {},
+            "reason": f"Fallback skill selection: {reason}",
+            "public_summary": f"{self.name} uses {selected or 'no skill'} for this step.",
+            "fallback": True,
+        }
+
+    def _parse_skill_result(
+        self,
+        raw_result: dict[str, Any],
+        selected_skill_id: str,
+    ) -> dict[str, Any]:
+        stdout = str(raw_result.get("stdout") or "").strip()
+        parsed = self._extract_json_object(stdout) if stdout else None
+        if isinstance(parsed, dict):
+            result = parsed
+        else:
+            result = {
+                "schema_version": SKILL_RESULT_SCHEMA_VERSION,
+                "skill_id": selected_skill_id,
+                "summary": f"{selected_skill_id} did not return valid JSON.",
+                "reason": str(raw_result.get("stderr") or raw_result.get("error_type") or "invalid skill output"),
+                "confidence": 0.0,
+                "world_effect": None,
+                "speech_effect": None,
+                "memory_effects": [],
+            }
+        result.setdefault("schema_version", SKILL_RESULT_SCHEMA_VERSION)
+        result.setdefault("skill_id", selected_skill_id)
+        result.setdefault("memory_effects", [])
+        return result
+
+    def _validate_skill_result(
+        self,
+        *,
+        selected_skill_id: str,
+        skill_result: dict[str, Any],
+        observation: Any,
+    ) -> dict[str, Any]:
+        errors: list[str] = []
+        valid_effects = {"world_effect": False, "speech_effect": False, "memory_effects": True}
+        info = self._skill_registry.get_skill_info(selected_skill_id, load_content=False)
+        allowed = set(info.effects if info is not None else [])
+
+        if skill_result.get("schema_version") != SKILL_RESULT_SCHEMA_VERSION:
+            errors.append("invalid schema_version")
+        if str(skill_result.get("skill_id") or "") != selected_skill_id:
+            errors.append("skill_id does not match selected_skill_id")
+
+        observation_dict = observation if isinstance(observation, dict) else {}
+        known_locations = {
+            str(item.get("id") or "")
+            for item in observation_dict.get("known_locations", []) or []
+            if isinstance(item, dict)
+        }
+        known_interactions = {
+            str(item.get("id") or ""): item
+            for item in observation_dict.get("known_interactions", []) or []
+            if isinstance(item, dict)
+        }
+        current_location = str(observation_dict.get("location_id") or "")
+
+        world = skill_result.get("world_effect")
+        if isinstance(world, dict):
+            effect_type = str(world.get("type") or "")
+            if effect_type not in allowed:
+                errors.append(f"world_effect type '{effect_type}' is not allowed for {selected_skill_id}")
+            elif effect_type == "move":
+                location_id = str(world.get("location_id") or world.get("location") or "")
+                if not location_id or (known_locations and location_id not in known_locations):
+                    errors.append(f"unknown move location_id: {location_id}")
+                else:
+                    valid_effects["world_effect"] = True
+            elif effect_type == "interact":
+                interaction_id = str(world.get("interaction_id") or "")
+                interaction = known_interactions.get(interaction_id)
+                allowed_locations = (
+                    interaction.get("allowed_location_ids")
+                    if isinstance(interaction, dict)
+                    else None
+                )
+                if not interaction:
+                    errors.append(f"unknown interaction_id: {interaction_id}")
+                elif allowed_locations and current_location not in allowed_locations:
+                    errors.append(f"interaction '{interaction_id}' is not available at {current_location}")
+                else:
+                    valid_effects["world_effect"] = True
+            elif effect_type == "set_state":
+                valid_effects["world_effect"] = True
+            else:
+                errors.append(f"unsupported world_effect type: {effect_type}")
+
+        speech = skill_result.get("speech_effect")
+        if isinstance(speech, dict):
+            effect_type = str(speech.get("type") or "")
+            if effect_type not in allowed:
+                errors.append(f"speech_effect type '{effect_type}' is not allowed for {selected_skill_id}")
+            elif effect_type == "direct_message" and self._safe_int(speech.get("receiver_id")) <= 0:
+                errors.append("direct_message requires receiver_id")
+            elif effect_type == "group_message" and self._safe_int(speech.get("group_id")) <= 0:
+                errors.append("group_message requires group_id")
+            elif effect_type in {"direct_message", "group_message"}:
+                valid_effects["speech_effect"] = True
+            else:
+                errors.append(f"unsupported speech_effect type: {effect_type}")
+
+        memories = skill_result.get("memory_effects")
+        if memories is not None and not isinstance(memories, list):
+            errors.append("memory_effects must be a list")
+            valid_effects["memory_effects"] = False
+        if memories and "remember" not in allowed:
+            errors.append(f"memory_effects are not allowed for {selected_skill_id}")
+            valid_effects["memory_effects"] = False
+
+        return {"errors": errors, "valid_effects": valid_effects, "allowed_effects": sorted(allowed)}
+
+    @staticmethod
+    def _safe_int(value: Any, default: int = 0) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    async def _apply_skill_result(
+        self,
+        skill_result: dict[str, Any],
+        validation: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        applied: list[dict[str, Any]] = []
+        valid_effects = validation.get("valid_effects") if isinstance(validation, dict) else {}
+        world = skill_result.get("world_effect")
+        if isinstance(world, dict) and valid_effects.get("world_effect"):
+            result = await self._apply_world_effect(world)
+            applied.append({"effect": "world_effect", "request": world, "result": result})
+        speech = skill_result.get("speech_effect")
+        if isinstance(speech, dict) and valid_effects.get("speech_effect"):
+            result = await self._apply_speech_effect(speech)
+            applied.append({"effect": "speech_effect", "request": speech, "result": result})
+        memories = skill_result.get("memory_effects")
+        if isinstance(memories, list) and valid_effects.get("memory_effects"):
+            result = self._append_memory_effects(memories, skill_result)
+            applied.append({"effect": "memory_effects", "request": memories, "result": result})
+        if validation.get("errors"):
+            applied.append({"effect": "validation", "errors": validation.get("errors")})
+        return applied
+
+    async def _apply_world_effect(self, effect: dict[str, Any]) -> Any:
+        effect_type = str(effect.get("type") or "")
+        proposal: dict[str, Any]
+        if effect_type == "move":
+            proposal = {
+                "action_type": "move",
+                "agent_id": self.id,
+                "location_id": effect.get("location_id") or effect.get("location"),
+                "reason": effect.get("reason"),
+            }
+        elif effect_type == "interact":
+            proposal = {
+                "action_type": "interact",
+                "agent_id": self.id,
+                "interaction_id": effect.get("interaction_id"),
+                "params": effect.get("params") if isinstance(effect.get("params"), dict) else {},
+                "reason": effect.get("reason"),
+            }
+        elif effect_type == "set_state":
+            proposal = {
+                "action_type": "set_action",
+                "agent_id": self.id,
+                "action": effect.get("action") or effect.get("reason") or "continues routine",
+                "status": effect.get("status") or "active",
+                "emotion": effect.get("emotion") or "calm",
+                "reason": effect.get("reason"),
+            }
+        else:
+            return {"ok": False, "error": f"unsupported world effect: {effect_type}"}
+        raw = await self._apply_action_proposal(proposal)
+        try:
+            return json.loads(raw)
+        except Exception:
+            return raw
+
+    async def _apply_speech_effect(self, effect: dict[str, Any]) -> Any:
+        effect_type = str(effect.get("type") or "")
+        if effect_type == "direct_message":
+            proposal = {
+                "action_type": "direct_message",
+                "agent_id": self.id,
+                "receiver_id": effect.get("receiver_id"),
+                "content": effect.get("content"),
+            }
+        elif effect_type == "group_message":
+            proposal = {
+                "action_type": "group_message",
+                "agent_id": self.id,
+                "group_id": effect.get("group_id") or 1,
+                "content": effect.get("content"),
+            }
+        else:
+            return {"ok": False, "error": f"unsupported speech effect: {effect_type}"}
+        raw = await self._apply_action_proposal(proposal)
+        try:
+            return json.loads(raw)
+        except Exception:
+            return raw
+
+    def _append_memory_effects(
+        self,
+        memories: list[dict[str, Any]],
+        skill_result: dict[str, Any],
+    ) -> dict[str, Any]:
+        target = self._runtime_path("memory/skill_memory.jsonl")
+        if target is None:
+            return {"ok": False, "error": "agent workspace is not initialized"}
+        written = 0
+        with target.open("a", encoding="utf-8") as f:
+            for memory in memories:
+                if not isinstance(memory, dict):
+                    continue
+                entry = {
+                    "time": datetime.now(timezone.utc).isoformat(),
+                    "agent_id": self.id,
+                    "skill_id": skill_result.get("skill_id"),
+                    **memory,
+                }
+                f.write(json.dumps(_json_safe(entry), ensure_ascii=False) + "\n")
+                written += 1
+        return {"ok": True, "written": written, "path": str(target)}
+
+    def _legacy_action_from_skill_result(self, skill_result: dict[str, Any]) -> dict[str, Any]:
+        world = skill_result.get("world_effect")
+        if not isinstance(world, dict):
+            return {}
+        effect_type = str(world.get("type") or "")
+        if effect_type == "move":
+            return {
+                "source": skill_result.get("skill_id"),
+                "action_type": "move",
+                "agent_id": self.id,
+                "location_id": world.get("location_id") or world.get("location"),
+                "reason": world.get("reason"),
+            }
+        if effect_type == "interact":
+            return {
+                "source": skill_result.get("skill_id"),
+                "action_type": "interact",
+                "agent_id": self.id,
+                "interaction_id": world.get("interaction_id"),
+                "params": world.get("params") if isinstance(world.get("params"), dict) else {},
+                "reason": world.get("reason"),
+            }
+        if effect_type == "set_state":
+            return {
+                "source": skill_result.get("skill_id"),
+                "action_type": "set_action",
+                "agent_id": self.id,
+                "action": world.get("action"),
+                "status": world.get("status"),
+                "emotion": world.get("emotion"),
+                "reason": world.get("reason"),
+            }
+        return {}
 
     def _action_proposal_from_decision(self, decision: dict[str, Any]) -> dict[str, Any]:
         raw = decision.get("action_proposal")
@@ -664,6 +1143,8 @@ Initialization example:
             "token_usage": {},
             "selected_skills": sorted(self._last_selected_skills),
             "activated_skills": sorted(self._last_activated_skills),
+            "mounted_skill_ids": self._mounted_skill_ids(),
+            "last_skill_decision": dict(self._last_skill_decision),
         }
         snapshot = {
             **state,
@@ -681,6 +1162,16 @@ Initialization example:
             "last_skill_results": list(self._last_skill_results),
             "last_action_proposal": dict(self._last_action_proposal),
             "last_social_action_proposal": dict(self._last_social_action_proposal),
+            "mounted_skill_ids": self._mounted_skill_ids(),
+            "last_skill_decision": dict(self._last_skill_decision),
+            "last_skill_result": dict(self._last_skill_result),
+            "last_environment_effects": list(self._last_environment_effects),
+            "skill_states": {
+                "mounted_skill_ids": self._mounted_skill_ids(),
+                "last_skill_decision": dict(self._last_skill_decision),
+                "last_skill_result": dict(self._last_skill_result),
+                "last_environment_effects": list(self._last_environment_effects),
+            },
             "workspace_files": self._workspace_files(),
         }
         if self._enable_skill_runtime and self._agent_work_dir is not None:
@@ -716,7 +1207,8 @@ Initialization example:
             "enable_memory": self._enable_memory,
             "channel_id": self._channel_id,
             "enable_skill_runtime": self._enable_skill_runtime,
-            "skill_runtime_skill_names": list(self._skill_runtime_skill_names),
+            "common_skill_ids": list(self._common_skill_ids),
+            "skill_ids": list(self._skill_ids),
             "experiment_context": _json_safe(self._experiment_context),
             "last_response": self._last_response,
             "last_environment_result": self._last_environment_result,
@@ -724,6 +1216,9 @@ Initialization example:
             "recent_live_questions": list(self._recent_live_questions),
             "last_action_proposal": dict(self._last_action_proposal),
             "last_social_action_proposal": dict(self._last_social_action_proposal),
+            "last_skill_decision": dict(self._last_skill_decision),
+            "last_skill_result": dict(self._last_skill_result),
+            "last_environment_effects": list(self._last_environment_effects),
         }
 
     async def load(self, dump_data: dict) -> None:
@@ -749,11 +1244,12 @@ Initialization example:
         )
         if "experiment_context" in dump_data:
             self._experiment_context = dump_data["experiment_context"]
-        skill_names = dump_data.get("skill_runtime_skill_names")
-        if isinstance(skill_names, list):
-            self._skill_runtime_skill_names = [
-                str(item) for item in skill_names if str(item).strip()
-            ]
+        common_skill_ids = dump_data.get("common_skill_ids")
+        if isinstance(common_skill_ids, list):
+            self._common_skill_ids = self._normalize_skill_ids(common_skill_ids)
+        skill_ids = dump_data.get("skill_ids")
+        if isinstance(skill_ids, list):
+            self._skill_ids = self._normalize_skill_ids(skill_ids)
         self._last_response = str(dump_data.get("last_response", ""))
         self._last_environment_result = str(
             dump_data.get("last_environment_result", "")
@@ -764,6 +1260,14 @@ Initialization example:
             self._last_social_action_proposal = dict(
                 dump_data["last_social_action_proposal"]
             )
+        if isinstance(dump_data.get("last_skill_decision"), dict):
+            self._last_skill_decision = dict(dump_data["last_skill_decision"])
+        if isinstance(dump_data.get("last_skill_result"), dict):
+            self._last_skill_result = dict(dump_data["last_skill_result"])
+        if isinstance(dump_data.get("last_environment_effects"), list):
+            self._last_environment_effects = [
+                item for item in dump_data["last_environment_effects"] if isinstance(item, dict)
+            ]
         pending_interventions = dump_data.get("pending_interventions")
         if isinstance(pending_interventions, list):
             self._pending_interventions = [
@@ -834,7 +1338,6 @@ Initialization example:
                 "Treat this as grounded executable context. You may override it when clearly wrong, "
                 "but if you agree, keep environment_instruction empty and AgentSociety will execute the proposal directly.\n"
             )
-        daily_life_text = self._build_daily_life_context(t=t)
         return (
             "You are controlling one AgentSociety simulation agent for exactly one step.\n"
             f"Agent id: {self.id}\n"
@@ -847,7 +1350,6 @@ Initialization example:
             f"{intervention_text}\n\n"
             f"{broadcast_text}"
             f"{skill_runtime_text}"
-            f"{daily_life_text}"
             "If the observation includes recent messages or latest_event about an emergency, "
             "treat that as live information and adapt your action immediately.\n\n"
             "Return only one JSON object with this exact shape:\n"
@@ -858,80 +1360,6 @@ Initialization example:
             "}\n"
             "Omit action_proposal when you want AgentSociety to use the executable skill proposal above.\n"
             "Do not wrap the JSON in markdown."
-        )
-
-    def _load_daily_life_skill_text(self, daily_life_skill_path: str | None) -> str:
-        if daily_life_skill_path:
-            path = Path(daily_life_skill_path).expanduser()
-            if not path.is_absolute():
-                path = (Path(_workspace_root_from_file()) / path).resolve()
-        else:
-            path = (
-                Path(_workspace_root_from_file())
-                / "custom"
-                / "skills"
-                / "daily_life"
-                / "SKILL.md"
-            )
-        try:
-            return path.read_text(encoding="utf-8")[:8000]
-        except OSError:
-            return ""
-
-    def _build_daily_life_context(self, t: datetime) -> str:
-        if not self._enable_daily_life:
-            return ""
-        profile = self.get_profile()
-        role_text = ""
-        if isinstance(profile, dict):
-            role_text = " ".join(
-                str(profile.get(key, ""))
-                for key in ("role", "occupation", "persona", "goal")
-            ).lower()
-        hour = t.hour + t.minute / 60
-        if 5.5 <= hour < 8.5:
-            time_hint = "morning routine: wake up, breakfast, prepare, commute"
-        elif 8.5 <= hour < 11.5:
-            time_hint = "morning duty: work, school, patrol, care, or role-specific task"
-        elif 11.5 <= hour < 13.5:
-            time_hint = "midday routine: lunch, brief social contact, light errands"
-        elif 13.5 <= hour < 17.5:
-            time_hint = "afternoon duty: continue work, class, errands, or goal task"
-        elif 17.5 <= hour < 20.5:
-            time_hint = "evening routine: dinner, friends, family, park, cafe, or home"
-        elif 20.5 <= hour < 23.5:
-            time_hint = "night routine: go home, rest, reflect, light conversation"
-        else:
-            time_hint = "late night routine: sleep unless the role requires night duty"
-
-        if any(word in role_text for word in ("学生", "student")):
-            role_hint = "Prefer school interactions such as attend_class or study_after_class during school hours."
-        elif any(word in role_text for word in ("老师", "教师", "teacher")):
-            role_hint = "Prefer school interactions such as teach_class or study_after_class during school hours."
-        elif any(word in role_text for word in ("医生", "护士", "doctor", "nurse")):
-            role_hint = "Prefer pharmacy interactions such as pharmacy_consultation or buy_medicine during work hours."
-        elif any(word in role_text for word in ("狱警", "警卫", "guard", "police")):
-            role_hint = "The original The Ville map has no prison; prefer public-safety patrol at park, supply_store, or market."
-        elif any(word in role_text for word in ("囚犯", "犯人", "inmate", "prisoner")):
-            role_hint = "The original The Ville map has no prison; use ordinary resident routines at home, park, cafe, or dorm."
-        elif any(word in role_text for word in ("店员", "商贩", "shop", "vendor")):
-            role_hint = "Prefer market interactions such as work_shop_shift or buy_food during work hours."
-        else:
-            role_hint = "Prefer ordinary resident routines: home, market, park, cafe, and goal-related public scenes."
-
-        skill_excerpt = (
-            f"\nDaily-life skill excerpt:\n{self._daily_life_skill_text}\n"
-            if self._daily_life_skill_text
-            else ""
-        )
-        return (
-            "\n\nDaily-life decision layer:\n"
-            f"- Time routine hint: {time_hint}\n"
-            f"- Role routine hint: {role_hint}\n"
-            "- Use only locations and interactions visible in the observation/map.\n"
-            "- Choose one meaningful action for this tick: move, interact, send a message, rest, or continue the current activity.\n"
-            "- Do not only pursue the long-term goal when the time and role imply eating, sleeping, work, school, or social contact.\n"
-            f"{skill_excerpt}\n"
         )
 
     async def _send_jiuwenclaw_request(self, prompt: str) -> str:

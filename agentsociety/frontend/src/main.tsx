@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next'
 import PixelReplay from './pages/PixelReplay'
 import AgentBuilder from './pages/AgentBuilder'
 import SetupPage from './pages/Setup'
+import SkillsPage from './pages/Skills'
 
 const router = createBrowserRouter([
     {
@@ -30,6 +31,10 @@ const router = createBrowserRouter([
     {
         path: "/setup",
         element: <SetupPage />,
+    },
+    {
+        path: "/skills",
+        element: <SkillsPage />,
     },
     {
         path: "*",

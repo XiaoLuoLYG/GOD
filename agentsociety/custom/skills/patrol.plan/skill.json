@@ -1,0 +1,37 @@
+{
+  "skill_id": "patrol.plan",
+  "name": "Patrol Plan",
+  "description": "Plan a practical patrol route through town.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "park",
+    "market",
+    "supply_store"
+  ],
+  "target_interactions": [
+    "take_walk",
+    "coordinate_group",
+    "inspect_supplies"
+  ],
+  "status": "planning_patrol",
+  "emotion": "alert",
+  "speech": "我先规划一条能覆盖重点地点的路线。",
+  "memory_template": "Used patrol.plan: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use patrol.plan in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

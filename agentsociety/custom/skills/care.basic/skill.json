@@ -1,0 +1,35 @@
+{
+  "skill_id": "care.basic",
+  "name": "Care Basic",
+  "description": "Offer basic care check-ins for neighbors.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "pharmacy",
+    "home"
+  ],
+  "target_interactions": [
+    "blood_pressure_check",
+    "home_visit_prep"
+  ],
+  "status": "caring",
+  "emotion": "attentive",
+  "speech": "我先确认身体状况，再提醒对方下一步怎么照顾自己。",
+  "memory_template": "Used care.basic: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use care.basic in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

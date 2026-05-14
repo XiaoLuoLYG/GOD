@@ -1,0 +1,35 @@
+{
+  "skill_id": "roster.verify",
+  "name": "Roster Verify",
+  "description": "Verify names, attendance, or responsibility lists.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "school",
+    "library"
+  ],
+  "target_interactions": [
+    "school_meeting",
+    "quiet_work"
+  ],
+  "status": "verifying_roster",
+  "emotion": "precise",
+  "speech": "我先核对名单，避免漏掉关键的人。",
+  "memory_template": "Used roster.verify: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use roster.verify in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

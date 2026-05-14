@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
     Button, message, Modal, Space, Switch, Tag, Popconfirm,
-    Form, Input, Upload, Typography,
+    Form, Input, Upload, Typography, Select,
 } from "antd";
 import { ProTable, ProColumns } from "@ant-design/pro-components";
 import { ActionType } from "@ant-design/pro-table";
@@ -24,6 +24,11 @@ interface SkillItem {
     has_skill_md: boolean;
     script: string;
     requires: string[];
+    effects: string[];
+    args_schema: Record<string, unknown>;
+    trigger_examples: string[];
+    shared: boolean;
+    validation_status: string;
 }
 
 const SkillsPage = () => {
@@ -155,6 +160,8 @@ const SkillsPage = () => {
                 description: values.description || "",
                 requires: values.requires ? values.requires.split(",").map((s: string) => s.trim()).filter(Boolean) : [],
                 script: values.script || "",
+                effects: Array.isArray(values.effects) ? values.effects : [],
+                shared: Boolean(values.shared),
                 body: values.body || "",
                 script_content: values.script_content || "",
             };
@@ -211,11 +218,17 @@ const SkillsPage = () => {
         return "orange";
     };
 
+    const validationColor = (status: string) => {
+        if (status === "ready") return "green";
+        if (status === "disabled") return "default";
+        return "red";
+    };
+
     const columns: ProColumns<SkillItem>[] = [
         {
             title: t("skill.columns.name"),
             dataIndex: "name",
-            width: 140,
+            width: 160,
             render: (_, record) => <Text strong>{record.name}</Text>,
         },
         {
@@ -238,9 +251,44 @@ const SkillsPage = () => {
             onFilter: (value, record) => record.source === value || record.source.startsWith(value as string),
         },
         {
+            title: t("skill.columns.effects"),
+            dataIndex: "effects",
+            width: 220,
+            render: (_, record) => (
+                <Space size={[0, 4]} wrap>
+                    {(record.effects || []).map((effect) => <Tag key={effect}>{effect}</Tag>)}
+                </Space>
+            ),
+        },
+        {
+            title: t("skill.columns.shared"),
+            dataIndex: "shared",
+            width: 90,
+            render: (_, record) => (
+                <Tag color={record.shared ? "cyan" : "default"}>
+                    {record.shared ? t("skill.shared.common") : t("skill.shared.personal")}
+                </Tag>
+            ),
+            filters: [
+                { text: t("skill.shared.common"), value: true },
+                { text: t("skill.shared.personal"), value: false },
+            ],
+            onFilter: (value, record) => record.shared === value,
+        },
+        {
+            title: t("skill.columns.validation"),
+            dataIndex: "validation_status",
+            width: 130,
+            render: (_, record) => (
+                <Tag color={validationColor(record.validation_status)}>
+                    {record.validation_status || "unknown"}
+                </Tag>
+            ),
+        },
+        {
             title: t("skill.columns.script"),
             dataIndex: "script",
-            width: 120,
+            width: 150,
             render: (_, record) => (
                 record.script
                     ? <Tag color="purple">{record.script}</Tag>
@@ -321,7 +369,7 @@ const SkillsPage = () => {
                 onCancel={() => setCreateOpen(false)}
                 onOk={handleCreate}
                 width={720}
-                destroyOnClose
+                destroyOnHidden
             >
                 <Form form={createForm} layout="vertical" preserve={false}>
                     <Form.Item
@@ -336,6 +384,23 @@ const SkillsPage = () => {
                     </Form.Item>
                     <Form.Item name="requires" label={t("skill.create.requires")}>
                         <Input placeholder={t("skill.create.requiresPlaceholder")} />
+                    </Form.Item>
+                    <Form.Item name="effects" label={t("skill.create.effects")} initialValue={["set_state", "remember"]}>
+                        <Select
+                            mode="tags"
+                            placeholder={t("skill.create.effectsPlaceholder")}
+                            options={[
+                                { value: "move", label: "move" },
+                                { value: "interact", label: "interact" },
+                                { value: "set_state", label: "set_state" },
+                                { value: "direct_message", label: "direct_message" },
+                                { value: "group_message", label: "group_message" },
+                                { value: "remember", label: "remember" },
+                            ]}
+                        />
+                    </Form.Item>
+                    <Form.Item name="shared" label={t("skill.create.shared")} valuePropName="checked" initialValue={false}>
+                        <Switch />
                     </Form.Item>
                     <Form.Item name="script" label={t("skill.create.script")}>
                         <Input placeholder={t("skill.create.scriptPlaceholder")} />

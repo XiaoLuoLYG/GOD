@@ -1,0 +1,24 @@
+{
+  "skill_id": "memory.record",
+  "name": "Memory Record",
+  "description": "Write relevant step context into agent memory without moving or speaking by default.",
+  "shared": true,
+  "effects": [
+    "remember"
+  ],
+  "target_locations": [],
+  "target_interactions": [],
+  "status": "reflecting",
+  "emotion": "calm",
+  "speech": "",
+  "memory_template": "Recorded context at {location_id}: {content}",
+  "failure_strategy": "memory_only",
+  "strategy": "memory_only",
+  "trigger_examples": [
+    "a meaningful event should be preserved for future decisions"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

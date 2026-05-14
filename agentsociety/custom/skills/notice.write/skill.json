@@ -1,0 +1,35 @@
+{
+  "skill_id": "notice.write",
+  "name": "Notice Write",
+  "description": "Write a clear public notice or local announcement.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "library",
+    "park"
+  ],
+  "target_interactions": [
+    "quiet_work",
+    "public_announcement"
+  ],
+  "status": "writing_notice",
+  "emotion": "focused",
+  "speech": "我把公告写得短一点、清楚一点。",
+  "memory_template": "Used notice.write: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use notice.write in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

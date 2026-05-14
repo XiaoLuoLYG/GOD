@@ -1,0 +1,35 @@
+{
+  "skill_id": "class.organize",
+  "name": "Class Organize",
+  "description": "Organize class materials, meetings, and student follow-up.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "school",
+    "library"
+  ],
+  "target_interactions": [
+    "prepare_lesson",
+    "school_meeting"
+  ],
+  "status": "organizing_class",
+  "emotion": "focused",
+  "speech": "我把课程安排和需要提醒的学生整理一下。",
+  "memory_template": "Used class.organize: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use class.organize in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

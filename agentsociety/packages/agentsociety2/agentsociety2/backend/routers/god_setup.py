@@ -54,6 +54,67 @@ DEFAULT_DRAFT_BACKGROUND = (
     "普通参与者等角色，重点观察权力、规则、协作和情绪变化，不允许羞辱、伤害或强迫行为。"
 )
 
+COMMON_SKILL_IDS = [
+    "routine.daily",
+    "social.reply",
+    "memory.record",
+    "map.navigate",
+    "safety.respond",
+]
+
+PERSONA_SKILL_IDS = [
+    "community.coordinate",
+    "conflict.mediate",
+    "first_aid.basic",
+    "notice.write",
+    "messaging.group",
+    "tools.repair",
+    "inventory.count",
+    "route.localmap",
+    "ledger.basic",
+    "neighbor.support",
+    "class.organize",
+    "youth.communicate",
+    "writing.feedback",
+    "history.localtelling",
+    "library.curate",
+    "care.basic",
+    "chronic.followup",
+    "emotion.calm",
+    "health.educate",
+    "record.shortnote",
+    "cooking.lightmeal",
+    "listen.relay",
+    "shop.run",
+    "social.matchmake",
+    "community.observe",
+    "class.learn",
+    "sketch.draw",
+    "phone.photolog",
+    "computer.basic",
+    "peer.communicate",
+    "route.recall",
+    "garden.basic",
+    "story.localpast",
+    "writing.hand",
+    "neighbor.greet",
+    "computer.repair",
+    "script.automate",
+    "info.research",
+    "remote.communicate",
+    "privacy.protect",
+    "patrol.plan",
+    "roster.verify",
+    "repair.basic",
+    "crowd.guide",
+    "radio.comms",
+    "vegetable.source",
+    "stall.run",
+    "price.negotiate",
+    "ingredient.advise",
+    "gossip.filter",
+]
+
 
 class ModelConfigPayload(BaseModel):
     GOD_LLM_API_KEY: str | None = None
@@ -297,35 +358,30 @@ def _scenario_templates(background: str, language: str) -> list[dict[str, Any]]:
                 "role": "规则协调员" if zh else "rules coordinator",
                 "scene_role": "coordinator",
                 "location": "school",
-                "skills": ["流程说明", "边界确认", "冲突降温", "记录共识", "公开沟通"] if zh else ["process briefing", "boundary setting", "de-escalation", "consensus notes", "public communication"],
                 "persona": "克制、重视程序，习惯把权力关系翻译成可讨论的规则。" if zh else "measured and process-minded, translates authority tension into discussable rules.",
             },
             {
                 "role": "权益观察员" if zh else "welfare observer",
                 "scene_role": "observer",
                 "location": "cafe",
-                "skills": ["情绪观察", "隐性压力识别", "私下询问", "风险记录", "同伴支持"] if zh else ["emotion observation", "pressure detection", "private check-ins", "risk notes", "peer support"],
                 "persona": "敏感但不夸张，能看见沉默成员的压力变化。" if zh else "sensitive without overreacting, notices pressure in quieter participants.",
             },
             {
                 "role": "生活组长" if zh else "daily-life lead",
                 "scene_role": "participant",
                 "location": "market",
-                "skills": ["资源分配", "排班协调", "日常采购", "简短协商", "秩序维护"] if zh else ["resource allocation", "shift coordination", "daily supplies", "brief negotiation", "order keeping"],
                 "persona": "务实、讲效率，但在紧张时会不自觉变得强势。" if zh else "practical and efficient, can become too forceful under tension.",
             },
             {
                 "role": "普通参与者" if zh else "ordinary participant",
                 "scene_role": "participant",
                 "location": "park",
-                "skills": ["自我表达", "观察规则变化", "寻求帮助", "同伴沟通", "保持边界"] if zh else ["self-expression", "rule-change awareness", "help seeking", "peer communication", "boundary keeping"],
                 "persona": "起初配合，遇到不公平规则时会犹豫是否提出异议。" if zh else "initially cooperative, hesitates before challenging unfair rules.",
             },
             {
                 "role": "安全记录员" if zh else "safety recorder",
                 "scene_role": "observer",
                 "location": "library",
-                "skills": ["事件记录", "中立复述", "提醒暂停", "资料整理", "风险标注"] if zh else ["event logging", "neutral summaries", "pause reminders", "document sorting", "risk marking"],
                 "persona": "安静、准确，优先保护实验边界和参与者尊严。" if zh else "quiet and precise, prioritizes boundaries and participant dignity.",
             },
         ]
@@ -335,28 +391,24 @@ def _scenario_templates(background: str, language: str) -> list[dict[str, Any]]:
                 "role": "班级协调老师" if zh else "class coordinator",
                 "scene_role": "teacher",
                 "location": "school",
-                "skills": ["课堂节奏控制", "学生情绪观察", "公开提问引导", "课后反馈整理", "家校沟通"] if zh else ["class pacing", "student mood reading", "public questioning", "after-class feedback", "family communication"],
                 "persona": "温和但有原则，习惯用具体例子把抽象冲突拉回课堂日常。" if zh else "warm but principled, grounds abstract conflict in classroom routine.",
             },
             {
                 "role": "学生代表" if zh else "student representative",
                 "scene_role": "student",
                 "location": "school",
-                "skills": ["同伴转述", "学习计划协调", "压力表达", "小组分工", "求助判断"] if zh else ["peer relay", "study-plan coordination", "pressure articulation", "group assignment", "help-seeking judgment"],
                 "persona": "反应快、在意公平，愿意替同伴开口但不喜欢被推到台前太久。" if zh else "quick and fairness-minded, speaks for peers but dislikes staying in the spotlight too long.",
             },
             {
                 "role": "图书馆志愿者" if zh else "library volunteer",
                 "scene_role": "observer",
                 "location": "library",
-                "skills": ["资料检索", "安静提醒", "借阅记录", "冲突旁观记录", "学习空间维护"] if zh else ["reference lookup", "quiet reminders", "loan records", "conflict notes", "study-space care"],
                 "persona": "细心、怕打扰别人，会用低声提醒和记录来维护秩序。" if zh else "careful and disruption-averse, maintains order through quiet reminders and notes.",
             },
             {
                 "role": "家长联络人" if zh else "family liaison",
                 "scene_role": "resident",
                 "location": "cafe",
-                "skills": ["信息转达", "非正式谈话", "担忧识别", "时间协调", "社区资源连接"] if zh else ["information relay", "informal conversation", "concern spotting", "time coordination", "resource linking"],
                 "persona": "熟人多、说话圆融，常把校园问题带到咖啡馆的轻松谈话里消化。" if zh else "well-connected and tactful, processes school concerns through relaxed cafe conversations.",
             },
         ]
@@ -365,70 +417,60 @@ def _scenario_templates(background: str, language: str) -> list[dict[str, Any]]:
             "role": "社区协调员" if zh else "neighborhood coordinator",
             "scene_role": "coordinator",
             "location": "park",
-            "skills": ["晨间巡访", "邻里介绍", "公共公告整理", "临时调解", "活动排程"] if zh else ["morning check-ins", "neighbor introductions", "notice-board upkeep", "light mediation", "event scheduling"],
             "persona": "外向、记得住别人的小习惯，喜欢先把冲突变成可安排的小任务。" if zh else "outgoing and detail-minded, turns friction into schedulable small tasks.",
         },
         {
             "role": "市场店主" if zh else "market shop owner",
             "scene_role": "shop_worker",
             "location": "market",
-            "skills": ["库存盘点", "采购优先级判断", "熟客需求记忆", "摊位动线安排", "价格解释"] if zh else ["inventory checks", "purchase prioritization", "regular-customer memory", "stall flow planning", "price explanation"],
             "persona": "务实、嘴上爽快但心里会照顾熟客，常通过采购清单判断小镇当天的情绪。" if zh else "practical and brisk, reads the town's mood through supply lists and regular customers.",
         },
         {
             "role": "中学老师" if zh else "teacher",
             "scene_role": "teacher",
             "location": "school",
-            "skills": ["课堂引导", "个别谈话", "作业反馈", "迟到原因判断", "家校信息同步"] if zh else ["lesson guidance", "one-on-one talks", "homework feedback", "lateness diagnosis", "family-school updates"],
             "persona": "耐心但时间紧，常在备课和照顾学生情绪之间切换。" if zh else "patient but time-pressed, switches between lesson prep and emotional care.",
         },
         {
             "role": "药房护理员" if zh else "pharmacy care worker",
             "scene_role": "care_worker",
             "location": "pharmacy",
-            "skills": ["用药提醒", "排队秩序维护", "健康担忧倾听", "物资短缺上报", "隐私边界确认"] if zh else ["medication reminders", "queue care", "health-concern listening", "shortage reporting", "privacy boundaries"],
             "persona": "说话轻、观察细，会把紧张的人先安顿下来再处理事务。" if zh else "soft-spoken and observant, settles anxious residents before handling tasks.",
         },
         {
             "role": "咖啡馆老板" if zh else "cafe owner",
             "scene_role": "resident",
             "location": "cafe",
-            "skills": ["晨间备餐", "闲聊破冰", "座位协调", "小道消息筛选", "情绪缓冲"] if zh else ["morning prep", "small-talk icebreaking", "seat coordination", "rumor filtering", "mood buffering"],
             "persona": "热情但不八卦，擅长让陌生人在点单和等咖啡之间自然开口。" if zh else "warm without gossiping, helps strangers talk while ordering and waiting.",
         },
         {
             "role": "高中学生" if zh else "student",
             "scene_role": "student",
             "location": "school",
-            "skills": ["同伴观察", "作业安排", "社交试探", "公交时间规划", "压力表达"] if zh else ["peer observation", "homework planning", "social probing", "bus-time planning", "pressure expression"],
             "persona": "好奇、略紧张，既想参与社区事务又怕被成年人当成小孩。" if zh else "curious and slightly nervous, wants to help without being treated like a child.",
         },
         {
             "role": "退休居民" if zh else "retired resident",
             "scene_role": "resident",
             "location": "park",
-            "skills": ["散步社交", "往事参照", "邻里提醒", "节奏放慢", "冲突旁观劝解"] if zh else ["walk-and-talk socializing", "memory references", "neighbor reminders", "pace slowing", "bystander calming"],
             "persona": "慢热、记忆力好，常用以前的小镇故事提醒别人别把问题放大。" if zh else "slow to warm but sharp, uses old town stories to deflate tension.",
         },
         {
             "role": "远程工程师" if zh else "remote engineer",
             "scene_role": "resident",
             "location": "home",
-            "skills": ["异步沟通", "设备排查", "番茄钟工作", "线上会议协调", "邻里技术帮忙"] if zh else ["async communication", "device troubleshooting", "focus blocks", "meeting coordination", "neighbor tech help"],
             "persona": "内向但可靠，常在工作间隙被邻居请去解决小技术问题。" if zh else "introverted but reliable, often solves small tech problems between work blocks.",
         },
         {
             "role": "公共安全志愿者" if zh else "public safety volunteer",
             "scene_role": "observer",
             "location": "supply_store",
-            "skills": ["巡逻路线规划", "物资检查", "异常记录", "礼貌提醒", "应急联络"] if zh else ["patrol routing", "supply checks", "incident notes", "polite reminders", "emergency contact"],
             "persona": "谨慎、避免夸张警报，喜欢用清单而不是权威压人。" if zh else "careful and anti-alarmist, prefers checklists over authority displays.",
         },
         {
             "role": "蔬果摊主" if zh else "produce vendor",
             "scene_role": "shop_worker",
             "location": "market",
-            "skills": ["新鲜度判断", "顾客偏好记忆", "摊位补货", "邻摊协作", "天气影响预估"] if zh else ["freshness judgment", "customer preference memory", "stall restocking", "vendor cooperation", "weather impact estimates"],
             "persona": "爽朗、会算账，也会从顾客买什么看出谁家今天可能需要帮忙。" if zh else "cheerful and numbers-savvy, infers who may need help from what customers buy.",
         },
     ]
@@ -498,9 +540,7 @@ def _default_agent(
     role = str(template.get("role") or ("participant" if agent_id > 1 else "coordinator"))
     scenario_role = str(template.get("scene_role") or role)
     profile_text = _generic_profile_text(role, background, basics.language)
-    skills = template.get("skills")
-    if not isinstance(skills, list) or not skills:
-        skills = ["观察沟通", "日程安排", "边界维护", "场景适应", "简短记录"] if _language_is_zh(basics.language) else ["observation", "routine planning", "boundary keeping", "scene adaptation", "brief notes"]
+    skill_ids = _default_skill_ids(agent_id)
     location = str(template.get("location") or "")
     if location not in known_locations:
         location = _fallback_location(agent_id - 1, known_locations)
@@ -510,7 +550,6 @@ def _default_agent(
         "role": role,
         "household": profile_text["household"],
         "persona": str(template.get("persona") or ("观察细致、反应自然，会把实验压力融入普通生活互动。" if _language_is_zh(basics.language) else "observant and natural, folds scenario pressure into ordinary town interactions.")),
-        "skills": skills,
         "daily_routine": profile_text["daily_routine"],
         "relationships": profile_text["relationships"],
         "goal": profile_text["goal"],
@@ -530,14 +569,38 @@ def _default_agent(
             "mode": "agent.plan",
             "trusted_dirs": [],
             "enable_memory": True,
-            "enable_daily_life": True,
             "enable_skill_runtime": True,
+            "common_skill_ids": list(COMMON_SKILL_IDS),
+            "skill_ids": skill_ids,
             "request_timeout": 900,
             "channel_id": "agentsociety",
             "experiment_context": _default_context(title, background),
         },
         "_initial_location": location,
     }
+
+
+def _default_skill_ids(agent_id: int, count: int = 5) -> list[str]:
+    start = ((agent_id - 1) * count) % len(PERSONA_SKILL_IDS)
+    rotated = PERSONA_SKILL_IDS[start:] + PERSONA_SKILL_IDS[:start]
+    return rotated[:count]
+
+
+def _normalize_skill_ids_from_profile(raw: Any, fallback: Any) -> list[str]:
+    candidates: list[str] = []
+    if isinstance(raw, list):
+        candidates.extend(str(item).strip() for item in raw if str(item).strip())
+    if not candidates and isinstance(fallback, list):
+        candidates.extend(str(item).strip() for item in fallback if str(item).strip())
+    known = set(PERSONA_SKILL_IDS)
+    normalized = [item for item in candidates if item in known]
+    if normalized:
+        return normalized[:5]
+    if isinstance(fallback, list):
+        fallback_ids = [str(item).strip() for item in fallback if str(item).strip() in known]
+        if fallback_ids:
+            return fallback_ids[:5]
+    return list(PERSONA_SKILL_IDS[:5])
 
 
 def _normalize_draft(raw: dict[str, Any], basics: DraftBasics) -> dict[str, Any]:
@@ -577,6 +640,7 @@ def _normalize_draft(raw: dict[str, Any], basics: DraftBasics) -> dict[str, Any]
         default_profile = default_kwargs["profile"]
         raw_name = str(kwargs.get("name") or profile.get("name") or default_profile["name"])
         name = default_profile["name"] if _is_generic_agent_name(raw_name, merged["agent_id"]) else raw_name
+        source_profile_skills = profile.get("skills")
         profile = {
             **default_profile,
             **profile,
@@ -588,14 +652,22 @@ def _normalize_draft(raw: dict[str, Any], basics: DraftBasics) -> dict[str, Any]
             "scenario": str(profile.get("scenario") or context.get("background") or "")[:1200],
             "scenario_role": str(profile.get("scenario_role") or profile.get("role") or "participant"),
         }
+        profile.pop("skills", None)
+        raw_skill_ids = _normalize_skill_ids_from_profile(
+            kwargs.get("skill_ids") if isinstance(kwargs.get("skill_ids"), list) else source_profile_skills,
+            default_kwargs.get("skill_ids", []),
+        )
         kwargs = {
             **default_kwargs,
             **kwargs,
             "id": merged["agent_id"],
             "name": name,
             "profile": profile,
+            "common_skill_ids": list(COMMON_SKILL_IDS),
+            "skill_ids": raw_skill_ids,
             "experiment_context": context,
         }
+        kwargs.pop("skill_runtime_skill_names", None)
         merged["kwargs"] = kwargs
         normalized_agents.append(merged)
 
@@ -739,13 +811,14 @@ async def _call_openai_compatible(
                             "role": "string",
                             "household": "string",
                             "persona": "string",
-                            "skills": ["string"],
                             "daily_routine": "string",
                             "relationships": "string",
                             "goal": "string",
                             "constraints": "string",
                             "scenario_role": "string",
                         },
+                        "common_skill_ids": COMMON_SKILL_IDS,
+                        "skill_ids": PERSONA_SKILL_IDS[:5],
                     },
                 }
             ],
@@ -776,10 +849,12 @@ async def _call_openai_compatible(
         f"Available The Ville locations and interactions:\n{_map_location_prompt()}\n\n"
         "Agent profile requirements:\n"
         f"- Return exactly {basics.agent_count} agents.\n"
-        "- Every agent must have a realistic human name; do not use Agent 1, Jiuwen Agent 1, Participant 1, or numbered placeholders.\n"
-        "- Each profile must be scenario-specific: role, household, persona, skills, daily_routine, relationships, goal, constraints, and scenario_role.\n"
+        "- Every agent must have a realistic English human name; do not use Agent 1, Jiuwen Agent 1, Participant 1, or numbered placeholders. Can use Jiuwen as a prefix, e.g. Jiuwen Alice, Jiuwen Bob, etc.\n"
+        "- Each profile must be scenario-specific: role, household, persona, daily_routine, relationships, goal, constraints, and scenario_role.\n"
         "- Relationships should reference other generated agent names or roles so the town has social texture.\n"
-        "- Skills are profile capabilities, not executable tools; make them concrete and role-specific.\n"
+        "- Do not put skills inside profile. Skills are executable runtime ids on kwargs.common_skill_ids and kwargs.skill_ids.\n"
+        f"- common_skill_ids must be exactly: {json.dumps(COMMON_SKILL_IDS, ensure_ascii=False)}.\n"
+        f"- skill_ids must contain 3-5 ids chosen only from this executable catalog: {json.dumps(PERSONA_SKILL_IDS, ensure_ascii=False)}.\n"
         "- Initial locations must use valid location ids from the list above and should match each role's routine.\n"
         "- Keep behavior safe and bounded; transform risky settings into observation, consent, rules, welfare, and communication dynamics.\n\n"
         f"Required JSON shape:\n{json.dumps(schema, ensure_ascii=False)}"

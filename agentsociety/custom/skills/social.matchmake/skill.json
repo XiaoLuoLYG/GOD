@@ -1,0 +1,35 @@
+{
+  "skill_id": "social.matchmake",
+  "name": "Social Matchmake",
+  "description": "Connect two people who may help each other.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "cafe",
+    "park"
+  ],
+  "target_interactions": [
+    "casual_meetup",
+    "meet_friend"
+  ],
+  "status": "matching_people",
+  "emotion": "warm",
+  "speech": "我想把合适的人介绍到一起聊聊。",
+  "memory_template": "Used social.matchmake: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use social.matchmake in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

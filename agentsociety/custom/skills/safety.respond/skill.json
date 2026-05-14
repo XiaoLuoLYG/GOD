@@ -1,0 +1,38 @@
+{
+  "skill_id": "safety.respond",
+  "name": "Safety Respond",
+  "description": "Respond to urgent or risky events with safety movement, announcement, and memory.",
+  "shared": true,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "supply_store",
+    "park",
+    "pharmacy",
+    "home"
+  ],
+  "target_interactions": [
+    "prepare_kit",
+    "public_announcement",
+    "pharmacy_consultation",
+    "relax_at_home"
+  ],
+  "status": "alert",
+  "emotion": "focused",
+  "speech": "请大家确认安全，必要时前往安全地点，并同步身边需要帮助的人。",
+  "memory_template": "Safety response recorded: {content}",
+  "failure_strategy": "set_state",
+  "strategy": "safety_response",
+  "trigger_examples": [
+    "fire, earthquake, emergency, evacuation, urgent warning, or safety intervention is present"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "skill_id": "youth.communicate",
+  "name": "Youth Communicate",
+  "description": "Communicate with youth in a patient supportive way.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "school",
+    "park"
+  ],
+  "target_interactions": [
+    "hold_office_hours",
+    "meet_friend"
+  ],
+  "status": "youth_support",
+  "emotion": "patient",
+  "speech": "我用年轻人听得进去的方式聊。",
+  "memory_template": "Used youth.communicate: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use youth.communicate in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

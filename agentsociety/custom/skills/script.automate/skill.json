@@ -1,0 +1,35 @@
+{
+  "skill_id": "script.automate",
+  "name": "Script Automate",
+  "description": "Automate a small repetitive computer task.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "home",
+    "library"
+  ],
+  "target_interactions": [
+    "work_from_home",
+    "quiet_work"
+  ],
+  "status": "automating",
+  "emotion": "focused",
+  "speech": "我写个小脚本把重复步骤省下来。",
+  "memory_template": "Used script.automate: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use script.automate in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

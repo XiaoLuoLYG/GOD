@@ -1,0 +1,35 @@
+{
+  "skill_id": "crowd.guide",
+  "name": "Crowd Guide",
+  "description": "Guide a group toward an orderly shared action.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "park",
+    "supply_store"
+  ],
+  "target_interactions": [
+    "coordinate_group",
+    "public_announcement"
+  ],
+  "status": "guiding_crowd",
+  "emotion": "steady",
+  "speech": "大家先别急，我来把方向和顺序说清楚。",
+  "memory_template": "Used crowd.guide: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use crowd.guide in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

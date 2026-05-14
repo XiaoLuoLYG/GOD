@@ -1,0 +1,35 @@
+{
+  "skill_id": "first_aid.basic",
+  "name": "First Aid Basic",
+  "description": "Prepare basic first-aid support and immediate care.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "pharmacy",
+    "supply_store"
+  ],
+  "target_interactions": [
+    "pharmacy_consultation",
+    "prepare_kit"
+  ],
+  "status": "first_aid_ready",
+  "emotion": "alert",
+  "speech": "我会先看是否需要药品、包扎或进一步求助。",
+  "memory_template": "Used first_aid.basic: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use first_aid.basic in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "skill_id": "stall.run",
+  "name": "Stall Run",
+  "description": "Run a market stall and handle daily stall tasks.",
+  "shared": false,
+  "effects": [
+    "move",
+    "interact",
+    "set_state",
+    "direct_message",
+    "group_message",
+    "remember"
+  ],
+  "target_locations": [
+    "market"
+  ],
+  "target_interactions": [
+    "work_shop_shift",
+    "restock_vegetables"
+  ],
+  "status": "stall_working",
+  "emotion": "focused",
+  "speech": "我先把摊位收拾好，再接待顾客。",
+  "memory_template": "Used stall.run: {summary} at {location_id}.",
+  "failure_strategy": "set_state",
+  "strategy": "configured_action",
+  "trigger_examples": [
+    "the agent needs to use stall.run in a grounded town situation"
+  ],
+  "args_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

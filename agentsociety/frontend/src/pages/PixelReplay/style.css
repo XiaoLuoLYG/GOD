@@ -21,15 +21,17 @@
     position: relative;
     grid-column: 1;
     grid-row: 1;
+    z-index: 7;
     min-width: 0;
     min-height: 0;
-    overflow: hidden;
+    overflow: visible;
     border-radius: 8px;
     background: #111827;
     box-shadow: 0 14px 36px rgba(15, 23, 42, 0.28);
 }
 
 .pixel-town-canvas canvas {
+    border-radius: 8px;
     image-rendering: pixelated;
 }
 
@@ -45,6 +47,145 @@
 .pixel-canvas-controls .ant-btn {
     background: rgba(255, 255, 255, 0.94);
     box-shadow: 0 10px 24px rgba(15, 23, 42, 0.24);
+}
+
+.pixel-agent-hover-target {
+    position: absolute;
+    z-index: 7;
+    width: 32px;
+    height: 32px;
+    transform: translate(-50%, -50%);
+    border-radius: 999px;
+    background: transparent;
+    cursor: pointer;
+}
+
+.pixel-agent-hover-layer {
+    position: absolute;
+    z-index: 8;
+    width: min(270px, calc(100% - 20px));
+    pointer-events: none;
+}
+
+.pixel-agent-hover-layer::after {
+    position: absolute;
+    top: -7px;
+    left: 14px;
+    width: 12px;
+    height: 12px;
+    border-top: 1px solid rgba(255, 248, 206, 0.72);
+    border-left: 1px solid rgba(255, 248, 206, 0.72);
+    background: rgba(14, 20, 22, 0.72);
+    content: '';
+    transform: rotate(45deg);
+}
+
+.pixel-agent-hover-card {
+    position: relative;
+    display: grid;
+    gap: 6px;
+    padding: 8px 10px 9px;
+    overflow: visible;
+    border: 1px solid rgba(255, 248, 206, 0.72);
+    border-radius: 6px;
+    background: rgba(14, 20, 22, 0.72);
+    box-shadow:
+        0 0 0 1px rgba(14, 20, 22, 0.72),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+        0 12px 28px rgba(0, 0, 0, 0.34);
+    backdrop-filter: blur(4px) saturate(1.1);
+}
+
+.pixel-agent-hover-card .ant-typography {
+    color: #f8fafc;
+    font-size: 11px;
+    line-height: 1.24;
+}
+
+.pixel-agent-hover-card .ant-typography-secondary {
+    color: rgba(226, 232, 240, 0.66);
+}
+
+.pixel-agent-hover-card .ant-tag {
+    margin-inline-end: 0;
+    font-size: 10px;
+    line-height: 16px;
+}
+
+.pixel-agent-hover-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+    padding-bottom: 2px;
+}
+
+.pixel-agent-hover-title {
+    display: grid;
+    min-width: 0;
+    gap: 1px;
+}
+
+.pixel-agent-hover-title .ant-typography:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pixel-agent-hover-grid {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 3px 7px;
+    min-width: 0;
+}
+
+.pixel-agent-hover-grid .ant-typography {
+    min-width: 0;
+    font-size: 11px;
+    line-height: 1.24;
+    overflow-wrap: anywhere;
+}
+
+.pixel-agent-hover-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+}
+
+.pixel-agent-hover-status {
+    max-width: 82px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pixel-agent-hover-message {
+    display: grid;
+    gap: 1px;
+    min-width: 0;
+    padding: 4px 6px;
+    border: 1px solid rgba(255, 248, 206, 0.1);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.pixel-agent-hover-message-list {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+}
+
+.pixel-agent-hover-text,
+.pixel-agent-hover-muted {
+    min-width: 0;
+    font-size: 11px;
+    line-height: 1.24;
+    overflow-wrap: anywhere;
+}
+
+.pixel-agent-hover-muted {
+    color: rgba(226, 232, 240, 0.66) !important;
 }
 
 .pixel-replay-topbar {
