@@ -19,6 +19,7 @@
   <a href="#%EF%B8%8F-架构">架构</a> ·
   <a href="#-默认实验">默认实验</a> ·
   <a href="#%EF%B8%8F-roadmap">Roadmap</a> ·
+  <a href="CONTRIBUTING.zh-CN.md">参与开发</a> ·
   <a href="README.md">🌏 English</a>
 </p>
 
@@ -204,14 +205,35 @@ GOD 是 local-first：控制台、后端、runtime bridge、实验文件和 repl
 
 <sub>每位居民都有完整 profile：年龄、家庭、住房、经济状况、健康、日常作息、技能、需求、担忧、秘密、社交圈、语言风格、小怪癖、短期/长期目标。</sub>
 
+## 🗺️ 可拔插地图包
+
+GOD 会自动从 `agentsociety/custom/maps/<map_id>/` 发现地图包。想加一张新地图？复制 [`agentsociety/custom/maps/_template/`](agentsociety/custom/maps/_template/README.zh-CN.md)，替换 `map.yaml`、`visuals/map.json`、tileset PNG，以及可选的 `characters/` 和 `location_assets/`，然后跑：
+
+```bash
+cd agentsociety
+uv run python scripts/validate_map_package.py custom/maps/<map_id>
+```
+
+配置向导会自动列出所有合法的地图包，完全不用改代码。v1 支持带 PNG tileset 的 Tiled JSON 地图，并要求一个 `Collisions` 层（`0` 表示可走）。完整契约见 [docs/MAP_PACKAGES.zh-CN.md](docs/MAP_PACKAGES.zh-CN.md)。
+
 ## 🛣️ Roadmap
+
+### ✅ 已发布
 
 | | |
 | --- | --- |
+| 🗺️ **可拔插地图包** | 把一个文件夹丢到 `agentsociety/custom/maps/<map_id>/`，刷新向导即出现新世界。自动发现、自动校验、热插拔。详见 [`docs/MAP_PACKAGES.zh-CN.md`](docs/MAP_PACKAGES.zh-CN.md)。 |
+| 🪄 **零代码配置向导** | 五步浏览器流程：一台空机器到活生生的小镇。不用改 `.env`，不用命令行参数。 |
+| 🧪 **可复现实验** | 实验以普通文件夹形式发布，位于 `quick_experiments/<hypothesis>/<experiment>/`。把 `GOD_EXPERIMENT` 指过去就能跑。 |
+
+### 🛣️ 进行中
+
+| | |
+| --- | --- |
+| 🤖 **可拔插 Agent 运行时** | 让 LLM runtime 和 persona 模板能像地图一样干净地替换。 |
 | 🧪 **多实验编排** | 在同一个控制台里跑多个实验、对照组和重复试验。 |
 | 🗺️ **实时地图生成** | 地图随事件、修缮、阻塞、人群动态演化。 |
 | 🌦️ **事件响应世界** | 天气、事故、节日、谣言、供应短缺。 |
-| 🔌 **可插拔 Agent 与地图** | 替换不同的 LLM runtime、persona 模板、地图 manifest。 |
 | 🌐 **大规模仿真** | 接入 AgentSociety 的批量 Agent、分片运行、采样 replay。 |
 | 📊 **实验评估** | 跨实验指标、行为差异、干预效果分析。 |
 | 📝 **操作员工作流** | 每个 step 的笔记、标签、书签、关键事件摘要。 |
@@ -226,6 +248,8 @@ GOD 是 local-first：控制台、后端、runtime bridge、实验文件和 repl
 ```
 
 会自动装好 Python、Node 依赖，启动完整栈，创建 live session，并先跑完第 1 步，让控制台打开时就是已初始化的小镇。改完代码刷新即可。
+
+完整指南：**[CONTRIBUTING.zh-CN.md →](CONTRIBUTING.zh-CN.md)** —— 分支策略、PR 检查表、代码风格，以及怎么提交一张新地图或新实验。
 
 ## 🙌 致谢
 

@@ -19,6 +19,7 @@
   <a href="#%EF%B8%8F-how-it-works">How it works</a> ·
   <a href="#-default-experiment">Default Experiment</a> ·
   <a href="#%EF%B8%8F-roadmap">Roadmap</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a> ·
   <a href="README.zh-CN.md">🌏 中文</a>
 </p>
 
@@ -218,12 +219,22 @@ The setup wizard will list valid packages without code changes. v1 supports Tile
 
 ## 🛣️ Roadmap
 
+### ✅ Recently shipped
+
 | | |
 | --- | --- |
+| 🗺️ **Pluggable map packages** | Drop a folder under `agentsociety/custom/maps/<map_id>/`, refresh the wizard, and a new world is selectable. Auto-discovered, validated, hot-swappable. See [`docs/MAP_PACKAGES.md`](docs/MAP_PACKAGES.md). |
+| 🪄 **No-code setup wizard** | A 5-step browser flow that turns a blank machine into a live society — no `.env` edits, no command-line flags. |
+| 🧪 **Scripted experiments** | Ship reproducible experiments as plain folders under `quick_experiments/<hypothesis>/<experiment>/`. Point `GOD_EXPERIMENT` at one and run. |
+
+### 🛣️ Next
+
+| | |
+| --- | --- |
+| 🤖 **Pluggable agent runtimes** | Swap LLM runtimes and persona templates as cleanly as we now swap maps. |
 | 🧪 **Multi-experiment orchestration** | Run experiments, control groups, and repeats side-by-side. |
 | 🗺️ **Live map generation** | Maps that evolve with events, repairs, blockages, crowds. |
 | 🌦️ **Event-responsive worlds** | Weather, accidents, festivals, rumors, shortages. |
-| 🔌 **Pluggable agents & maps** | Swap LLM runtimes, persona templates, map manifests. |
 | 🌐 **Large-scale simulation** | AgentSociety batching, sharded runs, sampled replay. |
 | 📊 **Experiment evaluation** | Cross-run metrics, behavior diffs, intervention analysis. |
 | 📝 **Operator workflow** | Per-step notes, tags, bookmarks, key-event summaries. |
@@ -240,6 +251,8 @@ Issues and pull requests are very welcome. To set up a dev environment:
 ```
 
 That installs Python and Node dependencies, brings up the full stack, creates a live session, and runs the first step so the control room opens on a populated town. From there, edit and reload.
+
+Full guide: **[CONTRIBUTING.md →](CONTRIBUTING.md)** — branching, PR checklist, style, and how to ship a new map or experiment.
 
 ## 🙌 Acknowledgements
 
