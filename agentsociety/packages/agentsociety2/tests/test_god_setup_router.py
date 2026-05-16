@@ -335,6 +335,25 @@ def test_normalize_draft_replaces_generic_agent_names(monkeypatch, tmp_path):
     assert first["kwargs"]["profile"]["role"] != "participant"
 
 
+def test_normalize_draft_uses_public_channel_default(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    monkeypatch.setattr(god_setup, "_known_location_ids", lambda: ["school", "park", "cafe"])
+    raw = _raw_draft()
+    raw["init_config"]["env_modules"][0]["kwargs"].pop("default_group_name")
+
+    draft = god_setup._normalize_draft(
+        raw,
+        DraftBasics(
+            title="Lab Scenario",
+            background="Coordinate a lab handoff.",
+            agent_count=2,
+        ),
+    )
+
+    env = draft["init_config"]["env_modules"][0]["kwargs"]
+    assert env["default_group_name"] == "Lab Scenario公开频道"
+
+
 def test_normalize_draft_backfills_scenario_specific_agents(monkeypatch, tmp_path):
     _configure_tmp_god(monkeypatch, tmp_path)
     monkeypatch.setattr(god_setup, "_known_location_ids", lambda: ["home", "school", "cafe", "market", "park"])

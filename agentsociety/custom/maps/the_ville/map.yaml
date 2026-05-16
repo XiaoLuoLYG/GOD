@@ -1,6 +1,6 @@
 schema_version: 1
 map_id: the_ville
-display_name: The Ville Pixel Town
+display_name: 维尔小镇像素地图
 tiled_map_path: visuals/the_ville_jan7.json
 tile_size: 32
 character_root: characters
@@ -104,7 +104,7 @@ locations:
     w: 7
     h: 11
 - id: cafe
-  name: Hobbs Cafe 咖啡馆
+  name: 霍布斯咖啡馆
   aliases:
   - cafe
   - café
@@ -130,7 +130,7 @@ locations:
     w: 12
     h: 8
 - id: park
-  name: Johnson Park 公园
+  name: 约翰逊公园
   aliases:
   - park
   - 小公园
@@ -156,7 +156,7 @@ locations:
     w: 15
     h: 11
 - id: supply_store
-  name: Harvey Oak Supply Store 供给店
+  name: 哈维橡树供给店
   aliases:
   - supply store
   - supply_store
@@ -182,7 +182,7 @@ locations:
     w: 14
     h: 12
 - id: market
-  name: The Willows Market 商店
+  name: 柳树市场
   aliases:
   - market
   - shop
@@ -209,7 +209,7 @@ locations:
     w: 19
     h: 12
 - id: pharmacy
-  name: The Willows Pharmacy 药房
+  name: 柳树药房
   aliases:
   - pharmacy
   - 药房
@@ -235,7 +235,7 @@ locations:
     w: 19
     h: 12
 - id: pub
-  name: The Rose and Crown Pub 酒馆
+  name: 玫瑰王冠酒馆
   aliases:
   - pub
   - bar
@@ -259,7 +259,7 @@ locations:
     w: 10
     h: 7
 - id: dorm
-  name: Oak Hill College 宿舍
+  name: 橡树山学院宿舍
   aliases:
   - dorm
   - dormitory

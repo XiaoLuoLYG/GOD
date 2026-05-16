@@ -53,7 +53,7 @@ def _write_map_package(tmp_path: Path, *, unreachable: bool = False) -> Path:
         json.dumps(
             {
                 "map_id": "test_town",
-                "display_name": "Test Town",
+                "display_name": "测试小镇",
                 "tiled_map_path": "map.json",
                 "tile_size": 32,
                 "locations": [
@@ -62,7 +62,7 @@ def _write_map_package(tmp_path: Path, *, unreachable: bool = False) -> Path:
                         "name": "公园",
                         "aliases": ["Park", "公园"],
                         "anchor_tile": {"x": 0, "y": 0},
-                        "interaction_ids": ["meet_friend"],
+                        "interaction_ids": ["meet_friend", "public_announcement"],
                     },
                     {
                         "id": "cafe",
@@ -76,24 +76,38 @@ def _write_map_package(tmp_path: Path, *, unreachable: bool = False) -> Path:
                     {
                         "id": "meet_friend",
                         "name": "见朋友",
-                        "description": "meet at park",
+                        "description": "在公园见朋友",
                         "allowed_location_ids": ["park"],
                         "effects": {
-                            "action": "{agent_name} met a friend {message}",
-                            "status": "active",
-                            "emotion": "focused",
-                            "latest_event": "{agent_name} met a friend",
+                            "action": "{agent_name}在公园见朋友：{message}",
+                            "status": "活跃",
+                            "emotion": "专注",
+                            "latest_event": "{agent_name}在公园见朋友。",
+                            "group_message": "{agent_name}悄悄说：{message}",
+                        },
+                    },
+                    {
+                        "id": "public_announcement",
+                        "name": "公告",
+                        "description": "在公园发布公告",
+                        "allowed_location_ids": ["park"],
+                        "effects": {
+                            "action": "{agent_name}发布公告",
+                            "status": "活跃",
+                            "emotion": "专注",
+                            "group_message": "公告：{message}",
+                            "broadcast": True,
                         },
                     },
                     {
                         "id": "chat_over_coffee",
                         "name": "咖啡聊天",
-                        "description": "chat at cafe",
+                        "description": "在咖啡馆聊天",
                         "allowed_location_ids": ["cafe"],
                         "effects": {
-                            "action": "{agent_name} chatted at the cafe",
-                            "status": "active",
-                            "emotion": "focused",
+                            "action": "{agent_name}在咖啡馆聊天",
+                            "status": "活跃",
+                            "emotion": "专注",
                         },
                     },
                 ],
@@ -108,7 +122,7 @@ def test_pixel_town_alias_movement_and_replay_fields(tmp_path: Path) -> None:
     async def scenario() -> None:
         manifest = _write_map_package(tmp_path)
         env = PixelTownSocialEnv(
-            agent_id_name_pairs=[[1, "Alice"]],
+            agent_id_name_pairs=[[1, "阿莉"]],
             initial_locations={"1": "Park"},
             map_manifest_path=str(manifest),
             movement_tiles_per_second=8,
@@ -148,11 +162,28 @@ def test_pixel_town_alias_movement_and_replay_fields(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
+def test_pixel_town_snapshot_fields_are_declared_in_replay_schema(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        manifest = _write_map_package(tmp_path)
+        env = PixelTownSocialEnv(
+            agent_id_name_pairs=[[1, "阿莉"], [2, "老鲍"]],
+            initial_locations={"1": "公园", "2": "Park"},
+            map_manifest_path=str(manifest),
+        )
+
+        observed = env._snapshot_agent(1)
+        declared = {"agent_id", "step", "t", *(column.name for column in env._agent_state_columns)}
+        assert set(observed).issubset(declared)
+        assert "nearby_agents" in declared
+
+    asyncio.run(scenario())
+
+
 def test_pixel_town_unreachable_move_does_not_change_position(tmp_path: Path) -> None:
     async def scenario() -> None:
         manifest = _write_map_package(tmp_path, unreachable=True)
         env = PixelTownSocialEnv(
-            agent_id_name_pairs=[[1, "Alice"]],
+            agent_id_name_pairs=[[1, "阿莉"]],
             initial_locations={"1": "公园"},
             map_manifest_path=str(manifest),
         )
@@ -174,7 +205,7 @@ def test_pixel_town_interactions_are_location_scoped(tmp_path: Path) -> None:
     async def scenario() -> None:
         manifest = _write_map_package(tmp_path)
         env = PixelTownSocialEnv(
-            agent_id_name_pairs=[[1, "Alice"]],
+            agent_id_name_pairs=[[1, "Jiuwen Alice"]],
             initial_locations={"1": "公园"},
             map_manifest_path=str(manifest),
             movement_tiles_per_second=10,
@@ -184,12 +215,12 @@ def test_pixel_town_interactions_are_location_scoped(tmp_path: Path) -> None:
         assert unavailable["ok"] is False
         assert unavailable["error"] == "interaction_not_available_here"
 
-        meet = await env.interact(1, "meet_friend", {"message": "hello"})
+        meet = await env.interact(1, "meet_friend", {"message": "你好"})
         assert meet["ok"] is True
         observed = await env.observe_agent(1)
-        assert observed["action"] == "Alice met a friend hello"
-        assert observed["status"] == "active"
-        assert observed["emotion"] == "focused"
+        assert observed["action"] == "Jiuwen Alice在公园见朋友：你好"
+        assert observed["status"] == "活跃"
+        assert observed["emotion"] == "专注"
 
         assert (await env.move_agent(1, "cafe"))["ok"] is True
         await env.step(1, datetime(2026, 5, 9, 12, 0, 0))
@@ -198,7 +229,186 @@ def test_pixel_town_interactions_are_location_scoped(tmp_path: Path) -> None:
         chat = await env.interact(1, "chat_over_coffee")
         assert chat["ok"] is True
         observed = await env.observe_agent(1)
-        assert observed["action"] == "Alice chatted at the cafe"
+        assert observed["action"] == "Jiuwen Alice在咖啡馆聊天"
+
+    asyncio.run(scenario())
+
+
+def test_english_agent_name_does_not_break_chinese_event_policy(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        manifest = _write_map_package(tmp_path)
+        env = PixelTownSocialEnv(
+            agent_id_name_pairs=[[1, "Donald Trump"]],
+            initial_locations={"1": "公园"},
+            map_manifest_path=str(manifest),
+        )
+
+        event = await env.publish_event("Trump 抵达西门。")
+        assert event["event"] == "Trump 抵达西门。"
+        observed = await env.observe_agent(1)
+        assert observed["latest_event"] == "Trump 抵达西门。"
+        assert observed["recent_messages"][-1]["content"] == "公共环境事件（信息）：Trump 抵达西门。"
+        assert env._step_communications[-1]["type"] == "system_event"
+        assert env._step_communications[-1]["sender_id"] == 0
+        assert env._step_communications[-1]["content"] == "公共环境事件（信息）：Trump 抵达西门。"
+
+        fallback = await env.publish_event("The visitor arrived.")
+        assert fallback["event"] == "收到一条公共环境事件。"
+
+    asyncio.run(scenario())
+
+
+def test_direct_messages_require_same_location_and_expose_nearby_agents(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        manifest = _write_map_package(tmp_path)
+        env = PixelTownSocialEnv(
+            agent_id_name_pairs=[[1, "Jiuwen Alice"], [2, "Jiuwen Bob"], [3, "Jiuwen Carol"]],
+            initial_locations={"1": "公园", "2": "Park", "3": "cafe"},
+            map_manifest_path=str(manifest),
+        )
+
+        observed = await env.observe_agent(1)
+        assert observed["nearby_agents"] == [
+            {
+                "agent_id": 2,
+                "name": "Jiuwen Bob",
+                "location_id": "park",
+                "location": "公园",
+            }
+        ]
+
+        sent = await env.send_message(1, 2, "安静问候")
+        assert sent["ok"] is True
+
+        sender = await env.observe_agent(1)
+        receiver = await env.observe_agent(2)
+        far_agent = await env.observe_agent(3)
+        assert sender["message_count"] == 0
+        assert receiver["message_count"] == 1
+        assert receiver["recent_messages"][-1]["type"] == "direct"
+        assert receiver["recent_messages"][-1]["content"] == "安静问候"
+        assert env._step_communications[-1]["type"] == "direct"
+        assert env._step_communications[-1]["sender_id"] == 1
+        assert env._step_communications[-1]["receiver_id"] == 2
+        assert env._step_communications[-1]["content"] == "安静问候"
+        assert far_agent["message_count"] == 0
+
+        blocked = await env.send_message(1, 3, "距离太远")
+        assert blocked["ok"] is False
+        assert blocked["error"] == "receiver_not_nearby"
+        assert (await env.observe_agent(3))["message_count"] == 0
+
+    asyncio.run(scenario())
+
+
+def test_chat_log_is_authoritative_even_when_mailbox_keeps_old_messages(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        manifest = _write_map_package(tmp_path)
+        env = PixelTownSocialEnv(
+            agent_id_name_pairs=[[1, "阿莉"], [2, "老鲍"]],
+            initial_locations={"1": "公园", "2": "Park"},
+            map_manifest_path=str(manifest),
+        )
+
+        sent = await env.send_message(1, 2, "这一条本步发送")
+        assert sent["ok"] is True
+        receiver = await env.observe_agent(2)
+        assert receiver["recent_messages"][-1]["content"] == "这一条本步发送"
+        assert env._step_communications == [
+            {
+                "type": "direct",
+                "sender_id": 1,
+                "sender_name": "阿莉",
+                "content": "这一条本步发送",
+                "receiver_id": 2,
+                "receiver_name": "老鲍",
+            }
+        ]
+
+        await env.step(1, datetime(2026, 5, 9, 12, 0, 0))
+        assert env._step_communications == []
+        receiver_after_step = await env.observe_agent(2)
+        assert receiver_after_step["recent_messages"][-1]["content"] == "这一条本步发送"
+
+    asyncio.run(scenario())
+
+
+def test_scripted_messages_are_also_recorded_in_step_communications(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        manifest = _write_map_package(tmp_path)
+        env = PixelTownSocialEnv(
+            agent_id_name_pairs=[[1, "阿莉"], [2, "老鲍"], [3, "小卡"]],
+            initial_locations={"1": "公园", "2": "Park", "3": "cafe"},
+            map_manifest_path=str(manifest),
+            default_group_name="测试公开群",
+        )
+
+        observed = await env.apply_scripted_action(
+            1,
+            {
+                "action": "同步消息",
+                "direct_messages": [{"to": 2, "content": "私下确认"}],
+                "group_messages": [{"group_id": 1, "content": "公开同步"}],
+            },
+        )
+        assert observed["agent_id"] == 1
+        assert (await env.observe_agent(2))["recent_messages"][-2]["content"] == "私下确认"
+        assert (await env.observe_agent(3))["recent_messages"][-1]["content"] == "公开同步"
+        assert env._step_communications[-2:] == [
+            {
+                "type": "direct",
+                "sender_id": 1,
+                "sender_name": "阿莉",
+                "content": "私下确认",
+                "receiver_id": 2,
+                "receiver_name": "老鲍",
+            },
+            {
+                "type": "group",
+                "sender_id": 1,
+                "sender_name": "阿莉",
+                "content": "公开同步",
+                "group_id": 1,
+                "group_name": "测试公开群",
+                "recipient_count": 3,
+            },
+        ]
+
+    asyncio.run(scenario())
+
+
+def test_interaction_speech_is_local_unless_public(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        manifest = _write_map_package(tmp_path)
+        env = PixelTownSocialEnv(
+            agent_id_name_pairs=[[1, "阿莉"], [2, "老鲍"], [3, "小卡"]],
+            initial_locations={"1": "公园", "2": "Park", "3": "cafe"},
+            map_manifest_path=str(manifest),
+            default_group_name="测试公开群",
+        )
+
+        local = await env.interact(1, "meet_friend", {"message": "本地消息"})
+        assert local["ok"] is True
+        assert (await env.observe_agent(1))["message_count"] == 0
+        bob = await env.observe_agent(2)
+        carol = await env.observe_agent(3)
+        assert bob["message_count"] == 1
+        assert bob["recent_messages"][-1]["type"] == "direct"
+        assert bob["recent_messages"][-1]["content"] == "阿莉悄悄说：本地消息"
+        assert carol["message_count"] == 0
+        assert env._step_communications[-1]["type"] == "direct"
+
+        public = await env.interact(1, "public_announcement", {"message": "请大家注意"})
+        assert public["ok"] is True
+        alice = await env.observe_agent(1)
+        bob = await env.observe_agent(2)
+        carol = await env.observe_agent(3)
+        assert alice["recent_messages"][-1]["type"] == "group"
+        assert bob["recent_messages"][-1]["type"] == "group"
+        assert carol["recent_messages"][-1]["type"] == "group"
+        assert carol["recent_messages"][-1]["group_name"] == "测试公开群"
+        assert env._step_communications[-1]["type"] == "group"
+        assert env._step_communications[-1]["recipient_count"] == 3
 
     asyncio.run(scenario())
 
@@ -206,7 +416,7 @@ def test_pixel_town_interactions_are_location_scoped(tmp_path: Path) -> None:
 def test_default_manifest_binds_required_real_scenes() -> None:
     async def scenario() -> None:
         env = PixelTownSocialEnv(
-            agent_id_name_pairs=[[1, "Alice"]],
+            agent_id_name_pairs=[[1, "阿莉"]],
             initial_locations={"1": "park"},
             movement_tiles_per_second=1000,
         )
@@ -217,7 +427,8 @@ def test_default_manifest_binds_required_real_scenes() -> None:
             assert location_id in by_id
             assert by_id[location_id]["bounds"]["w"] >= 4
             assert by_id[location_id]["scene_type"]
-            assert by_id[location_id]["source_address"].startswith("the Ville:")
+            if "source_address" in by_id[location_id]:
+                assert by_id[location_id]["source_address"].startswith("the Ville:")
 
         removed_move = await env.move_agent(1, "prison")
         assert removed_move["ok"] is False

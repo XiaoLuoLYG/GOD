@@ -7,6 +7,12 @@ ENV_FILE="${GOD_ENV_FILE:-$ROOT_DIR/.env}"
 # Internal monorepo layout. Hidden from the outward-facing config surface.
 BACKEND_ROOT="${BACKEND_ROOT:-$ROOT_DIR/agentsociety}"
 RUNTIME_ROOT="${RUNTIME_ROOT:-$ROOT_DIR/jiuwenclaw}"
+GOD_EXPERIMENT_WAS_EXPLICIT="${GOD_EXPERIMENT+x}"
+GOD_EXPERIMENT_RUN_WAS_EXPLICIT="${GOD_EXPERIMENT_RUN+x}"
+LIVE_WORKSPACE_PATH_WAS_EXPLICIT="${LIVE_WORKSPACE_PATH+x}"
+GOD_EXPERIMENT_EXPLICIT_VALUE="${GOD_EXPERIMENT:-}"
+GOD_EXPERIMENT_RUN_EXPLICIT_VALUE="${GOD_EXPERIMENT_RUN:-}"
+LIVE_WORKSPACE_PATH_EXPLICIT_VALUE="${LIVE_WORKSPACE_PATH:-}"
 LIVE_WORKSPACE_PATH="${LIVE_WORKSPACE_PATH:-$BACKEND_ROOT/quick_experiments}"
 
 # State dirs.
@@ -123,6 +129,16 @@ for key, value in mapping.items():
 PY
   )"
   [[ -n "$exports" ]] || return 0
+  if [[ -n "$GOD_EXPERIMENT_WAS_EXPLICIT" ]]; then
+    exports="$(printf '%s\n' "$exports" | grep -v '^GOD_EXPERIMENT=' || true)"
+  fi
+  if [[ -n "$GOD_EXPERIMENT_RUN_WAS_EXPLICIT" ]]; then
+    exports="$(printf '%s\n' "$exports" | grep -v '^GOD_EXPERIMENT_RUN=' || true)"
+  fi
+  if [[ -n "$LIVE_WORKSPACE_PATH_WAS_EXPLICIT" ]]; then
+    exports="$(printf '%s\n' "$exports" | grep -v '^LIVE_WORKSPACE_PATH=' || true)"
+  fi
+  [[ -n "$exports" ]] || return 0
   eval "$exports"
   export GOD_EXPERIMENT GOD_EXPERIMENT_RUN LIVE_WORKSPACE_PATH
 }
@@ -133,6 +149,15 @@ load_env() {
     # shellcheck disable=SC1090
     source "$ENV_FILE"
     set +a
+  fi
+  if [[ -n "$GOD_EXPERIMENT_WAS_EXPLICIT" ]]; then
+    GOD_EXPERIMENT="$GOD_EXPERIMENT_EXPLICIT_VALUE"
+  fi
+  if [[ -n "$GOD_EXPERIMENT_RUN_WAS_EXPLICIT" ]]; then
+    GOD_EXPERIMENT_RUN="$GOD_EXPERIMENT_RUN_EXPLICIT_VALUE"
+  fi
+  if [[ -n "$LIVE_WORKSPACE_PATH_WAS_EXPLICIT" ]]; then
+    LIVE_WORKSPACE_PATH="$LIVE_WORKSPACE_PATH_EXPLICIT_VALUE"
   fi
   export_internal_env
   load_current_experiment
