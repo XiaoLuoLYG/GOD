@@ -46,6 +46,16 @@ const INITIAL_REPLAY_RETRY_INTERVAL_MS = 1500;
 const PHASER_TEXT_FONT_FAMILY = 'Arial, "PingFang SC", "Microsoft YaHei", sans-serif';
 const AGENT_NAME_LABEL_HEIGHT = 17;
 const SPEECH_BUBBLE_LABEL_GAP = 6;
+const CAMERA_MIN_ZOOM_FLOOR = 0.01;
+const CAMERA_MAX_ZOOM = 1.8;
+const AGENT_OVERLAP_SINGLE_RING_LIMIT = 8;
+const AGENT_OVERLAP_FIRST_RING_CAPACITY = 6;
+const AGENT_OVERLAP_RING_CAPACITY_STEP = 6;
+const AGENT_OVERLAP_TARGET_SPACING_TILES = 2.05;
+const AGENT_OVERLAP_MIN_RADIUS_TILES = 1.4;
+const AGENT_OVERLAP_RING_SPACING_TILES = 2.85;
+const AGENT_SPRITE_BASE_SCALE = 1.22;
+const AGENT_SPRITE_SELECTED_SCALE = 1.42;
 const HIDDEN_TILE_LAYER_NAMES = new Set([
     'AgentSociety Scene Footprints',
     'Collisions',
@@ -244,6 +254,11 @@ type Tile = {
     y: number;
 };
 
+type VisualOffset = {
+    x: number;
+    y: number;
+};
+
 type WalkableMap = {
     mapId: string;
     displayName: string;
@@ -259,24 +274,12 @@ type WalkableMap = {
     walkableKeys: Set<string>;
 };
 
-type AgentMessage = {
-    type?: string;
-    sender_id?: number;
-    sender_name?: string;
-    receiver_id?: number;
-    receiver_name?: string;
-    group_id?: number;
-    group_name?: string;
-    recipient_count?: number;
-    content?: string;
-    timestamp?: string;
-};
-
 type PixelAgent = {
     id: number;
     name: string;
     spriteKey: string;
     tile: Tile;
+    visualOffset: VisualOffset;
     action: string;
     status?: string;
     location: string;
@@ -289,7 +292,6 @@ type PixelAgent = {
     messageCount: number;
     currentPhase?: string;
     latestEvent?: string;
-    sentMessages: AgentMessage[];
     stepCommunications: Communication[];
     availableInteractions: ReplayMapInteraction[];
 };
@@ -388,6 +390,92 @@ function tileKey(tile: Tile): string {
     return `${tile.x},${tile.y}`;
 }
 
+function ringCapacityForIndex(ringIndex: number): number {
+    return AGENT_OVERLAP_FIRST_RING_CAPACITY + ringIndex * AGENT_OVERLAP_RING_CAPACITY_STEP;
+}
+
+function overlapRadiusForRing(countInRing: number, ringIndex: number): number {
+    const spacingRadius = countInRing > 1
+        ? AGENT_OVERLAP_TARGET_SPACING_TILES / (2 * Math.sin(Math.PI / countInRing))
+        : 0;
+    return Math.max(
+        AGENT_OVERLAP_MIN_RADIUS_TILES + ringIndex * AGENT_OVERLAP_RING_SPACING_TILES,
+        spacingRadius,
+    );
+}
+
+function overlapRingSlot(index: number, count: number): {
+    countInRing: number;
+    indexInRing: number;
+    ringIndex: number;
+} {
+    if (count <= AGENT_OVERLAP_SINGLE_RING_LIMIT) {
+        return {
+            countInRing: count,
+            indexInRing: index,
+            ringIndex: 0,
+        };
+    }
+
+    let ringIndex = 0;
+    let consumed = 0;
+    while (consumed < count) {
+        const countInRing = Math.min(ringCapacityForIndex(ringIndex), count - consumed);
+        if (index < consumed + countInRing) {
+            return {
+                countInRing,
+                indexInRing: index - consumed,
+                ringIndex,
+            };
+        }
+        consumed += countInRing;
+        ringIndex += 1;
+    }
+
+    return {
+        countInRing: 1,
+        indexInRing: 0,
+        ringIndex,
+    };
+}
+
+function visualOffsetForOverlap(index: number, count: number): VisualOffset {
+    if (count <= 1) {
+        return { x: 0, y: 0 };
+    }
+    const { countInRing, indexInRing, ringIndex } = overlapRingSlot(index, count);
+    const ringAngleOffset = ringIndex > 0 ? Math.PI / countInRing : 0;
+    const angle = (countInRing === 2 ? 0 : -Math.PI / 2)
+        + ringAngleOffset
+        + (Math.PI * 2 * indexInRing) / countInRing;
+    const radius = overlapRadiusForRing(countInRing, ringIndex);
+    return {
+        x: Math.cos(angle) * radius,
+        y: Math.sin(angle) * radius,
+    };
+}
+
+function applyAgentVisualOffsets(agents: PixelAgent[]): PixelAgent[] {
+    const groups = new Map<string, PixelAgent[]>();
+    for (const agent of agents) {
+        const key = tileKey(agent.tile);
+        groups.set(key, [...(groups.get(key) ?? []), agent]);
+    }
+
+    const offsets = new Map<number, VisualOffset>();
+    for (const group of groups.values()) {
+        const sorted = [...group].sort((a, b) => a.id - b.id);
+        sorted.forEach((agent, index) => {
+            offsets.set(agent.id, visualOffsetForOverlap(index, sorted.length));
+        });
+    }
+
+    return agents.map((agent) => ({
+        ...agent,
+        visualOffset: offsets.get(agent.id) ?? { x: 0, y: 0 },
+    }));
+}
+
 function getAgentName(profile: AgentProfile): string {
     if (profile.name && profile.name.trim() !== '') {
         return profile.name;
@@ -437,14 +525,34 @@ function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+const mentionBoundary = '(?=\\s|$|[，。,.!?；;:：])';
+
 function mentionPattern(value: string, flags = ''): RegExp {
-    return new RegExp(`@${escapeRegExp(value)}(?=\\s|$|[，。,.!?；;])`, flags);
+    return new RegExp(`@${escapeRegExp(value)}${mentionBoundary}`, flags);
+}
+
+function systemMentionPattern(flags = ''): RegExp {
+    return new RegExp(`@(?:系统|system)${mentionBoundary}`, flags.includes('i') ? flags : `${flags}i`);
+}
+
+function allAgentsMentionPattern(flags = ''): RegExp {
+    return new RegExp(`@(?:所有居民|all_residents|all)${mentionBoundary}`, flags.includes('i') ? flags : `${flags}i`);
+}
+
+function agentIdMentionPattern(flags = ''): RegExp {
+    return new RegExp(`@[^@\\n，。,.!?；;:：]*?#\\s*(\\d+)${mentionBoundary}`, flags);
 }
 
 function stripTargetMentions(text: string, mentions: LiveTargetMention[]): string {
-    return mentions.reduce((current, mention) => (
+    const withoutKnownMentions = mentions.reduce((current, mention) => (
         current.replace(mentionPattern(mention.value, 'g'), '')
-    ), text).replace(/\s+/g, ' ').trim();
+    ), text);
+    return withoutKnownMentions
+        .replace(systemMentionPattern('gi'), '')
+        .replace(allAgentsMentionPattern('gi'), '')
+        .replace(agentIdMentionPattern('g'), '')
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 function resolveTargetFromPrompt(
@@ -456,16 +564,20 @@ function resolveTargetFromPrompt(
         mentionPattern(mention.value).test(text)
     ));
     const systemTarget = selected.find((mention) => mention.target.type === 'society');
-    if (systemTarget) {
+    if (systemTarget || systemMentionPattern('i').test(text)) {
         return { type: 'society' };
     }
     const allTarget = selected.find((mention) => mention.target.type === 'all_agents');
-    if (allTarget) {
+    if (allTarget || allAgentsMentionPattern('i').test(text)) {
         return { type: 'all_agents' };
     }
-    const agentIds = selected
+    const selectedAgentIds = selected
         .map((mention) => mention.target.agent_id)
         .filter((agentId): agentId is number => typeof agentId === 'number');
+    const genericAgentIds = Array.from(text.matchAll(agentIdMentionPattern('g')))
+        .map((match) => Number(match[1]))
+        .filter((agentId) => Number.isInteger(agentId));
+    const agentIds = [...selectedAgentIds, ...genericAgentIds];
     const uniqueAgentIds = Array.from(new Set(agentIds));
     if (uniqueAgentIds.length === 1) {
         return { type: 'agent', agent_id: uniqueAgentIds[0] };
@@ -623,45 +735,6 @@ function normalizeAgentId(value: unknown): number | undefined {
     return undefined;
 }
 
-function normalizeAgentMessage(value: unknown): AgentMessage | undefined {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-        return undefined;
-    }
-    const row = value as Record<string, unknown>;
-    const content = pickDisplayValue(row, ['content', 'message', 'text']);
-    if (!content) {
-        return undefined;
-    }
-    return {
-        type: pickDisplayValue(row, ['type', 'message_type']),
-        sender_id: normalizeAgentId(row.sender_id),
-        sender_name: pickDisplayValue(row, ['sender_name']),
-        receiver_id: normalizeAgentId(row.receiver_id),
-        receiver_name: pickDisplayValue(row, ['receiver_name']),
-        group_id: normalizeAgentId(row.group_id),
-        group_name: pickDisplayValue(row, ['group_name']),
-        recipient_count: normalizeAgentId(row.recipient_count),
-        content,
-        timestamp: pickDisplayValue(row, ['timestamp', 't', 'time']),
-    };
-}
-
-function parseAgentMessages(value: unknown): AgentMessage[] {
-    if (Array.isArray(value)) {
-        return value
-            .map(normalizeAgentMessage)
-            .filter((item): item is AgentMessage => Boolean(item));
-    }
-    if (typeof value !== 'string' || value.trim() === '') {
-        return [];
-    }
-    try {
-        return parseAgentMessages(JSON.parse(value));
-    } catch {
-        return [];
-    }
-}
-
 function firstEnvRow(bundle: ReplayStepBundle | undefined): Record<string, unknown> | undefined {
     const datasets = bundle?.env_state_rows ?? {};
     for (const dataset of Object.values(datasets)) {
@@ -699,10 +772,6 @@ function parseCommunications(row: Record<string, unknown> | undefined): Communic
     } catch {
         return [];
     }
-}
-
-function filterAgentSentMessages(agentId: number, messages: AgentMessage[]): AgentMessage[] {
-    return messages.filter((item) => item.sender_id === agentId).slice(-3);
 }
 
 function filterAgentStepCommunications(agentId: number, communications: Communication[]): Communication[] {
@@ -765,51 +834,49 @@ function buildPixelFrame(
 ): PixelFrame {
     const envRow = firstEnvRow(bundle);
     const stepCommunications = parseCommunications(envRow);
+    const agents = profiles.map((profile, index) => {
+        const row = findAgentRow(bundle, profile.id);
+        const rawDescription = row ? pickDisplayValue(row, ['description', 'action', 'activity', 'state', 'status']) : undefined;
+        const status = row ? pickDisplayValue(row, ['status']) : undefined;
+        const location = row ? pickDisplayValue(row, ['location', 'target_address', 'place', 'address']) : undefined;
+        const lastMessage = row ? pickDisplayValue(row, ['last_message']) : undefined;
+        const emotion = row ? pickDisplayValue(row, ['emotion']) : undefined;
+        const currentPhase = row ? pickDisplayValue(row, ['current_phase']) : undefined;
+        const latestEvent = row ? pickDisplayValue(row, ['latest_event']) : undefined;
+        const tileX = pickOptionalNumberValue(row, 'tile_x');
+        const tileY = pickOptionalNumberValue(row, 'tile_y');
+        const hasReplayTile = tileX !== undefined && tileY !== undefined;
+        const fallbackTile = getAutoTile(profile.id, step, walkableMap);
+        const availableInteractions = row
+            ? parseInteractionList(row.available_interactions_json)
+            : [];
+        return {
+            id: profile.id,
+            name: getAgentName(profile),
+            spriteKey: spriteForAgent(index, walkableMap),
+            tile: hasReplayTile ? { x: tileX, y: tileY } : fallbackTile,
+            visualOffset: { x: 0, y: 0 },
+            action: rawDescription ?? 'idle',
+            status,
+            location: location ?? '小镇',
+            locationId: row ? pickDisplayValue(row, ['location_id']) : undefined,
+            movementStatus: row ? pickDisplayValue(row, ['movement_status']) : undefined,
+            targetLocationId: row ? pickDisplayValue(row, ['target_location_id']) : undefined,
+            hasReplayTile,
+            emotion,
+            lastMessage,
+            messageCount: pickNumberValue(row, 'message_count'),
+            currentPhase: currentPhase ?? pickDisplayValue(envRow ?? {}, ['current_phase']),
+            latestEvent: latestEvent ?? pickDisplayValue(envRow ?? {}, ['latest_event']),
+            stepCommunications: filterAgentStepCommunications(profile.id, stepCommunications),
+            availableInteractions,
+        };
+    });
     return {
         step,
         t: bundle?.t,
         map: walkableMap,
-        agents: profiles.map((profile, index) => {
-            const row = findAgentRow(bundle, profile.id);
-            const rawDescription = row ? pickDisplayValue(row, ['description', 'action', 'activity', 'state', 'status']) : undefined;
-            const status = row ? pickDisplayValue(row, ['status']) : undefined;
-            const location = row ? pickDisplayValue(row, ['location', 'target_address', 'place', 'address']) : undefined;
-            const lastMessage = row ? pickDisplayValue(row, ['last_message']) : undefined;
-            const emotion = row ? pickDisplayValue(row, ['emotion']) : undefined;
-            const currentPhase = row ? pickDisplayValue(row, ['current_phase']) : undefined;
-            const latestEvent = row ? pickDisplayValue(row, ['latest_event']) : undefined;
-            const tileX = pickOptionalNumberValue(row, 'tile_x');
-            const tileY = pickOptionalNumberValue(row, 'tile_y');
-            const hasReplayTile = tileX !== undefined && tileY !== undefined;
-            const fallbackTile = getAutoTile(profile.id, step, walkableMap);
-            const sentMessages = row
-                ? filterAgentSentMessages(profile.id, parseAgentMessages(row.recent_messages))
-                : [];
-            const availableInteractions = row
-                ? parseInteractionList(row.available_interactions_json)
-                : [];
-            return {
-                id: profile.id,
-                name: getAgentName(profile),
-                spriteKey: spriteForAgent(index, walkableMap),
-                tile: hasReplayTile ? { x: tileX, y: tileY } : fallbackTile,
-                action: rawDescription ?? 'idle',
-                status,
-                location: location ?? '小镇',
-                locationId: row ? pickDisplayValue(row, ['location_id']) : undefined,
-                movementStatus: row ? pickDisplayValue(row, ['movement_status']) : undefined,
-                targetLocationId: row ? pickDisplayValue(row, ['target_location_id']) : undefined,
-                hasReplayTile,
-                emotion,
-                lastMessage,
-                messageCount: pickNumberValue(row, 'message_count'),
-                currentPhase: currentPhase ?? pickDisplayValue(envRow ?? {}, ['current_phase']),
-                latestEvent: latestEvent ?? pickDisplayValue(envRow ?? {}, ['latest_event']),
-                sentMessages,
-                stepCommunications: filterAgentStepCommunications(profile.id, stepCommunications),
-                availableInteractions,
-            };
-        }),
+        agents: applyAgentVisualOffsets(agents),
     };
 }
 
@@ -911,6 +978,31 @@ function formatTime(value?: string | null): string {
     return value.replace('T', ' ').replace(/\.\d+$/, '');
 }
 
+function getMapZoomBounds(viewportWidth: number, viewportHeight: number, mapWidth: number, mapHeight: number) {
+    const containZoom = Math.min(viewportWidth / mapWidth, viewportHeight / mapHeight);
+    const coverZoom = Math.max(viewportWidth / mapWidth, viewportHeight / mapHeight);
+    const minZoom = Math.max(CAMERA_MIN_ZOOM_FLOOR, containZoom);
+    return {
+        coverZoom,
+        minZoom,
+        maxZoom: Math.max(CAMERA_MAX_ZOOM, coverZoom, minZoom),
+    };
+}
+
+function clampZoom(value: number, viewportWidth: number, viewportHeight: number, mapWidth: number, mapHeight: number) {
+    const { minZoom, maxZoom } = getMapZoomBounds(viewportWidth, viewportHeight, mapWidth, mapHeight);
+    return Phaser.Math.Clamp(value, minZoom, maxZoom);
+}
+
+function clampCameraScroll(scene: Phaser.Scene, bridge: PhaserBridge) {
+    const camera = scene.cameras.main;
+    if (!bridge.mapWidthPixels || !bridge.mapHeightPixels) {
+        return;
+    }
+    camera.scrollX = camera.clampX(camera.scrollX);
+    camera.scrollY = camera.clampY(camera.scrollY);
+}
+
 function fitCameraToMap(scene: Phaser.Scene, bridge: PhaserBridge) {
     const camera = scene.cameras.main;
     const mapWidth = bridge.mapWidthPixels;
@@ -918,25 +1010,44 @@ function fitCameraToMap(scene: Phaser.Scene, bridge: PhaserBridge) {
     if (!mapWidth || !mapHeight) {
         return;
     }
-    const nextZoom = Phaser.Math.Clamp(
-        Math.min(camera.width / mapWidth, camera.height / mapHeight) * 0.88,
-        0.16,
-        0.92,
-    );
+    const { coverZoom } = getMapZoomBounds(camera.width, camera.height, mapWidth, mapHeight);
+    const nextZoom = clampZoom(coverZoom, camera.width, camera.height, mapWidth, mapHeight);
     camera.setZoom(nextZoom);
     camera.centerOn(mapWidth / 2, mapHeight / 2);
+    clampCameraScroll(scene, bridge);
 }
 
-function zoomCameraAtCenter(scene: Phaser.Scene, delta: number) {
+function zoomCameraAtScreenPoint(
+    scene: Phaser.Scene,
+    bridge: PhaserBridge,
+    screenX: number,
+    screenY: number,
+    delta: number,
+) {
     const camera = scene.cameras.main;
-    const centerX = camera.width / 2;
-    const centerY = camera.height / 2;
-    const before = camera.getWorldPoint(centerX, centerY);
-    const nextZoom = Phaser.Math.Clamp(camera.zoom + delta, 0.16, 1.8);
+    const mapWidth = bridge.mapWidthPixels;
+    const mapHeight = bridge.mapHeightPixels;
+    if (!mapWidth || !mapHeight) {
+        return;
+    }
+    const before = camera.getWorldPoint(screenX, screenY);
+    const nextZoom = clampZoom(camera.zoom + delta, camera.width, camera.height, mapWidth, mapHeight);
     camera.setZoom(nextZoom);
-    const after = camera.getWorldPoint(centerX, centerY);
+    const after = camera.getWorldPoint(screenX, screenY);
     camera.scrollX += before.x - after.x;
     camera.scrollY += before.y - after.y;
+    clampCameraScroll(scene, bridge);
+}
+
+function zoomCameraAtCenter(scene: Phaser.Scene, bridge: PhaserBridge, delta: number) {
+    zoomCameraAtScreenPoint(scene, bridge, scene.cameras.main.width / 2, scene.cameras.main.height / 2, delta);
+}
+
+function getAgentWorldPosition(agent: PixelAgent, tileSize: number): { x: number; y: number } {
+    return {
+        x: agent.tile.x * tileSize + tileSize / 2 + agent.visualOffset.x * tileSize,
+        y: agent.tile.y * tileSize + tileSize / 2 + agent.visualOffset.y * tileSize,
+    };
 }
 
 function getFitScreenPosition(agent: PixelAgent, map: WalkableMap, canvasSize: CanvasSize): AgentScreenPosition | undefined {
@@ -949,17 +1060,19 @@ function getFitScreenPosition(agent: PixelAgent, map: WalkableMap, canvasSize: C
     if (mapWidth <= 0 || mapHeight <= 0) {
         return undefined;
     }
-    const zoom = Phaser.Math.Clamp(
-        Math.min(canvasSize.width / mapWidth, canvasSize.height / mapHeight) * 0.88,
-        0.16,
-        0.92,
-    );
+    const { coverZoom } = getMapZoomBounds(canvasSize.width, canvasSize.height, mapWidth, mapHeight);
+    const zoom = clampZoom(coverZoom, canvasSize.width, canvasSize.height, mapWidth, mapHeight);
     const originX = canvasSize.width / 2;
     const originY = canvasSize.height / 2;
-    const scrollX = mapWidth / 2 - originX;
-    const scrollY = mapHeight / 2 - originY;
-    const worldX = agent.tile.x * tileSize + tileSize / 2;
-    const worldY = agent.tile.y * tileSize + tileSize / 2;
+    const displayWidth = canvasSize.width / zoom;
+    const displayHeight = canvasSize.height / zoom;
+    const minScrollX = (displayWidth - canvasSize.width) / 2;
+    const minScrollY = (displayHeight - canvasSize.height) / 2;
+    const maxScrollX = Math.max(minScrollX, minScrollX + mapWidth - displayWidth);
+    const maxScrollY = Math.max(minScrollY, minScrollY + mapHeight - displayHeight);
+    const scrollX = Phaser.Math.Clamp(mapWidth / 2 - originX, minScrollX, maxScrollX);
+    const scrollY = Phaser.Math.Clamp(mapHeight / 2 - originY, minScrollY, maxScrollY);
+    const { x: worldX, y: worldY } = getAgentWorldPosition(agent, tileSize);
     const speechOffsetY = getCompactSpeechBubbleMetrics(tileSize, zoom).offsetY * zoom;
     const screenX = originX + (worldX - scrollX - originX) * zoom;
     const screenY = originY + (worldY - scrollY - originY) * zoom;
@@ -1023,10 +1136,8 @@ function projectWorldToContainer(
     };
 }
 
-function getAgentSpeechItems(agent: PixelAgent): Array<AgentMessage | Communication> {
-    return agent.stepCommunications.length > 0
-        ? agent.stepCommunications
-        : agent.sentMessages;
+function getAgentSpeechItems(agent: PixelAgent): Communication[] {
+    return agent.stepCommunications;
 }
 
 function PixelAgentHoverCard({
@@ -1190,8 +1301,9 @@ function PixelTownCanvas({
         const camera = scene.cameras.main;
         const tileSize = currentFrame.map.tileSize || TILE_SIZE;
         const sprite = bridgeRef.current.sprites.get(agentId);
-        const worldX = sprite?.x ?? (agent.tile.x * tileSize + tileSize / 2);
-        const worldY = sprite?.y ?? (agent.tile.y * tileSize + tileSize / 2);
+        const agentPosition = getAgentWorldPosition(agent, tileSize);
+        const worldX = sprite?.x ?? agentPosition.x;
+        const worldY = sprite?.y ?? agentPosition.y;
         const label = bridgeRef.current.labels.get(agentId);
         const speechBubble = bridgeRef.current.speechBubbles.get(agentId);
         const { offsetY } = getCompactSpeechBubbleMetrics(tileSize, camera.zoom);
@@ -1400,6 +1512,7 @@ function PixelTownCanvas({
                     }
                     this.cameras.main.scrollX = dragStart.scrollX - (pointer.x - dragStart.x) / this.cameras.main.zoom;
                     this.cameras.main.scrollY = dragStart.scrollY - (pointer.y - dragStart.y) / this.cameras.main.zoom;
+                    clampCameraScroll(this, bridgeRef.current);
                     syncAgentScreenPositions();
                 });
                 this.input.on('pointerup', () => {
@@ -1410,12 +1523,7 @@ function PixelTownCanvas({
                     handleHoverAgent(undefined);
                 });
                 this.input.on('wheel', (pointer: Phaser.Input.Pointer, _objects: unknown[], _dx: number, dy: number) => {
-                    const before = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-                    const nextZoom = Phaser.Math.Clamp(this.cameras.main.zoom + (dy > 0 ? -0.06 : 0.06), 0.16, 1.8);
-                    this.cameras.main.setZoom(nextZoom);
-                    const after = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-                    this.cameras.main.scrollX += before.x - after.x;
-                    this.cameras.main.scrollY += before.y - after.y;
+                    zoomCameraAtScreenPoint(this, bridgeRef.current, pointer.x, pointer.y, dy > 0 ? -0.06 : 0.06);
                     syncAgentScreenPositions();
                 });
                 this.scale.on('resize', () => {
@@ -1524,7 +1632,7 @@ function PixelTownCanvas({
     return (
         <div className="pixel-town-canvas" ref={containerRef}>
             <div className="pixel-canvas-controls">
-                <Tooltip title={`适配整张地图：${map.displayName}`}>
+                <Tooltip title={`重置为铺满地图区域：${map.displayName}`}>
                     <Button
                         shape="circle"
                         icon={<AimOutlined />}
@@ -1542,7 +1650,7 @@ function PixelTownCanvas({
                         icon={<ZoomInOutlined />}
                         onClick={() => {
                             if (bridgeRef.current.scene) {
-                                zoomCameraAtCenter(bridgeRef.current.scene, 0.1);
+                                zoomCameraAtCenter(bridgeRef.current.scene, bridgeRef.current, 0.1);
                                 syncAgentScreenPositions();
                             }
                         }}
@@ -1554,7 +1662,7 @@ function PixelTownCanvas({
                         icon={<ZoomOutOutlined />}
                         onClick={() => {
                             if (bridgeRef.current.scene) {
-                                zoomCameraAtCenter(bridgeRef.current.scene, -0.1);
+                                zoomCameraAtCenter(bridgeRef.current.scene, bridgeRef.current, -0.1);
                                 syncAgentScreenPositions();
                             }
                         }}
@@ -1864,8 +1972,7 @@ function renderFrame(
 
     frame.agents.forEach((agent) => {
         const tileSize = frame.map.tileSize || TILE_SIZE;
-        const x = agent.tile.x * tileSize + tileSize / 2;
-        const y = agent.tile.y * tileSize + tileSize / 2;
+        const { x, y } = getAgentWorldPosition(agent, tileSize);
         let sprite = bridge.sprites.get(agent.id);
         let label = bridge.labels.get(agent.id);
         let hitZone = bridge.hitZones.get(agent.id);
@@ -1879,6 +1986,7 @@ function renderFrame(
             sprite.setDepth(10);
             bridge.sprites.set(agent.id, sprite);
         }
+        sprite.setDepth(10 + y / 10000);
         if (!hitZone) {
             hitZone = scene.add.zone(x, y, tileSize * 5, tileSize * 5);
             hitZone.setDepth(40);
@@ -1978,7 +2086,7 @@ function updateSelection(bridge: PhaserBridge) {
     for (const [agentId, sprite] of bridge.sprites.entries()) {
         const selected = agentId === bridge.selectedId;
         sprite.setTint(selected ? 0xfff1a8 : 0xffffff);
-        sprite.setScale(selected ? 1.18 : 1);
+        sprite.setScale(selected ? AGENT_SPRITE_SELECTED_SCALE : AGENT_SPRITE_BASE_SCALE);
         bridge.labels.get(agentId)?.setAlpha(selected ? 1 : 0.82);
     }
     if (bridge.selectedId && bridge.scene) {

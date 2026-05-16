@@ -335,6 +335,41 @@ def test_normalize_draft_replaces_generic_agent_names(monkeypatch, tmp_path):
     assert first["kwargs"]["profile"]["role"] != "participant"
 
 
+def test_normalize_draft_uses_public_channel_default(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    monkeypatch.setattr(god_setup, "_known_location_ids", lambda: ["school", "park", "cafe"])
+    raw = _raw_draft()
+    raw["init_config"]["env_modules"][0]["kwargs"].pop("default_group_name")
+
+    draft = god_setup._normalize_draft(
+        raw,
+        DraftBasics(
+            title="Lab Scenario",
+            background="Coordinate a lab handoff.",
+            agent_count=2,
+        ),
+    )
+
+    env = draft["init_config"]["env_modules"][0]["kwargs"]
+    assert env["default_group_name"] == "Lab Scenario公开频道"
+
+
+def test_pku_trump_experiment_uses_pku_campus_public_channel():
+    repo_root = Path(__file__).resolve().parents[3]
+    config_path = (
+        repo_root
+        / "quick_experiments"
+        / "hypothesis_pku_trump_visit"
+        / "experiment_1"
+        / "init"
+        / "init_config.json"
+    )
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+
+    env = config["env_modules"][0]["kwargs"]
+    assert env["default_group_name"] == "北大校园"
+
+
 def test_normalize_draft_backfills_scenario_specific_agents(monkeypatch, tmp_path):
     _configure_tmp_god(monkeypatch, tmp_path)
     monkeypatch.setattr(god_setup, "_known_location_ids", lambda: ["home", "school", "cafe", "market", "park"])

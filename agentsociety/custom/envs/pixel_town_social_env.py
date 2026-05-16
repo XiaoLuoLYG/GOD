@@ -27,6 +27,33 @@ def _normalize_key(value: Any) -> str:
     return str(value or "").strip().casefold()
 
 
+def _contains_latin(value: Any) -> bool:
+    return any("a" <= ch.lower() <= "z" for ch in str(value or ""))
+
+
+def _contains_latin_outside_terms(value: Any, allowed_terms: list[str]) -> bool:
+    text = str(value or "")
+    terms: set[str] = set()
+    for item in allowed_terms:
+        term = str(item).strip()
+        if not term:
+            continue
+        terms.add(term)
+        terms.update(
+            piece
+            for piece in term.replace("-", " ").replace("_", " ").split()
+            if _contains_latin(piece)
+        )
+    for term in sorted(terms, key=len, reverse=True):
+        text = text.replace(term, "")
+    return _contains_latin(text)
+
+
+def _force_chinese_text(value: Any, fallback: str) -> str:
+    text = str(value or "").strip()
+    return fallback if _contains_latin(text) else text
+
+
 def _load_structured_file(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(f"Pixel town map manifest not found: {path}")
@@ -52,6 +79,7 @@ class PixelTownSocialEnv(EnvBase):
         ColumnDef("message_count", "INTEGER"),
         ColumnDef("last_message", "TEXT"),
         ColumnDef("recent_messages", "JSON"),
+        ColumnDef("nearby_agents", "JSON"),
         ColumnDef("current_phase", "TEXT"),
         ColumnDef("latest_event", "TEXT"),
         ColumnDef("groups", "JSON"),
@@ -78,7 +106,7 @@ class PixelTownSocialEnv(EnvBase):
         self,
         agent_id_name_pairs: list[list[int | str]] | None = None,
         initial_locations: dict[str, str] | None = None,
-        default_group_name: str = "Weekend Pixel Town Plan",
+        default_group_name: str = "像素小镇日常群",
         map_manifest_path: str | None = None,
         map_id: str | None = None,
         movement_tiles_per_second: float = 8.0,
@@ -116,9 +144,9 @@ class PixelTownSocialEnv(EnvBase):
         for agent_id in self._agent_names:
             initial_location = (initial_locations or {}).get(str(agent_id))
             self._place_agent_at_location(agent_id, initial_location, fallback_index=agent_id)
-        self._actions = {agent_id: "arriving" for agent_id in self._agent_names}
-        self._statuses = {agent_id: "ready" for agent_id in self._agent_names}
-        self._emotions = {agent_id: "curious" for agent_id in self._agent_names}
+        self._actions = {agent_id: "刚到达" for agent_id in self._agent_names}
+        self._statuses = {agent_id: "就绪" for agent_id in self._agent_names}
+        self._emotions = {agent_id: "好奇" for agent_id in self._agent_names}
         self._mailboxes: dict[int, list[dict[str, Any]]] = defaultdict(list)
         self._groups: dict[int, dict[str, Any]] = {
             1: {
@@ -130,7 +158,7 @@ class PixelTownSocialEnv(EnvBase):
         self._step_communications: list[dict[str, Any]] = []
         self._step_counter = 0
         self._current_phase = "setup"
-        self._latest_event = f"Agents arrive in {self._map_manifest.get('display_name') or self._map_id}."
+        self._latest_event = f"智能体抵达{self._map_display_name()}。"
         self._lock = asyncio.Lock()
 
     @staticmethod
@@ -418,18 +446,18 @@ supports direct/group messages between agents.
             agent_id = int(agent_id)
             self._agent_names[agent_id] = str(name)
             self._place_agent_at_location(agent_id, location, fallback_index=agent_id)
-            self._actions.setdefault(agent_id, "joined the town")
-            self._statuses.setdefault(agent_id, "ready")
-            self._emotions.setdefault(agent_id, "curious")
+            self._actions.setdefault(agent_id, "加入小镇")
+            self._statuses.setdefault(agent_id, "就绪")
+            self._emotions.setdefault(agent_id, "好奇")
             self._mailboxes.setdefault(agent_id, [])
             group = self._groups.setdefault(
                 1,
-                {"name": "Town Coordination", "members": []},
+                {"name": "小镇协作群", "members": []},
             )
             members = {int(member_id) for member_id in group.get("members", [])}
             members.add(agent_id)
             group["members"] = sorted(members)
-            self._latest_event = f"{name} joined the town."
+            self._latest_event = f"{self._display_name(agent_id)} 加入了小镇。"
             return self._snapshot_agent(agent_id)
 
     @tool(readonly=False)
@@ -442,7 +470,7 @@ supports direct/group messages between agents.
     ) -> dict[str, Any]:
         """Publish a system-level world event that agents can observe and react to."""
         async with self._lock:
-            event = str(event).strip()
+            event = self._force_visible_text(event, "收到一条公共环境事件。")
             severity = str(severity or "info").strip().lower()
             if not event:
                 return {"event": "", "severity": severity, "broadcast": False}
@@ -455,7 +483,7 @@ supports direct/group messages between agents.
             if broadcast:
                 group = self._groups.get(int(group_id))
                 if group:
-                    content = f"公共环境事件（{severity}）：{event}"
+                    content = f"公共环境事件（{self._severity_label(severity)}）：{event}"
                     message = self._build_message(
                         "system_event",
                         0,
@@ -515,15 +543,15 @@ supports direct/group messages between agents.
             self._movement_paths[agent_id] = path
             self._movement_progress[agent_id] = 0.0
             self._movement_targets[agent_id] = target_location_id
-            target_name = self._locations_by_id[target_location_id]["name"]
+            target_name = self._location_display_name(target_location_id)
             if len(path) <= 1:
                 self._finish_movement(agent_id, target_location_id)
             else:
                 self._movement_statuses[agent_id] = "moving"
-                self._actions[agent_id] = f"moving to {target_name}"
-                self._statuses[agent_id] = "moving"
+                self._actions[agent_id] = f"前往{target_name}"
+                self._statuses[agent_id] = "移动中"
                 self._tiles[agent_id] = path[0]
-            self._latest_event = f"{self._agent_names.get(agent_id, agent_id)} moving to {target_name}."
+            self._latest_event = f"{self._display_name(agent_id)} 正在前往{target_name}。"
             return {
                 "ok": True,
                 "agent_id": agent_id,
@@ -566,33 +594,39 @@ supports direct/group messages between agents.
 
             effects = interaction.get("effects") or {}
             if action := effects.get("action"):
-                self._actions[agent_id] = self._render_template(str(action), agent_id, params)
+                self._actions[agent_id] = self._force_visible_text(
+                    self._render_template(str(action), agent_id, params),
+                    f"{self._display_name(agent_id)} 执行{interaction['name']}",
+                )
             if status := effects.get("status"):
-                self._statuses[agent_id] = self._render_template(str(status), agent_id, params)
+                self._statuses[agent_id] = self._force_visible_text(
+                    self._render_template(str(status), agent_id, params),
+                    "活跃",
+                )
             if emotion := effects.get("emotion"):
-                self._emotions[agent_id] = self._render_template(str(emotion), agent_id, params)
+                self._emotions[agent_id] = self._force_visible_text(
+                    self._render_template(str(emotion), agent_id, params),
+                    "平静",
+                )
             if event := effects.get("latest_event"):
-                self._latest_event = self._render_template(str(event), agent_id, params)
+                self._latest_event = self._force_visible_text(
+                    self._render_template(str(event), agent_id, params),
+                    f"{self._display_name(agent_id)} 执行了{interaction['name']}。",
+                )
             else:
                 self._latest_event = (
-                    f"{self._agent_names.get(agent_id, agent_id)} used {interaction['name']}."
+                    f"{self._display_name(agent_id)} 执行了{interaction['name']}。"
                 )
             if group_message := effects.get("group_message"):
-                group_id = int(effects.get("group_id") or 1)
-                group = self._groups.get(group_id)
-                if group:
-                    content = self._render_template(str(group_message), agent_id, params)
-                    message = self._build_message("group", agent_id, content, group_id=group_id)
-                    for member_id in group["members"]:
-                        self._mailboxes[int(member_id)].append(message)
-                    self._total_messages_sent += 1
-                    self._record_communication(
-                        message_type="group",
-                        sender_id=agent_id,
-                        content=content,
-                        group_id=group_id,
-                        recipient_count=len(group["members"]),
-                    )
+                content = self._render_template(str(group_message), agent_id, params)
+                if self._is_public_interaction(interaction, effects):
+                    group_id = int(effects.get("group_id") or 1)
+                    if group_id in self._groups:
+                        self._deliver_group_message_locked(agent_id, group_id, content)
+                else:
+                    receiver_id = self._select_nearby_message_target(agent_id, params)
+                    if receiver_id is not None:
+                        self._deliver_direct_message_locked(agent_id, receiver_id, content)
             return {
                 "ok": True,
                 "agent_id": agent_id,
@@ -612,15 +646,18 @@ supports direct/group messages between agents.
     ) -> dict[str, Any]:
         """Set replay-visible action/status/emotion for an agent."""
         async with self._lock:
-            self._actions[agent_id] = action
-            self._statuses[agent_id] = status
-            self._emotions[agent_id] = emotion
-            self._latest_event = f"{self._agent_names.get(agent_id, agent_id)}: {action}"
+            visible_action = self._force_visible_text(action, "继续日常安排")
+            visible_status = self._force_visible_text(status, "活跃")
+            visible_emotion = self._force_visible_text(emotion, "平静")
+            self._actions[agent_id] = visible_action
+            self._statuses[agent_id] = visible_status
+            self._emotions[agent_id] = visible_emotion
+            self._latest_event = f"{self._display_name(agent_id)}：{visible_action}"
             return {
                 "agent_id": agent_id,
-                "action": action,
-                "status": status,
-                "emotion": emotion,
+                "action": visible_action,
+                "status": visible_status,
+                "emotion": visible_emotion,
             }
 
     @tool(readonly=False)
@@ -632,24 +669,25 @@ supports direct/group messages between agents.
     ) -> dict[str, Any]:
         """Send a direct message to another agent."""
         async with self._lock:
-            message = self._build_message("direct", sender_id, content)
-            self._mailboxes[receiver_id].append(message)
-            self._total_messages_sent += 1
-            self._record_communication(
-                message_type="direct",
-                sender_id=sender_id,
-                content=content,
-                receiver_id=receiver_id,
-            )
-            self._latest_event = (
-                f"{self._agent_names.get(sender_id, sender_id)} messaged "
-                f"{self._agent_names.get(receiver_id, receiver_id)}."
-            )
-            return {
-                "sender_id": sender_id,
-                "receiver_id": receiver_id,
-                "content": content,
-            }
+            sender_id = int(sender_id)
+            receiver_id = int(receiver_id)
+            if sender_id not in self._agent_names:
+                return {"ok": False, "error": "unknown_sender", "sender_id": sender_id}
+            if receiver_id not in self._agent_names:
+                return {"ok": False, "error": "unknown_receiver", "receiver_id": receiver_id}
+            sender_location_id = self._location_ids.get(sender_id)
+            receiver_location_id = self._location_ids.get(receiver_id)
+            if sender_location_id != receiver_location_id:
+                return {
+                    "ok": False,
+                    "error": "receiver_not_nearby",
+                    "sender_id": sender_id,
+                    "receiver_id": receiver_id,
+                    "sender_location_id": sender_location_id,
+                    "receiver_location_id": receiver_location_id,
+                    "nearby_agents": self._nearby_agents(sender_id),
+                }
+            return self._deliver_direct_message_locked(sender_id, receiver_id, str(content))
 
     @tool(readonly=False)
     async def send_group_message(
@@ -660,29 +698,12 @@ supports direct/group messages between agents.
     ) -> dict[str, Any]:
         """Send a message to all members of a group."""
         async with self._lock:
+            sender_id = int(sender_id)
+            group_id = int(group_id)
             group = self._groups.get(group_id)
             if not group:
-                return {"sender_id": sender_id, "group_id": group_id, "recipient_count": 0}
-            message = self._build_message("group", sender_id, content, group_id=group_id)
-            for member_id in group["members"]:
-                self._mailboxes[int(member_id)].append(message)
-            self._total_messages_sent += 1
-            self._record_communication(
-                message_type="group",
-                sender_id=sender_id,
-                content=content,
-                group_id=group_id,
-                recipient_count=len(group["members"]),
-            )
-            self._latest_event = (
-                f"{self._agent_names.get(sender_id, sender_id)} posted to {group['name']}."
-            )
-            return {
-                "sender_id": sender_id,
-                "group_id": group_id,
-                "content": content,
-                "recipient_count": len(group["members"]),
-            }
+                return {"ok": False, "sender_id": sender_id, "group_id": group_id, "recipient_count": 0}
+            return self._deliver_group_message_locked(sender_id, group_id, str(content))
 
     async def apply_scripted_action(
         self,
@@ -693,15 +714,24 @@ supports direct/group messages between agents.
         async with self._lock:
             if location := action.get("location"):
                 self._place_agent_at_location(agent_id, location, fallback_index=agent_id)
-            self._actions[agent_id] = str(action.get("action") or "waiting")
-            self._statuses[agent_id] = str(action.get("status") or "active")
-            self._emotions[agent_id] = str(action.get("emotion") or "focused")
+            self._actions[agent_id] = self._force_visible_text(
+                action.get("action") or "等待",
+                "等待下一步安排",
+            )
+            self._statuses[agent_id] = self._force_visible_text(
+                action.get("status") or "活跃",
+                "活跃",
+            )
+            self._emotions[agent_id] = self._force_visible_text(
+                action.get("emotion") or "专注",
+                "专注",
+            )
             if phase := action.get("phase"):
                 self._current_phase = str(phase)
 
             for direct in action.get("direct_messages", []) or []:
                 receiver_id = int(direct["to"])
-                content = str(direct["content"])
+                content = self._force_visible_text(direct["content"], "我会用中文继续处理。")
                 self._mailboxes[receiver_id].append(
                     self._build_message("direct", agent_id, content)
                 )
@@ -715,7 +745,7 @@ supports direct/group messages between agents.
 
             for group_msg in action.get("group_messages", []) or []:
                 group_id = int(group_msg.get("group_id", 1))
-                content = str(group_msg["content"])
+                content = self._force_visible_text(group_msg["content"], "我会用中文同步当前处理。")
                 group = self._groups.get(group_id)
                 if group:
                     message = self._build_message(
@@ -734,7 +764,11 @@ supports direct/group messages between agents.
 
             self._latest_event = str(
                 action.get("event")
-                or f"{self._agent_names.get(agent_id, agent_id)}: {self._actions[agent_id]}"
+                or f"{self._display_name(agent_id)}：{self._actions[agent_id]}"
+            )
+            self._latest_event = self._force_visible_text(
+                self._latest_event,
+                f"{self._display_name(agent_id)} 更新了状态。",
             )
             return self._snapshot_agent(agent_id)
 
@@ -912,16 +946,15 @@ supports direct/group messages between agents.
                 self._finish_movement(agent_id, target_location_id)
 
     def _finish_movement(self, agent_id: int, location_id: str) -> None:
-        location = self._locations_by_id[location_id]
         self._location_ids[agent_id] = location_id
-        self._locations[agent_id] = str(location["name"])
+        self._locations[agent_id] = self._location_display_name(location_id)
         self._tiles[agent_id] = self._location_tile(location_id)
         self._movement_statuses[agent_id] = "idle"
         self._movement_targets[agent_id] = None
         self._movement_paths[agent_id] = [self._tiles[agent_id]]
         self._movement_progress[agent_id] = 0.0
-        self._statuses[agent_id] = "active"
-        self._actions[agent_id] = f"arrived at {location['name']}"
+        self._statuses[agent_id] = "活跃"
+        self._actions[agent_id] = f"已到达{self._location_display_name(location_id)}"
 
     def _build_message(
         self,
@@ -934,13 +967,139 @@ supports direct/group messages between agents.
             "type": message_type,
             "sender_id": sender_id,
             "sender_name": self._display_name(sender_id),
-            "content": content,
+            "content": self._force_visible_text(content, "我会用中文继续处理。"),
             "timestamp": self.t.isoformat() if hasattr(self, "t") else "",
         }
         if group_id is not None:
             message["group_id"] = group_id
-            message["group_name"] = self._groups.get(group_id, {}).get("name", f"Group {group_id}")
+            message["group_name"] = _force_chinese_text(
+                self._groups.get(group_id, {}).get("name", f"{group_id}号群"),
+                f"{group_id}号群",
+            )
         return message
+
+    def _deliver_direct_message_locked(
+        self,
+        sender_id: int,
+        receiver_id: int,
+        content: str,
+    ) -> dict[str, Any]:
+        content = self._force_visible_text(content, "我会用中文继续处理。")
+        message = self._build_message("direct", sender_id, content)
+        self._mailboxes[receiver_id].append(message)
+        self._total_messages_sent += 1
+        self._record_communication(
+            message_type="direct",
+            sender_id=sender_id,
+            content=content,
+            receiver_id=receiver_id,
+        )
+        self._latest_event = (
+            f"{self._display_name(sender_id)} 给"
+            f"{self._display_name(receiver_id)} 发了私信。"
+        )
+        return {
+            "ok": True,
+            "sender_id": sender_id,
+            "receiver_id": receiver_id,
+            "content": content,
+        }
+
+    def _deliver_group_message_locked(
+        self,
+        sender_id: int,
+        group_id: int,
+        content: str,
+    ) -> dict[str, Any]:
+        content = self._force_visible_text(content, "我会用中文同步当前处理。")
+        group = self._groups[group_id]
+        message = self._build_message("group", sender_id, content, group_id=group_id)
+        for member_id in group["members"]:
+            self._mailboxes[int(member_id)].append(message)
+        self._total_messages_sent += 1
+        self._record_communication(
+            message_type="group",
+            sender_id=sender_id,
+            content=content,
+            group_id=group_id,
+            recipient_count=len(group["members"]),
+        )
+        self._latest_event = (
+            f"{self._display_name(sender_id)} 在{_force_chinese_text(group['name'], f'{group_id}号群')}发了消息。"
+        )
+        return {
+            "ok": True,
+            "sender_id": sender_id,
+            "group_id": group_id,
+            "content": content,
+            "recipient_count": len(group["members"]),
+        }
+
+    def _nearby_agent_ids(self, agent_id: int) -> list[int]:
+        location_id = self._location_ids.get(int(agent_id))
+        if not location_id:
+            return []
+        return [
+            other_id
+            for other_id in sorted(self._agent_names)
+            if other_id != int(agent_id)
+            and self._location_ids.get(other_id) == location_id
+        ]
+
+    def _nearby_agents(self, agent_id: int) -> list[dict[str, Any]]:
+        return [
+            {
+                "agent_id": other_id,
+                "name": self._display_name(other_id),
+                "location_id": self._location_ids.get(other_id),
+                "location": self._locations.get(other_id, ""),
+            }
+            for other_id in self._nearby_agent_ids(agent_id)
+        ]
+
+    def _select_nearby_message_target(
+        self,
+        agent_id: int,
+        params: dict[str, Any],
+    ) -> int | None:
+        nearby_ids = self._nearby_agent_ids(agent_id)
+        for key in ("receiver_id", "to", "target_agent_id"):
+            try:
+                candidate = int(params.get(key))
+            except (TypeError, ValueError):
+                continue
+            if candidate in nearby_ids:
+                return candidate
+        return nearby_ids[0] if nearby_ids else None
+
+    @staticmethod
+    def _truthy_public_value(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        return str(value or "").strip().casefold() in {
+            "1",
+            "true",
+            "yes",
+            "public",
+            "broadcast",
+            "announcement",
+            "all",
+        }
+
+    def _is_public_interaction(
+        self,
+        interaction: dict[str, Any],
+        effects: dict[str, Any],
+    ) -> bool:
+        if str(interaction.get("id") or "") == "public_announcement":
+            return True
+        for key in ("broadcast", "public", "is_public"):
+            if self._truthy_public_value(effects.get(key)):
+                return True
+        for key in ("scope", "message_scope"):
+            if self._truthy_public_value(effects.get(key)):
+                return True
+        return False
 
     def _record_communication(
         self,
@@ -955,34 +1114,63 @@ supports direct/group messages between agents.
             "type": message_type,
             "sender_id": sender_id,
             "sender_name": self._display_name(sender_id),
-            "content": content,
+            "content": self._force_visible_text(content, "我会用中文继续处理。"),
         }
         if receiver_id is not None:
             communication["receiver_id"] = receiver_id
-            communication["receiver_name"] = self._agent_names.get(
-                receiver_id, f"Agent {receiver_id}"
-            )
+            communication["receiver_name"] = self._display_name(receiver_id)
         if group_id is not None:
             communication["group_id"] = group_id
             communication["group_name"] = self._groups.get(group_id, {}).get(
-                "name", f"Group {group_id}"
+                "name", f"{group_id}号群"
             )
         if recipient_count is not None:
             communication["recipient_count"] = recipient_count
         self._step_communications.append(communication)
 
+    def _force_visible_text(self, value: Any, fallback: str) -> str:
+        text = str(value or "").strip()
+        if _contains_latin_outside_terms(text, list(self._agent_names.values())):
+            return fallback
+        return text
+
     def _display_name(self, agent_id: int) -> str:
         if int(agent_id) == 0:
-            return "Town system"
-        return self._agent_names.get(agent_id, f"Agent {agent_id}")
+            return "小镇系统"
+        name = str(self._agent_names.get(agent_id, f"{agent_id}号智能体")).strip()
+        return name or f"{agent_id}号智能体"
+
+    def _map_display_name(self) -> str:
+        display_name = self._map_manifest.get("display_name")
+        if display_name and not _contains_latin(display_name):
+            return str(display_name)
+        return "当前地图"
+
+    def _location_display_name(self, location_id: str) -> str:
+        location = self._locations_by_id.get(location_id) or {}
+        return _force_chinese_text(location.get("name") or location_id, "目标地点")
+
+    @staticmethod
+    def _severity_label(severity: str) -> str:
+        return {
+            "info": "信息",
+            "warning": "警告",
+            "emergency": "紧急",
+            "crisis": "危机",
+            "disaster": "灾害",
+        }.get(str(severity or "").lower(), "信息")
 
     def _public_location(self, location: dict[str, Any]) -> dict[str, Any]:
         location_id = str(location["id"])
         tile = self._location_tile(location_id)
         public = {
             "id": location_id,
-            "name": location["name"],
-            "aliases": location.get("aliases", []),
+            "name": _force_chinese_text(location["name"], location_id),
+            "aliases": [
+                alias
+                for alias in location.get("aliases", [])
+                if not _contains_latin(alias)
+            ],
             "anchor_tile": {"x": tile[0], "y": tile[1]},
             "interaction_ids": location.get("interaction_ids", []),
         }
@@ -990,17 +1178,17 @@ supports direct/group messages between agents.
             public["scene_type"] = location["scene_type"]
         if location.get("bounds"):
             public["bounds"] = location["bounds"]
-        if location.get("source_address"):
-            public["source_address"] = location["source_address"]
-        if location.get("source_object"):
-            public["source_object"] = location["source_object"]
         return public
 
     def _public_interaction(self, interaction: dict[str, Any]) -> dict[str, Any]:
         return {
             "id": interaction["id"],
-            "name": interaction["name"],
-            "description": interaction.get("description", ""),
+            "name": _force_chinese_text(interaction["name"], interaction["id"]),
+            "description": (
+                ""
+                if _contains_latin(interaction.get("description", ""))
+                else interaction.get("description", "")
+            ),
             "allowed_location_ids": interaction.get("allowed_location_ids", []),
         }
 
@@ -1042,13 +1230,14 @@ supports direct/group messages between agents.
         return {
             "agent_id": agent_id,
             "name": self._agent_names.get(agent_id, f"Agent {agent_id}"),
-            "location": self._locations.get(agent_id, "Town square"),
-            "action": self._actions.get(agent_id, "waiting"),
-            "status": self._statuses.get(agent_id, "ready"),
-            "emotion": self._emotions.get(agent_id, "neutral"),
+            "location": self._locations.get(agent_id, "小镇广场"),
+            "action": self._actions.get(agent_id, "等待"),
+            "status": self._statuses.get(agent_id, "就绪"),
+            "emotion": self._emotions.get(agent_id, "平静"),
             "message_count": len(messages),
             "last_message": last_message,
             "recent_messages": list(messages[-5:]),
+            "nearby_agents": self._nearby_agents(agent_id),
             "current_phase": self._current_phase,
             "latest_event": self._latest_event,
             "groups": self._groups,

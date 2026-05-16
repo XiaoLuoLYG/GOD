@@ -1,5 +1,5 @@
 start_t: "2026-05-15T08:20:00+08:00"
 steps:
   - type: run
-    num_steps: 16
+    num_steps: 24
     tick: 1800

@@ -58,6 +58,11 @@ MODEL_KEYS = (
 
 SENSITIVE_KEYS = {"GOD_LLM_API_KEY", "GOD_EMBEDDING_API_KEY"}
 
+
+def _default_public_group_name(title: str) -> str:
+    title = str(title or "").strip()
+    return f"{title}公开频道" if title else "GOD 公开频道"
+
 DEFAULT_DRAFT_BACKGROUND = (
     "请生成一个安全、边界清晰的社会角色压力模拟：参与者被分配为管理者、观察者、"
     "普通参与者等角色，重点观察权力、规则、协作和情绪变化，不允许羞辱、伤害或强迫行为。"
@@ -753,7 +758,10 @@ def _normalize_draft(raw: dict[str, Any], basics: DraftBasics) -> dict[str, Any]
                 [agent["agent_id"], agent["kwargs"]["name"]] for agent in normalized_agents
             ],
             "initial_locations": initial_locations,
-            "default_group_name": str(source_env_kwargs.get("default_group_name") or f"{basics.title} Chat"),
+            "default_group_name": str(
+                source_env_kwargs.get("default_group_name")
+                or _default_public_group_name(basics.title)
+            ),
             "map_id": package.map_id,
             "map_manifest_path": relative_manifest_path(package, _map_service_root()),
             "movement_tiles_per_second": float(
@@ -904,7 +912,7 @@ async def _call_openai_compatible(
         f"Available locations and interactions:\n{_map_location_prompt(package)}\n\n"
         "Agent profile requirements:\n"
         f"- Return exactly {basics.agent_count} agents.\n"
-        "- Every agent must have a realistic English human name; do not use Agent 1, Jiuwen Agent 1, Participant 1, or numbered placeholders. Can use Jiuwen as a prefix, e.g. Jiuwen Alice, Jiuwen Bob, etc.\n"
+        "- 每个智能体都必须有真实自然的显示名；可以是中文或英文，但不要使用 Agent 1、Jiuwen Agent 1、Participant 1 或编号占位名。\n"
         "- Each profile must be scenario-specific: role, household, persona, daily_routine, relationships, goal, constraints, and scenario_role.\n"
         "- Relationships should reference other generated agent names or roles so the town has social texture.\n"
         "- Do not put skills inside profile. Skills are executable runtime ids on kwargs.common_skill_ids and kwargs.skill_ids.\n"

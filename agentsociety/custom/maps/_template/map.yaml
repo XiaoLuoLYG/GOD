@@ -27,12 +27,12 @@ locations:
   - wait
 interactions:
 - id: wait
-  name: Wait
-  description: Spend a short moment in the plaza.
+  name: 等待
+  description: 在广场短暂停留。
   allowed_location_ids:
   - plaza
   effects:
-    action: "{agent_name} is waiting in the plaza"
-    status: resting
-    emotion: calm
-    latest_event: "{agent_name} paused in the plaza."
+    action: "{agent_name} 在广场等待"
+    status: 休息中
+    emotion: 平静
+    latest_event: "{agent_name} 在广场短暂停留。"
