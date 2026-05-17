@@ -30,6 +30,7 @@ import {
     UploadOutlined,
 } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import RootLayout from '../../Layout';
 import { fetchCustom } from '../../components/fetch';
 import { AgentEditorModal } from './AgentEditorModal';
@@ -71,7 +72,14 @@ type AgentBuilderPanelProps = {
     onSaved?: () => void | Promise<void>;
 };
 
-const DEFAULT_PROFILE = {
+type DefaultProfile = {
+    name: string;
+    role: string;
+    persona: string;
+    goal: string;
+};
+
+const DEFAULT_PROFILE: DefaultProfile = {
     name: '',
     role: '小镇居民',
     persona: '主动、可靠、会根据小镇当前情况和其他居民协作',
@@ -127,6 +135,7 @@ const buildDefaultAgentValues = (
     classes: AgentClassInfo[],
     currentAgents: AgentRecord[],
     workspacePath: string,
+    defaultProfile: DefaultProfile,
 ): AgentFormValues => {
     const agentType = findDefaultAgentType(classes);
     const existing = currentAgents.find((agent) => agent.agent_type === agentType);
@@ -136,7 +145,7 @@ const buildDefaultAgentValues = (
     const { id: _id, name: _name, profile: _profile, ...existingExtra } = existing?.kwargs || {};
     const name = agentType === 'JiuwenClawAgent' ? `Jiuwen Agent ${nextId}` : `Agent_${nextId}`;
     const profile = {
-        ...DEFAULT_PROFILE,
+        ...defaultProfile,
         ...existingProfile,
         name,
     };
@@ -171,6 +180,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
     autoLoad = false,
     onSaved,
 }) => {
+    const { t } = useTranslation();
     const [searchParams, setSearchParams] = useSearchParams();
     const [workspacePath, setWorkspacePath] = useState(
         initialWorkspacePath ||
@@ -198,6 +208,12 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
     const agents = config?.agents || [];
     const duplicateIds = useMemo(() => getDuplicateIds(agents), [agents]);
     const hasInvalidAgents = agents.some((agent) => !agent.kwargs || agent.kwargs.id !== agent.agent_id) || duplicateIds.size > 0;
+    const defaultProfile = useMemo<DefaultProfile>(() => ({
+        ...DEFAULT_PROFILE,
+        role: t('agentBuilder.defaults.role'),
+        persona: t('agentBuilder.defaults.persona'),
+        goal: t('agentBuilder.defaults.goal'),
+    }), [t]);
 
     const endpointBase = `/api/v1/experiment-configs/${encodeURIComponent(hypothesisId)}/${encodeURIComponent(experimentId)}`;
     const query = `workspace_path=${encodeURIComponent(workspacePath)}`;
@@ -208,9 +224,9 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
             .then((payload) => setAgentClasses(Object.values(payload.agents || {})))
             .catch((error) => {
                 console.error(error);
-                message.warning('Agent classes could not be loaded.');
+                message.warning(t('agentBuilder.messages.classesLoadFailed'));
             });
-    }, []);
+    }, [t]);
 
     const updateUrlState = () => {
         const params = new URLSearchParams();
@@ -227,7 +243,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
 
     const loadConfig = async () => {
         if (!workspacePath || !hypothesisId || !experimentId) {
-            message.warning('Please provide workspace path, hypothesis ID, and experiment ID.');
+            message.warning(t('agentBuilder.messages.requiredPath'));
             return;
         }
         setLoading(true);
@@ -240,9 +256,9 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
             const payload = await response.json();
             setConfig(payload.config);
             setConfigPath(payload.path);
-            message.success('init_config.json loaded.');
+            message.success(t('agentBuilder.messages.loaded'));
         } catch (error) {
-            message.error(`Failed to load init config: ${error instanceof Error ? error.message : String(error)}`);
+            message.error(t('agentBuilder.messages.loadFailed', { error: error instanceof Error ? error.message : String(error) }));
         } finally {
             setLoading(false);
         }
@@ -271,10 +287,10 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
             const payload = await response.json();
             setConfig(payload.config);
             setConfigPath(payload.path);
-            message.success('init_config.json saved.');
+            message.success(t('agentBuilder.messages.saved'));
             await onSaved?.();
         } catch (error) {
-            message.error(`Failed to save init config: ${error instanceof Error ? error.message : String(error)}`);
+            message.error(t('agentBuilder.messages.saveFailed', { error: error instanceof Error ? error.message : String(error) }));
         } finally {
             setSaving(false);
         }
@@ -283,7 +299,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
     const openCreateAgent = () => {
         const nextId = agents.length ? Math.max(...agents.map((agent) => agent.agent_id)) + 1 : 1;
         setEditingAgentId(null);
-        form.setFieldsValue(buildDefaultAgentValues(nextId, agentClasses, agents, workspacePath));
+        form.setFieldsValue(buildDefaultAgentValues(nextId, agentClasses, agents, workspacePath, defaultProfile));
         setAgentModalOpen(true);
     };
 
@@ -317,7 +333,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
 
     const previewImport = async () => {
         if (!importContent.trim()) {
-            message.warning('Paste or upload CSV/JSON content first.');
+            message.warning(t('agentBuilder.messages.importContentRequired'));
             return;
         }
         try {
@@ -331,9 +347,9 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
             }
             const payload = await response.json();
             setImportPreview(payload);
-            message.success(`Preview ready: ${payload.valid_count} valid, ${payload.invalid_count} invalid.`);
+            message.success(t('agentBuilder.messages.previewReady', { valid: payload.valid_count, invalid: payload.invalid_count }));
         } catch (error) {
-            message.error(`Import preview failed: ${error instanceof Error ? error.message : String(error)}`);
+            message.error(t('agentBuilder.messages.previewFailed', { error: error instanceof Error ? error.message : String(error) }));
         }
     };
 
@@ -343,7 +359,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
             .filter((row) => row.valid && row.agent)
             .map((row) => row.agent as AgentRecord);
         if (!validAgents.length) {
-            message.warning('No valid rows to apply.');
+            message.warning(t('agentBuilder.messages.noValidRows'));
             return;
         }
         try {
@@ -368,10 +384,10 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
             if (payload.warnings?.length) {
                 message.warning(payload.warnings.join(' '));
             } else {
-                message.success(`Imported ${validAgents.length} agents.`);
+                message.success(t('agentBuilder.messages.imported', { count: validAgents.length }));
             }
         } catch (error) {
-            message.error(`Apply import failed: ${error instanceof Error ? error.message : String(error)}`);
+            message.error(t('agentBuilder.messages.applyImportFailed', { error: error instanceof Error ? error.message : String(error) }));
         }
     };
 
@@ -383,16 +399,16 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
             sorter: (a, b) => a.agent_id - b.agent_id,
         },
         {
-            title: 'Name',
+            title: t('agentBuilder.columns.name'),
             render: (_, record) => getAgentName(record),
         },
         {
-            title: 'Agent Type',
+            title: t('agentBuilder.columns.agentType'),
             dataIndex: 'agent_type',
             render: (value: string) => <Tag color="blue">{value}</Tag>,
         },
         {
-            title: 'Profile',
+            title: t('agentBuilder.columns.profile'),
             render: (_, record) => (
                 <Tooltip title={<pre style={{ margin: 0 }}>{jsonStringify(record.kwargs?.profile)}</pre>}>
                     <Text code>{shortJson(record.kwargs?.profile)}</Text>
@@ -400,7 +416,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
             ),
         },
         {
-            title: 'Kwargs',
+            title: t('agentBuilder.columns.kwargs'),
             render: (_, record) => {
                 const { profile, ...rest } = record.kwargs || {};
                 return (
@@ -411,27 +427,27 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
             },
         },
         {
-            title: 'Status',
+            title: t('agentBuilder.columns.status'),
             width: 130,
             render: (_, record) => {
                 if (duplicateIds.has(record.agent_id)) {
-                    return <Tag color="red">Duplicate ID</Tag>;
+                    return <Tag color="red">{t('agentBuilder.status.duplicateId')}</Tag>;
                 }
                 if (record.kwargs?.id !== record.agent_id) {
-                    return <Tag color="orange">ID mismatch</Tag>;
+                    return <Tag color="orange">{t('agentBuilder.status.idMismatch')}</Tag>;
                 }
-                return <Tag color="green">Valid</Tag>;
+                return <Tag color="green">{t('agentBuilder.status.valid')}</Tag>;
             },
         },
         {
-            title: 'Actions',
+            title: t('agentBuilder.columns.actions'),
             width: 110,
             render: (_, record) => (
                 <Space size="small">
-                    <Tooltip title="Edit">
+                    <Tooltip title={t('agentBuilder.actions.edit')}>
                         <Button size="small" icon={<EditOutlined />} onClick={() => openEditAgent(record)} />
                     </Tooltip>
-                    <Popconfirm title="Delete this agent?" onConfirm={() => deleteAgent(record.agent_id)}>
+                    <Popconfirm title={t('agentBuilder.messages.deleteConfirm')} onConfirm={() => deleteAgent(record.agent_id)}>
                         <Button size="small" danger icon={<DeleteOutlined />} />
                     </Popconfirm>
                 </Space>
@@ -440,18 +456,20 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
     ];
 
     const previewColumns: ColumnsType<ImportPreviewRow> = [
-        { title: 'Row', dataIndex: 'row_index', width: 80 },
+        { title: t('agentBuilder.columns.row'), dataIndex: 'row_index', width: 80 },
         {
-            title: 'Status',
+            title: t('agentBuilder.columns.status'),
             width: 110,
-            render: (_, row) => row.valid ? <Tag color="green">Valid</Tag> : <Tag color="red">Invalid</Tag>,
+            render: (_, row) => row.valid
+                ? <Tag color="green">{t('agentBuilder.status.valid')}</Tag>
+                : <Tag color="red">{t('agentBuilder.status.invalid')}</Tag>,
         },
         {
-            title: 'Agent',
+            title: t('agentBuilder.columns.agent'),
             render: (_, row) => row.agent ? `${row.agent.agent_id} · ${getAgentName(row.agent)} · ${row.agent.agent_type}` : '-',
         },
         {
-            title: 'Errors',
+            title: t('agentBuilder.columns.errors'),
             render: (_, row) => row.errors.length ? row.errors.join('; ') : '-',
         },
     ];
@@ -459,11 +477,11 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
     const content = (
         <>
             <Card
-                    title="Agent Builder"
+                    title={t('agentBuilder.title')}
                     extra={
-                        <Space>
+                        <Space wrap>
                             <Button icon={<FolderOpenOutlined />} onClick={loadConfig} loading={loading}>
-                                Load
+                                {t('agentBuilder.actions.load')}
                             </Button>
                             <Button
                                 type="primary"
@@ -472,7 +490,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                                 disabled={!config || hasInvalidAgents}
                                 loading={saving}
                             >
-                                Save
+                                {t('agentBuilder.actions.save')}
                             </Button>
                         </Space>
                     }
@@ -480,7 +498,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                     <Row gutter={[12, 12]}>
                         <Col xs={24} lg={12}>
                             <Input
-                                addonBefore="Workspace"
+                                addonBefore={t('agentBuilder.fields.workspace')}
                                 value={workspacePath}
                                 onChange={(event) => setWorkspacePath(event.target.value)}
                                 placeholder="/path/to/workspace"
@@ -488,14 +506,14 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                         </Col>
                         <Col xs={12} lg={6}>
                             <Input
-                                addonBefore="Hypothesis"
+                                addonBefore={t('agentBuilder.fields.hypothesis')}
                                 value={hypothesisId}
                                 onChange={(event) => setHypothesisId(event.target.value)}
                             />
                         </Col>
                         <Col xs={12} lg={6}>
                             <Input
-                                addonBefore="Experiment"
+                                addonBefore={t('agentBuilder.fields.experiment')}
                                 value={experimentId}
                                 onChange={(event) => setExperimentId(event.target.value)}
                             />
@@ -504,27 +522,27 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
 
                     {configPath && (
                         <Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>
-                            Loaded from <Text code>{configPath}</Text>
+                            {t('agentBuilder.messages.loadedFrom')} <Text code>{configPath}</Text>
                         </Paragraph>
                     )}
 
                     <Divider />
 
-                    <Space style={{ marginBottom: 12 }}>
+                    <Space wrap style={{ marginBottom: 12 }}>
                         <Button type="primary" icon={<PlusOutlined />} onClick={openCreateAgent} disabled={!config}>
-                            Add Agent
+                            {t('agentBuilder.actions.addAgent')}
                         </Button>
                         <Button icon={<ImportOutlined />} onClick={() => setImportModalOpen(true)} disabled={!config}>
-                            Batch Import
+                            {t('agentBuilder.actions.batchImport')}
                         </Button>
-                        <Tag>{agents.length} agents</Tag>
+                        <Tag>{t('agentBuilder.messages.agentCount', { count: agents.length })}</Tag>
                     </Space>
 
                     {hasInvalidAgents && (
                         <Alert
                             type="warning"
                             showIcon
-                            message="Some agents are invalid. Fix duplicate IDs or ID mismatches before saving."
+                            message={t('agentBuilder.messages.invalidAgents')}
                             style={{ marginBottom: 12 }}
                         />
                     )}
@@ -535,6 +553,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                         dataSource={agents}
                         loading={loading}
                         pagination={{ pageSize: 10, showSizeChanger: true }}
+                        scroll={{ x: 900 }}
                     />
             </Card>
 
@@ -548,14 +567,14 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
             />
 
             <Modal
-                title="Batch Import Agents"
+                title={t('agentBuilder.import.title')}
                 open={importModalOpen}
                 onCancel={() => setImportModalOpen(false)}
                 footer={[
-                    <Button key="cancel" onClick={() => setImportModalOpen(false)}>Cancel</Button>,
-                    <Button key="preview" onClick={previewImport}>Preview</Button>,
+                    <Button key="cancel" onClick={() => setImportModalOpen(false)}>{t('agentBuilder.actions.cancel')}</Button>,
+                    <Button key="preview" onClick={previewImport}>{t('agentBuilder.actions.preview')}</Button>,
                     <Button key="apply" type="primary" disabled={!importPreview?.valid_count} onClick={applyImport}>
-                        Apply Valid Rows
+                        {t('agentBuilder.actions.applyValidRows')}
                     </Button>,
                 ]}
                 width="82vw"
@@ -565,20 +584,20 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                     <Alert
                         type="info"
                         showIcon
-                        message="CSV requires agent_id, agent_type, name. Optional columns include profile.*, kwargs.*, profile_json, kwargs_json."
+                        message={t('agentBuilder.import.help')}
                     />
                     <Row gutter={12}>
                         <Col span={12}>
                             <Radio.Group value={importFormat} onChange={(event) => setImportFormat(event.target.value)}>
-                                <Radio.Button value="auto">Auto</Radio.Button>
+                                <Radio.Button value="auto">{t('agentBuilder.import.auto')}</Radio.Button>
                                 <Radio.Button value="csv">CSV</Radio.Button>
                                 <Radio.Button value="json">JSON</Radio.Button>
                             </Radio.Group>
                         </Col>
                         <Col span={12} style={{ textAlign: 'right' }}>
                             <Radio.Group value={importMode} onChange={(event) => setImportMode(event.target.value)}>
-                                <Radio.Button value="append">Append</Radio.Button>
-                                <Radio.Button value="replace">Replace</Radio.Button>
+                                <Radio.Button value="append">{t('agentBuilder.import.append')}</Radio.Button>
+                                <Radio.Button value="replace">{t('agentBuilder.import.replace')}</Radio.Button>
                             </Radio.Group>
                         </Col>
                     </Row>
@@ -591,13 +610,13 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                         accept=".csv,.json"
                     >
                         <p className="ant-upload-drag-icon"><UploadOutlined /></p>
-                        <p className="ant-upload-text">Drop a CSV/JSON file here or click to select</p>
+                        <p className="ant-upload-text">{t('agentBuilder.import.dropText')}</p>
                     </Upload.Dragger>
                     <Input.TextArea
                         rows={10}
                         value={importContent}
                         onChange={(event) => setImportContent(event.target.value)}
-                        placeholder={'agent_id,agent_type,name,profile.age\n2,PersonAgent,Bob,31'}
+                        placeholder={t('agentBuilder.import.contentPlaceholder')}
                         spellCheck={false}
                     />
                     {importPreview && (
@@ -607,11 +626,12 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                             columns={previewColumns}
                             dataSource={importPreview.rows}
                             pagination={{ pageSize: 8 }}
+                            scroll={{ x: 720 }}
                             title={() => (
                                 <Space>
-                                    <Tag color="green">{importPreview.valid_count} valid</Tag>
+                                    <Tag color="green">{t('agentBuilder.import.validCount', { count: importPreview.valid_count })}</Tag>
                                     <Tag color={importPreview.invalid_count ? 'red' : 'default'}>
-                                        {importPreview.invalid_count} invalid
+                                        {t('agentBuilder.import.invalidCount', { count: importPreview.invalid_count })}
                                     </Tag>
                                 </Space>
                             )}
@@ -628,7 +648,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
 
     return (
         <RootLayout selectedKey="/agent-builder">
-            <div style={{ padding: 24 }}>
+            <div style={{ padding: 24, overflowX: 'hidden' }}>
                 {content}
             </div>
         </RootLayout>

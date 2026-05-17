@@ -42,6 +42,10 @@ export default {
         cancel: "Cancel",
         metadataTitle: "Basic Information",
         basicInfo: "Basic Information",
-        view: "View"
+        view: "View",
+        language: {
+            switchToChinese: "Switch to Chinese",
+            switchToEnglish: "Switch to English"
+        }
     }
 }; 

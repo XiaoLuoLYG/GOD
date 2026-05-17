@@ -7,6 +7,7 @@ import { ProTable, ProColumns } from "@ant-design/pro-components";
 import { ActionType } from "@ant-design/pro-table";
 import { useTranslation } from "react-i18next";
 import { fetchCustom } from "../../components/fetch";
+import LanguageToggle from "../../components/LanguageToggle";
 import {
     PlusOutlined, UploadOutlined, ReloadOutlined,
     DeleteOutlined, EyeOutlined, ScanOutlined,
@@ -224,6 +225,18 @@ const SkillsPage = () => {
         return "red";
     };
 
+    const validationLabel = (status: string) => {
+        if (status === "ready") return t("skill.validation.ready");
+        if (status === "disabled") return t("skill.validation.disabled");
+        if (!status) return t("skill.validation.unknown");
+        return status;
+    };
+
+    const effectLabel = (effect: string) => {
+        const translated = t(`skill.effects.${effect}`, { defaultValue: "" });
+        return translated || effect;
+    };
+
     const columns: ProColumns<SkillItem>[] = [
         {
             title: t("skill.columns.name"),
@@ -256,7 +269,7 @@ const SkillsPage = () => {
             width: 220,
             render: (_, record) => (
                 <Space size={[0, 4]} wrap>
-                    {(record.effects || []).map((effect) => <Tag key={effect}>{effect}</Tag>)}
+                    {(record.effects || []).map((effect) => <Tag key={effect}>{effectLabel(effect)}</Tag>)}
                 </Space>
             ),
         },
@@ -281,7 +294,7 @@ const SkillsPage = () => {
             width: 130,
             render: (_, record) => (
                 <Tag color={validationColor(record.validation_status)}>
-                    {record.validation_status || "unknown"}
+                    {validationLabel(record.validation_status)}
                 </Tag>
             ),
         },
@@ -344,21 +357,24 @@ const SkillsPage = () => {
                 loading={loading}
                 search={false}
                 pagination={false}
+                scroll={{ x: 1100 }}
                 toolBarRender={() => [
-                    <Button key="scan" icon={<ScanOutlined />} onClick={handleScan}>
-                        {t("skill.actions.scan")}
-                    </Button>,
-                    <Upload
-                        key="upload"
-                        accept=".zip"
-                        showUploadList={false}
-                        beforeUpload={(file) => { handleUpload(file); return false; }}
-                    >
-                        <Button icon={<UploadOutlined />}>{t("skill.actions.upload")}</Button>
-                    </Upload>,
-                    <Button key="create" type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-                        {t("skill.actions.create")}
-                    </Button>,
+                    <Space key="actions" wrap>
+                        <LanguageToggle />
+                        <Button icon={<ScanOutlined />} onClick={handleScan}>
+                            {t("skill.actions.scan")}
+                        </Button>
+                        <Upload
+                            accept=".zip"
+                            showUploadList={false}
+                            beforeUpload={(file) => { handleUpload(file); return false; }}
+                        >
+                            <Button icon={<UploadOutlined />}>{t("skill.actions.upload")}</Button>
+                        </Upload>
+                        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+                            {t("skill.actions.create")}
+                        </Button>
+                    </Space>,
                 ]}
             />
 
@@ -390,12 +406,12 @@ const SkillsPage = () => {
                             mode="tags"
                             placeholder={t("skill.create.effectsPlaceholder")}
                             options={[
-                                { value: "move", label: "move" },
-                                { value: "interact", label: "interact" },
-                                { value: "set_state", label: "set_state" },
-                                { value: "direct_message", label: "direct_message" },
-                                { value: "group_message", label: "group_message" },
-                                { value: "remember", label: "remember" },
+                                { value: "move", label: effectLabel("move") },
+                                { value: "interact", label: effectLabel("interact") },
+                                { value: "set_state", label: effectLabel("set_state") },
+                                { value: "direct_message", label: effectLabel("direct_message") },
+                                { value: "group_message", label: effectLabel("group_message") },
+                                { value: "remember", label: effectLabel("remember") },
                             ]}
                         />
                     </Form.Item>

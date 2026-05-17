@@ -33,6 +33,8 @@ import enSkill from './locales/en/skill';
 import zhSkill from './locales/zh/skill';
 import enSetup from './locales/en/setup';
 import zhSetup from './locales/zh/setup';
+import enAgentBuilder from './locales/en/agentBuilder';
+import zhAgentBuilder from './locales/zh/agentBuilder';
 
 // Combine translations
 const resources = {
@@ -53,6 +55,7 @@ const resources = {
             experiment: enExperiment,
             skill: enSkill,
             setup: enSetup,
+            agentBuilder: enAgentBuilder,
         }
     },
     zh: {
@@ -72,6 +75,7 @@ const resources = {
             experiment: zhExperiment,
             skill: zhSkill,
             setup: zhSetup,
+            agentBuilder: zhAgentBuilder,
         }
     }
 };

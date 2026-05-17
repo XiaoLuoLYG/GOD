@@ -1,21 +1,17 @@
 import { GithubOutlined, ExperimentOutlined, ApiOutlined, TeamOutlined, GlobalOutlined, NodeIndexOutlined, SettingOutlined, RocketOutlined, ThunderboltOutlined, AppstoreAddOutlined } from "@ant-design/icons";
-import { Menu, MenuProps, Space, Dropdown, Button } from "antd";
+import { Menu, MenuProps, Space, Dropdown } from "antd";
 import { Link } from "react-router-dom";
 import Account from "./components/Account";
 import { useTranslation } from 'react-i18next';
 import { WITH_AUTH } from "./components/fetch";
+import LanguageToggle from "./components/LanguageToggle";
 // import Account from "./components/Account";
 
 const RootMenu = ({ selectedKey, style }: {
     selectedKey: string,
     style?: React.CSSProperties
 }) => {
-    const { t, i18n } = useTranslation();
-
-    const handleLanguageChange = () => {
-        const newLang = i18n.language === 'en' ? 'zh' : 'en';
-        i18n.changeLanguage(newLang);
-    };
+    const { t } = useTranslation();
 
     const agentItems: MenuProps['items'] = [
         {
@@ -83,12 +79,15 @@ const RootMenu = ({ selectedKey, style }: {
     const menuStyle: React.CSSProperties = {
         ...style,
         display: 'flex',
-        width: '100%',
+        flex: '1 1 auto',
+        minWidth: 0,
+        width: 'auto',
         alignItems: 'center',
+        overflow: 'hidden',
     };
 
     return (
-        <div style={{ display: 'flex', width: '100%' }}>
+        <div style={{ display: 'flex', width: '100%', minWidth: 0 }}>
             <Menu
                 theme="dark"
                 mode="horizontal"
@@ -100,16 +99,17 @@ const RootMenu = ({ selectedKey, style }: {
                 marginLeft: 'auto',
                 display: 'flex',
                 alignItems: 'center',
-                minWidth: '320px',
-                justifyContent: 'flex-end'
+                flex: '0 0 auto',
+                minWidth: WITH_AUTH ? '320px' : 'max-content',
+                justifyContent: 'flex-end',
+                position: 'relative',
+                zIndex: 2
             }}>
-                <Button
+                <LanguageToggle
                     type="text"
+                    showLabel={false}
                     style={{ color: 'white' }}
-                    onClick={handleLanguageChange}
-                >
-                    {i18n.language === 'en' ? '中文' : 'English'}
-                </Button>
+                />
                 {WITH_AUTH && <Account />}
             </div>
         </div>

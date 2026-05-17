@@ -26,7 +26,6 @@ import {
     DeleteOutlined,
     EditOutlined,
     ExperimentOutlined,
-    GlobalOutlined,
     PlayCircleOutlined,
     QuestionCircleOutlined,
     RobotOutlined,
@@ -37,6 +36,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { fetchCustom } from '../../components/fetch';
+import LanguageToggle from '../../components/LanguageToggle';
 import { AgentEditorModal } from '../AgentBuilder/AgentEditorModal';
 import {
     jsonStringify,
@@ -312,8 +312,6 @@ export default function SetupPage() {
     const [agentForm] = Form.useForm<AgentFormValues>();
     const [modelForm] = Form.useForm<ModelForm>();
     const [basicsForm] = Form.useForm<BasicsForm>();
-    const nextLanguage = i18n.language?.startsWith('en') ? 'zh' : 'en';
-
     const selectedMapId = String(
         draft?.init_config?.env_modules?.[0]?.kwargs?.map_id
         || basicsValues.map_id
@@ -750,7 +748,7 @@ export default function SetupPage() {
                     <Col xs={24} lg={8}>
                         <Form.Item
                             name="GOD_LLM_API_KEY"
-                            label={formLabel('API key', copy('model.apiKeyTooltip'))}
+                            label={formLabel(copy('model.apiKey'), copy('model.apiKeyTooltip'))}
                         >
                             <Input.Password placeholder={status?.model_config.GOD_LLM_API_KEY?.configured ? copy('model.apiKeyConfiguredPlaceholder') : copy('model.apiKeyPlaceholder')} />
                         </Form.Item>
@@ -758,7 +756,7 @@ export default function SetupPage() {
                     <Col xs={24} lg={8}>
                         <Form.Item
                             name="GOD_LLM_API_BASE"
-                            label={formLabel('API base URL', copy('model.apiBaseTooltip'))}
+                            label={formLabel(copy('model.apiBase'), copy('model.apiBaseTooltip'))}
                             rules={[{ required: true }]}
                         >
                             <Input />
@@ -767,7 +765,7 @@ export default function SetupPage() {
                     <Col xs={24} lg={8}>
                         <Form.Item
                             name="GOD_LLM_MODEL"
-                            label={formLabel('Model', copy('model.modelTooltip'))}
+                            label={formLabel(copy('model.modelName'), copy('model.modelTooltip'))}
                             rules={[{ required: true }]}
                         >
                             <Input />
@@ -776,7 +774,7 @@ export default function SetupPage() {
                     <Col xs={24} lg={8}>
                         <Form.Item
                             name="GOD_EMBEDDING_API_KEY"
-                            label={formLabel('Embedding key', copy('model.embeddingKeyTooltip'))}
+                            label={formLabel(copy('model.embeddingKey'), copy('model.embeddingKeyTooltip'))}
                         >
                             <Input.Password placeholder={status?.model_config.GOD_EMBEDDING_API_KEY?.configured ? copy('model.embeddingConfiguredPlaceholder') : copy('model.embeddingPlaceholder')} />
                         </Form.Item>
@@ -784,7 +782,7 @@ export default function SetupPage() {
                     <Col xs={24} lg={8}>
                         <Form.Item
                             name="GOD_EMBEDDING_API_BASE"
-                            label={formLabel('Embedding base URL', copy('model.embeddingBaseTooltip'))}
+                            label={formLabel(copy('model.embeddingBase'), copy('model.embeddingBaseTooltip'))}
                         >
                             <Input />
                         </Form.Item>
@@ -792,23 +790,23 @@ export default function SetupPage() {
                     <Col xs={24} lg={8}>
                         <Form.Item
                             name="GOD_EMBEDDING_MODEL"
-                            label={formLabel('Embedding model', copy('model.embeddingModelTooltip'))}
+                            label={formLabel(copy('model.embeddingModel'), copy('model.embeddingModelTooltip'))}
                         >
                             <Input />
                         </Form.Item>
                     </Col>
                     <Col xs={24} lg={8}>
-                        <Form.Item name="GOD_BACKEND_HOST" label={formLabel('Backend host', copy('model.backendHostTooltip'))}>
+                        <Form.Item name="GOD_BACKEND_HOST" label={formLabel(copy('model.backendHost'), copy('model.backendHostTooltip'))}>
                             <Input />
                         </Form.Item>
                     </Col>
                     <Col xs={12} lg={8}>
-                        <Form.Item name="GOD_BACKEND_PORT" label={formLabel('Backend port', copy('model.backendPortTooltip'))}>
+                        <Form.Item name="GOD_BACKEND_PORT" label={formLabel(copy('model.backendPort'), copy('model.backendPortTooltip'))}>
                             <Input />
                         </Form.Item>
                     </Col>
                     <Col xs={12} lg={8}>
-                        <Form.Item name="GOD_FRONTEND_PORT" label={formLabel('Frontend port', copy('model.frontendPortTooltip'))}>
+                        <Form.Item name="GOD_FRONTEND_PORT" label={formLabel(copy('model.frontendPort'), copy('model.frontendPortTooltip'))}>
                             <Input />
                         </Form.Item>
                     </Col>
@@ -1190,7 +1188,7 @@ export default function SetupPage() {
                         description={copy('confirm.safeCopyDescription')}
                         style={{ marginBottom: 16 }}
                     />
-                    <Space>
+                    <Space wrap>
                         <Button onClick={() => setCurrentStep(3)}>{copy('confirm.keepEditing')}</Button>
                         <Button
                             type="primary"
@@ -1236,15 +1234,8 @@ export default function SetupPage() {
                             {copy('header.subtitle')}
                         </Text>
                     </div>
-                    <Space>
-                        <Button
-                            icon={<GlobalOutlined />}
-                            onClick={() => {
-                                void i18n.changeLanguage(nextLanguage);
-                            }}
-                        >
-                            {copy('header.language')}
-                        </Button>
+                    <Space wrap>
+                        <LanguageToggle />
                         {status?.current_experiment?.hypothesis_id && (
                             <Button onClick={() => navigate(`/pixel-replay/${status.current_experiment?.hypothesis_id}/${status.current_experiment?.experiment_id || '1'}?workspace_path=${encodeURIComponent(status.current_experiment?.workspace_path || status.workspace_path)}`)}>
                                 {copy('header.openCurrent')}

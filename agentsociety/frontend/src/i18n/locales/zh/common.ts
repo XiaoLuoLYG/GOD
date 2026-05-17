@@ -10,7 +10,7 @@ export default {
         agents: '智能体',
         agentConfigs: '智能体配置',
         agentTemplates: '智能体模板',
-        agentBuilder: 'Agent Builder',
+        agentBuilder: '智能体构建器',
         workflows: '工作流',
         create: '创建',
         login: '登录',
@@ -20,7 +20,7 @@ export default {
         demoUser: '示例用户',
         bill: '账单',
         profiles: '智能体画像',
-        skills: 'Agent Skills',
+        skills: '智能体技能',
     },
     common: {
         name: "名称",
@@ -42,6 +42,10 @@ export default {
         cancel: "取消",
         metadataTitle: "基本信息",
         basicInfo: "基本信息",
-        view: "查看"
+        view: "查看",
+        language: {
+            switchToChinese: "切换到中文",
+            switchToEnglish: "切换到英文"
+        }
     }
 }; 

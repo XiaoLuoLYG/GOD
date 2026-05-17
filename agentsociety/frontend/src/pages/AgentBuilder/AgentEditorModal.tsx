@@ -10,6 +10,7 @@ import {
     message,
 } from 'antd';
 import type { FormInstance } from 'antd/es/form';
+import { useTranslation } from 'react-i18next';
 import {
     buildAgentFromForm,
     type AgentClassInfo,
@@ -38,18 +39,19 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
     onCancel,
     onSave,
 }) => {
+    const { t } = useTranslation();
     const submitAgent = async () => {
         try {
             const values = await form.validateFields();
             await onSave(buildAgentFromForm(values));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : 'Agent form is invalid.');
+            message.error(error instanceof Error ? error.message : t('agentBuilder.editor.invalidForm'));
         }
     };
 
     return (
         <Modal
-            title={editingAgentId === null ? 'Add Agent' : 'Edit Agent'}
+            title={editingAgentId === null ? t('agentBuilder.editor.addTitle') : t('agentBuilder.editor.editTitle')}
             open={open}
             onOk={submitAgent}
             onCancel={onCancel}
@@ -60,18 +62,18 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
             <Form form={form} layout="vertical">
                 <Row gutter={12}>
                     <Col span={8}>
-                        <Form.Item name="agent_id" label="Agent ID" rules={[{ required: true }]}>
+                        <Form.Item name="agent_id" label={t('agentBuilder.fields.agentId')} rules={[{ required: true }]}>
                             <InputNumber min={minAgentId} style={{ width: '100%' }} />
                         </Form.Item>
                     </Col>
                     <Col span={8}>
-                        <Form.Item name="agent_type" label="Agent Type" rules={[{ required: true }]}>
+                        <Form.Item name="agent_type" label={t('agentBuilder.fields.agentType')} rules={[{ required: true }]}>
                             {agentClasses.length ? (
                                 <Select
                                     showSearch
                                     options={agentClasses.map((item) => ({
                                         value: item.type,
-                                        label: `${item.type}${item.is_custom ? ' (custom)' : ''}`,
+                                        label: `${item.type}${item.is_custom ? ` (${t('agentBuilder.editor.customClassSuffix')})` : ''}`,
                                     }))}
                                 />
                             ) : (
@@ -80,15 +82,15 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                         </Form.Item>
                     </Col>
                     <Col span={8}>
-                        <Form.Item name="name" label="Name" rules={[{ required: true }]}>
+                        <Form.Item name="name" label={t('agentBuilder.fields.name')} rules={[{ required: true }]}>
                             <Input />
                         </Form.Item>
                     </Col>
                 </Row>
-                <Form.Item name="profile_json" label="Profile JSON" rules={[{ required: true }]}>
+                <Form.Item name="profile_json" label={t('agentBuilder.fields.profileJson')} rules={[{ required: true }]}>
                     <Input.TextArea rows={8} spellCheck={false} />
                 </Form.Item>
-                <Form.Item name="kwargs_json" label="Extra kwargs JSON">
+                <Form.Item name="kwargs_json" label={t('agentBuilder.fields.extraKwargsJson')}>
                     <Input.TextArea rows={6} spellCheck={false} />
                 </Form.Item>
             </Form>

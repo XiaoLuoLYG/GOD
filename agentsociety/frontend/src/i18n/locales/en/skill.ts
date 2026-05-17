@@ -26,6 +26,19 @@ export default {
         enabled: 'Enabled',
         disabled: 'Disabled',
     },
+    validation: {
+        ready: 'Ready',
+        disabled: 'Disabled',
+        unknown: 'Unknown',
+    },
+    effects: {
+        move: 'Move',
+        interact: 'Interact',
+        set_state: 'Set state',
+        direct_message: 'Direct message',
+        group_message: 'Group message',
+        remember: 'Remember',
+    },
     type: {
         promptOnly: 'Prompt-only',
         subprocess: 'Subprocess',

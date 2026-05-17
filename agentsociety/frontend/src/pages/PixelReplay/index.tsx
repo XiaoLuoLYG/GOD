@@ -30,7 +30,10 @@ import {
     ZoomOutOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { fetchCustom } from '../../components/fetch';
+import LanguageToggle from '../../components/LanguageToggle';
 import { AgentBuilderPanel } from '../AgentBuilder';
 import './style.css';
 
@@ -355,26 +358,11 @@ type Communication = {
     content?: string;
 };
 
-const PHASE_LABELS: Record<string, string> = {
-    opening: '开场协调',
-    mapping: '路线梳理',
-    inventory: '物资清点',
-    risk_review: '风险评估',
-    route_choice: '路线决策',
-    assignments: '任务分配',
-    field_check: '现场检查',
-    adjustment: '方案调整',
-    broadcast: '公开通知',
-    confirmation: '确认准备',
-    final_walkthrough: '最终走查',
-    wrap_up: '收尾归档',
-};
-
-function formatPhase(value: unknown): string {
+function formatPhase(value: unknown, t: TFunction): string {
     if (typeof value !== 'string' || value.trim() === '') {
-        return '暂无阶段';
+        return t('replay.pixel.phase.empty');
     }
-    return PHASE_LABELS[value] ?? value;
+    return t(`replay.pixel.phase.${value}`, { defaultValue: value });
 }
 
 function stableHash(input: string): number {
@@ -490,24 +478,24 @@ function getAgentOptionLabel(profile: AgentProfile): string {
     return `${getAgentName(profile)} · #${profile.id}`;
 }
 
-function describeAskTarget(target: AskTarget, profiles: AgentProfile[]): string {
+function describeTargetSubject(target: AskTarget, profiles: AgentProfile[], t: TFunction): string {
     const byId = new Map(profiles.map((profile) => [profile.id, profile]));
     if (target.type === 'society') {
-        return '问系统';
+        return t('replay.pixel.target.system');
     }
     if (target.type === 'all_agents') {
-        return `问所有居民（${profiles.length} 个）`;
+        return t('replay.pixel.target.allResidents', { count: profiles.length });
     }
     const ids = target.type === 'agent'
         ? (target.agent_id === undefined ? [] : [target.agent_id])
         : target.agent_ids ?? [];
     if (ids.length === 0) {
-        return '未选择居民';
+        return t('replay.pixel.target.none');
     }
     return ids
         .map((id) => {
             const profile = byId.get(id);
-            return profile ? getAgentOptionLabel(profile) : `Agent #${id}`;
+            return profile ? getAgentOptionLabel(profile) : t('replay.pixel.target.agentFallback', { id });
         })
         .join('，');
 }
@@ -516,9 +504,10 @@ function describeInteractionTarget(
     target: AskTarget,
     profiles: AgentProfile[],
     mode: 'ask' | 'intervene',
+    t: TFunction,
 ): string {
-    const label = describeAskTarget(target, profiles);
-    return mode === 'intervene' ? label.replace(/^问/, '干预') : label;
+    const targetLabel = describeTargetSubject(target, profiles, t);
+    return t(`replay.pixel.target.${mode}`, { target: targetLabel });
 }
 
 function escapeRegExp(value: string): string {
@@ -611,9 +600,9 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     return undefined;
 }
 
-function formatValue(value: unknown): string {
+function formatValue(value: unknown, emptyText = '-'): string {
     if (value === undefined || value === null || value === '') {
-        return '暂无';
+        return emptyText;
     }
     return typeof value === 'string'
         ? value
@@ -622,7 +611,7 @@ function formatValue(value: unknown): string {
             : JSON.stringify(value, null, 2);
 }
 
-function formatInlineFields(data: Record<string, unknown> | undefined, emptyText = '暂无数据'): string {
+function formatInlineFields(data: Record<string, unknown> | undefined, emptyText = '-', emptyValue = '-'): string {
     if (!data || Object.keys(data).length === 0) {
         return emptyText;
     }
@@ -631,17 +620,17 @@ function formatInlineFields(data: Record<string, unknown> | undefined, emptyText
         return emptyText;
     }
     return entries
-        .map(([key, value]) => `${key}: ${formatValue(value)}`)
+        .map(([key, value]) => `${key}: ${formatValue(value, emptyValue)}`)
         .join('\n');
 }
 
-function formatTokenUsage(tokenUsage: Record<string, TokenUsage> | undefined): string {
+function formatTokenUsage(tokenUsage: Record<string, TokenUsage> | undefined, t: TFunction): string {
     if (!tokenUsage || Object.keys(tokenUsage).length === 0) {
-        return '未记录 token 消耗。需要新版本运行写入 session_state，或 run/output.log 中包含 token usage 日志。';
+        return t('replay.pixel.drawer.tokenEmpty');
     }
     return Object.entries(tokenUsage)
         .map(([model, usage]) => (
-            `${model}: 调用 ${usage.call_count}，输入 ${usage.input_tokens}，输出 ${usage.output_tokens}，总计 ${usage.input_tokens + usage.output_tokens}`
+            `${model}: ${t('replay.pixel.drawer.tokenCall')} ${usage.call_count}，${t('replay.pixel.drawer.tokenInput')} ${usage.input_tokens}，${t('replay.pixel.drawer.tokenOutput')} ${usage.output_tokens}，${t('replay.pixel.drawer.tokenTotal')} ${usage.input_tokens + usage.output_tokens}`
         ))
         .join('；');
 }
@@ -659,6 +648,11 @@ function renderPlainDetail(label: string, value: string) {
             <Text className="pixel-agent-detail-text">{value}</Text>
         </div>
     );
+}
+
+function formatStatusLabel(value: string | undefined, t: TFunction, fallback = 'idle') {
+    const status = value || fallback;
+    return t(`replay.pixel.status.${status}`, { defaultValue: status });
 }
 
 function buildAgentSummary(agent: PixelAgent | undefined): Record<string, unknown> | undefined {
@@ -831,6 +825,7 @@ function buildPixelFrame(
     bundle: ReplayStepBundle | undefined,
     step: number,
     walkableMap: WalkableMap,
+    labels: { idleAction: string; defaultLocation: string },
 ): PixelFrame {
     const envRow = firstEnvRow(bundle);
     const stepCommunications = parseCommunications(envRow);
@@ -856,9 +851,9 @@ function buildPixelFrame(
             spriteKey: spriteForAgent(index, walkableMap),
             tile: hasReplayTile ? { x: tileX, y: tileY } : fallbackTile,
             visualOffset: { x: 0, y: 0 },
-            action: rawDescription ?? 'idle',
+            action: rawDescription ?? labels.idleAction,
             status,
-            location: location ?? '小镇',
+            location: location ?? labels.defaultLocation,
             locationId: row ? pickDisplayValue(row, ['location_id']) : undefined,
             movementStatus: row ? pickDisplayValue(row, ['movement_status']) : undefined,
             targetLocationId: row ? pickDisplayValue(row, ['target_location_id']) : undefined,
@@ -930,10 +925,10 @@ async function waitForInitialReplay<T>(
     throw lastError ?? new Error('Replay loading was cancelled');
 }
 
-async function loadWalkableMap(mapInfo: ReplayMapInfo): Promise<WalkableMap> {
+async function loadWalkableMap(mapInfo: ReplayMapInfo, t: TFunction): Promise<WalkableMap> {
     const response = await fetchCustom(mapInfo.tiled_map_url);
     if (!response.ok) {
-        throw new Error(`小镇地图加载失败：${response.status} ${response.statusText}`);
+        throw new Error(t('replay.pixel.error.mapLoadFailed', { status: response.status, statusText: response.statusText }));
     }
     const map = await response.json() as {
         width: number;
@@ -945,7 +940,7 @@ async function loadWalkableMap(mapInfo: ReplayMapInfo): Promise<WalkableMap> {
     };
     const collisions = map.layers?.find((layer) => layer.name === 'Collisions');
     if (!collisions?.data) {
-        throw new Error('小镇地图缺少 Collisions 图层。');
+        throw new Error(t('replay.pixel.error.missingCollisions'));
     }
     const width = Number(map.width);
     const height = Number(map.height);
@@ -1147,55 +1142,56 @@ function PixelAgentHoverCard({
     agent: PixelAgent;
     frame: PixelFrame;
 }) {
+    const { t } = useTranslation();
     return (
         <div className="pixel-agent-hover-card">
             <div className="pixel-agent-hover-header">
                 <div className="pixel-agent-hover-title">
                     <Text strong>{agent.name}</Text>
-                    <Text type="secondary">#{agent.id} · 第 {frame.step + 1} 步</Text>
+                    <Text type="secondary">#{agent.id} · {t('replay.pixel.hover.step', { step: frame.step + 1 })}</Text>
                 </div>
                 <Tag className="pixel-agent-hover-status" color={agent.movementStatus === 'moving' ? 'blue' : 'green'}>
-                    {agent.movementStatus ?? agent.status ?? 'idle'}
+                    {formatStatusLabel(agent.movementStatus ?? agent.status, t)}
                 </Tag>
             </div>
 
             <div className="pixel-agent-hover-grid">
-                <Text type="secondary">时间</Text>
+                <Text type="secondary">{t('replay.pixel.hover.time')}</Text>
                 <Text>{formatTime(frame.t)}</Text>
-                <Text type="secondary">动作</Text>
+                <Text type="secondary">{t('replay.pixel.hover.action')}</Text>
                 <Text>{agent.action}</Text>
-                <Text type="secondary">位置</Text>
+                <Text type="secondary">{t('replay.pixel.hover.location')}</Text>
                 <Text>
                     {agent.location}
                     {agent.locationId ? ` · ${agent.locationId}` : ''}
                 </Text>
                 {agent.targetLocationId && (
                     <>
-                        <Text type="secondary">目标</Text>
+                        <Text type="secondary">{t('replay.pixel.hover.target')}</Text>
                         <Text>{agent.targetLocationId}</Text>
                     </>
                 )}
                 {agent.emotion && (
                     <>
-                        <Text type="secondary">情绪</Text>
+                        <Text type="secondary">{t('replay.pixel.hover.emotion')}</Text>
                         <Text>{agent.emotion}</Text>
                     </>
                 )}
                 {agent.currentPhase && (
                     <>
-                        <Text type="secondary">阶段</Text>
-                        <Text>{formatPhase(agent.currentPhase)}</Text>
+                        <Text type="secondary">{t('replay.pixel.hover.phase')}</Text>
+                        <Text>{formatPhase(agent.currentPhase, t)}</Text>
                     </>
                 )}
                 {agent.latestEvent && (
                     <>
-                        <Text type="secondary">事件</Text>
+                        <Text type="secondary">{t('replay.pixel.hover.event')}</Text>
                         <Text className="pixel-agent-hover-text">{agent.latestEvent}</Text>
                     </>
                 )}
-                <Text type="secondary">交互</Text>
+                <Text type="secondary">{t('replay.pixel.hover.interactions')}</Text>
                 {agent.availableInteractions.length === 0 ? (
-                    <Text className="pixel-agent-hover-muted">暂无可交互动作</Text>
+                    <Text className="pixel-agent-hover-muted">{t('replay.pixel.hover.noInteractions')}</Text>
                 ) : (
                     <div className="pixel-agent-hover-tags">
                         {agent.availableInteractions.slice(0, 4).map((interaction) => (
@@ -1249,6 +1245,7 @@ function PixelTownCanvas({
     onOpenSetup: () => void;
     onOpenSkills: () => void;
 }) {
+    const { t } = useTranslation();
     const containerRef = useRef<HTMLDivElement | null>(null);
     const gameRef = useRef<Phaser.Game | null>(null);
     const bridgeRef = useRef<PhaserBridge>({
@@ -1632,7 +1629,7 @@ function PixelTownCanvas({
     return (
         <div className="pixel-town-canvas" ref={containerRef}>
             <div className="pixel-canvas-controls">
-                <Tooltip title={`重置为铺满地图区域：${map.displayName}`}>
+                <Tooltip title={t('replay.pixel.canvas.resetFit', { map: map.displayName })}>
                     <Button
                         shape="circle"
                         icon={<AimOutlined />}
@@ -1644,7 +1641,7 @@ function PixelTownCanvas({
                         }}
                     />
                 </Tooltip>
-                <Tooltip title="放大地图">
+                <Tooltip title={t('replay.pixel.canvas.zoomIn')}>
                     <Button
                         shape="circle"
                         icon={<ZoomInOutlined />}
@@ -1656,7 +1653,7 @@ function PixelTownCanvas({
                         }}
                     />
                 </Tooltip>
-                <Tooltip title="缩小地图">
+                <Tooltip title={t('replay.pixel.canvas.zoomOut')}>
                     <Button
                         shape="circle"
                         icon={<ZoomOutOutlined />}
@@ -1670,14 +1667,14 @@ function PixelTownCanvas({
                 </Tooltip>
             </div>
             <div className="pixel-canvas-actions">
-                <Tooltip title="创建或配置一个新的实验副本">
+                <Tooltip title={t('replay.pixel.canvas.newExperimentTooltip')}>
                     <Button icon={<SettingOutlined />} onClick={onOpenSetup}>
-                        新实验
+                        {t('replay.pixel.canvas.newExperiment')}
                     </Button>
                 </Tooltip>
-                <Tooltip title="查看和创建真实可执行 Skills">
+                <Tooltip title={t('replay.pixel.canvas.skillsTooltip')}>
                     <Button icon={<ThunderboltOutlined />} onClick={onOpenSkills}>
-                        Skills
+                        {t('replay.pixel.canvas.skills')}
                     </Button>
                 </Tooltip>
             </div>
@@ -2098,6 +2095,7 @@ function updateSelection(bridge: PhaserBridge) {
 }
 
 export default function PixelReplay() {
+    const { t } = useTranslation();
     const [messageApi, messageContextHolder] = message.useMessage();
     const navigate = useNavigate();
     const { hypothesisId, experimentId } = useParams();
@@ -2192,7 +2190,7 @@ export default function PixelReplay() {
                 const { nextMap, nextLiveStatus } = await waitForInitialReplay(
                     async () => {
                         const mapInfo = await fetchJson<ReplayMapInfo>(withWorkspace('/map'));
-                        const loadedMap = await loadWalkableMap(mapInfo);
+                        const loadedMap = await loadWalkableMap(mapInfo, t);
                         let loadedLiveStatus: LiveStatus | undefined;
                         if (liveBaseUrl) {
                             try {
@@ -2206,7 +2204,7 @@ export default function PixelReplay() {
                     },
                     (err, attempt) => {
                         if (!cancelled) {
-                            setLoadingDetail(`GOD 正在准备小镇回放，等待服务和第一帧数据就绪... 第 ${attempt} 次重试：${toErrorMessage(err)}`);
+                            setLoadingDetail(t('replay.pixel.loading.retry', { attempt, error: toErrorMessage(err) }));
                         }
                     },
                     () => cancelled,
@@ -2289,14 +2287,14 @@ export default function PixelReplay() {
                         if (index >= 0) {
                             next[index] = {
                                 ...next[index],
-                                result: `调用失败：${payload.message ?? '实时命令未完成'}`,
+                                result: t('replay.pixel.live.callFailed', { error: payload.message ?? t('replay.pixel.live.commandNotCompleted') }),
                             };
                         }
                         return next;
                     });
                 }
                 if (payload.type === 'error') {
-                    messageApi.error(payload.message ?? '实时实验执行失败');
+                    messageApi.error(payload.message ?? t('replay.pixel.live.executionFailed'));
                 }
             } catch (err) {
                 console.error('Failed to parse live event:', err);
@@ -2395,13 +2393,13 @@ export default function PixelReplay() {
     const liveAuto = liveStatus?.status === 'auto' || liveStatus?.auto_running;
     const liveTargetMentions = useMemo<LiveTargetMention[]>(() => [
         {
-            value: '系统',
-            label: '@系统',
+            value: t('replay.pixel.target.systemMentionValue'),
+            label: `@${t('replay.pixel.target.systemMentionValue')}`,
             target: { type: 'society' },
         },
         {
-            value: '所有居民',
-            label: '@所有居民',
+            value: t('replay.pixel.target.allResidentsMentionValue'),
+            label: `@${t('replay.pixel.target.allResidentsMentionValue')}`,
             target: { type: 'all_agents' },
         },
         ...profiles.map((profile) => {
@@ -2412,7 +2410,7 @@ export default function PixelReplay() {
                 target: { type: 'agent', agent_id: profile.id } as AskTarget,
             };
         }),
-    ], [profiles]);
+    ], [profiles, t]);
 
     const askTarget = useMemo<AskTarget>(() => {
         if (askTargetType === 'agent') {
@@ -2433,7 +2431,7 @@ export default function PixelReplay() {
         || Boolean(promptTarget.agent_id)
         || Boolean(promptTarget.agent_ids?.length);
 
-    const promptTargetLabel = describeInteractionTarget(promptTarget, profiles, liveMode);
+    const promptTargetLabel = describeInteractionTarget(promptTarget, profiles, liveMode, t);
 
     const applyMentionTarget = useCallback((value: string) => {
         const mention = liveTargetMentions.find((item) => item.value === value);
@@ -2505,7 +2503,7 @@ export default function PixelReplay() {
             id: `${Date.now()}`,
             type: liveMode,
             prompt: rawPrompt,
-            targetLabel: describeInteractionTarget(target, profiles, liveMode),
+            targetLabel: describeInteractionTarget(target, profiles, liveMode, t),
         };
         setLiveInteractions((items) => [...items, pending]);
         setLivePrompt('');
@@ -2547,12 +2545,12 @@ export default function PixelReplay() {
                 }
                 return next;
             });
-            messageApi.success(response.artifact_name ? `结果已保存：${response.artifact_name}` : '命令已完成');
+            messageApi.success(response.artifact_name ? t('replay.pixel.live.resultSaved', { name: response.artifact_name }) : t('replay.pixel.live.commandDone'));
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : String(err);
             setLiveInteractions((items) => items.map((item) => (
                 item.id === pending.id
-                    ? { ...item, result: `调用失败：${errorMessage}` }
+                    ? { ...item, result: t('replay.pixel.live.callFailed', { error: errorMessage }) }
                     : item
             )));
             setLiveStatus((status) => status ? {
@@ -2566,14 +2564,17 @@ export default function PixelReplay() {
         } finally {
             setLiveBusy(false);
         }
-    }, [askTarget, liveBaseUrl, liveMode, livePrompt, liveTargetMentions, messageApi, profiles, promptTargetReady, withLiveWorkspace]);
+    }, [askTarget, liveBaseUrl, liveMode, livePrompt, liveTargetMentions, messageApi, profiles, promptTargetReady, t, withLiveWorkspace]);
 
     const frame = useMemo(() => {
         if (!walkableMap) {
             return undefined;
         }
-        return buildPixelFrame(profiles, bundle, currentStep, walkableMap);
-    }, [bundle, currentStep, profiles, walkableMap]);
+        return buildPixelFrame(profiles, bundle, currentStep, walkableMap, {
+            idleAction: formatStatusLabel(undefined, t),
+            defaultLocation: walkableMap.displayName,
+        });
+    }, [bundle, currentStep, profiles, t, walkableMap]);
 
     const selectedAgent = frame?.agents.find((agent) => agent.id === selectedAgentId);
     const selectedProfile = profiles.find((profile) => profile.id === selectedAgentId);
@@ -2613,7 +2614,7 @@ export default function PixelReplay() {
             <div className="pixel-replay-loading">
                 <Spin size="large" />
                 <Space direction="vertical" size={4} align="center">
-                    <Text>正在加载小镇回放...</Text>
+                    <Text>{t('replay.pixel.loading.text')}</Text>
                     {loadingDetail && <Text type="secondary">{loadingDetail}</Text>}
                 </Space>
             </div>
@@ -2626,7 +2627,7 @@ export default function PixelReplay() {
                 <Alert
                     type="error"
                     showIcon
-                    message="小镇回放无法启动"
+                    message={t('replay.pixel.error.title')}
                     description={error}
                 />
             </div>
@@ -2636,7 +2637,7 @@ export default function PixelReplay() {
     if (!frame) {
         return (
             <div className="pixel-replay-error">
-                <Empty description="这个实验还没有可回放画面。" />
+                <Empty description={t('replay.pixel.error.empty')} />
             </div>
         );
     }
@@ -2661,7 +2662,7 @@ export default function PixelReplay() {
                         type="primary"
                         onClick={() => setPlaying((value) => !value)}
                     >
-                        {playing ? '暂停' : '播放'}
+                        {playing ? t('replay.pixel.topbar.pause') : t('replay.pixel.topbar.play')}
                     </Button>
                     <Button
                         icon={<StepBackwardOutlined />}
@@ -2688,7 +2689,7 @@ export default function PixelReplay() {
                             disabled={!liveWaiting || liveBusy}
                             onClick={runLiveStep}
                         >
-                            Run Step
+                            {t('replay.pixel.topbar.runStep')}
                         </Button>
                         <Button
                             icon={liveAuto ? <PauseOutlined /> : <CaretRightOutlined />}
@@ -2696,13 +2697,13 @@ export default function PixelReplay() {
                             disabled={liveBusy || (!liveAuto && !liveWaiting)}
                             onClick={toggleLiveAuto}
                         >
-                            {liveAuto ? 'Pause Auto' : 'Auto'}
+                            {liveAuto ? t('replay.pixel.topbar.pauseAuto') : t('replay.pixel.topbar.auto')}
                         </Button>
                         <Button
                             disabled
                             className={`pixel-live-status-button status-${liveStatus?.status ?? 'offline'}`}
                         >
-                            {liveStatus?.status ?? 'offline'}
+                            {formatStatusLabel(liveStatus?.status, t, 'offline')}
                         </Button>
                     </Space.Compact>
                     <Select
@@ -2716,10 +2717,11 @@ export default function PixelReplay() {
                             { value: 250, label: '4x' },
                         ]}
                     />
-                    <Tag color="blue">回放第 {currentStep + 1} 步</Tag>
-                    {liveStatus && <Tag color="geekblue">Live 已执行 {liveStatus.step_count} 步</Tag>}
+                    <Tag color="blue">{t('replay.pixel.topbar.stepTag', { step: currentStep + 1 })}</Tag>
+                    {liveStatus && <Tag color="geekblue">{t('replay.pixel.topbar.liveSteps', { count: liveStatus.step_count })}</Tag>}
                     <Text>{formatTime(bundle?.t ?? timeline[currentIndex]?.t)}</Text>
                     {stepLoading && <Spin size="small" />}
+                    <LanguageToggle />
                 </Space>
                 <input
                     className="pixel-replay-range"
@@ -2737,22 +2739,22 @@ export default function PixelReplay() {
 
             <div className="pixel-dashboard">
                 <Card className="pixel-panel pixel-overview-card" variant="borderless">
-                    <Title level={4}>小镇实验回放</Title>
+                    <Title level={4}>{t('replay.pixel.overview.title')}</Title>
                     <Text type="secondary">
-                        假设 {effectiveHypothesisId} · 实验 {effectiveExperimentId}
+                        {t('replay.pixel.overview.subtitle', { hypothesis: effectiveHypothesisId, experiment: effectiveExperimentId })}
                     </Text>
                     <div className="pixel-replay-stats">
-                        <Tag>{info?.agent_count ?? profiles.length}居民</Tag>
-                        <Tag>{info?.total_steps ?? timeline.length}步</Tag>
+                        <Tag>{t('replay.pixel.overview.residents', { count: info?.agent_count ?? profiles.length })}</Tag>
+                        <Tag>{t('replay.pixel.overview.steps', { count: info?.total_steps ?? timeline.length })}</Tag>
                         <Tag color="geekblue">{frame.map.displayName}</Tag>
                         {envSnapshot?.total_messages_sent !== undefined && (
-                            <Tag color="green">累计{String(envSnapshot.total_messages_sent)}消息</Tag>
+                            <Tag color="green">{t('replay.pixel.overview.messages', { count: Number(envSnapshot.total_messages_sent) || 0 })}</Tag>
                         )}
                         <Tag color={communications.length > 0 ? 'blue' : undefined}>
-                            本步{communications.length}通信
+                            {t('replay.pixel.overview.communications', { count: communications.length })}
                         </Tag>
                         {missingReplayTileCount > 0 && (
-                            <Tag color="orange">{missingReplayTileCount}人缺少地图坐标</Tag>
+                            <Tag color="orange">{t('replay.pixel.overview.missingTiles', { count: missingReplayTileCount })}</Tag>
                         )}
                     </div>
                 </Card>
@@ -2760,12 +2762,12 @@ export default function PixelReplay() {
                 <Card className="pixel-panel pixel-step-card" variant="borderless">
                     <div className="pixel-panel-content pixel-step-content">
                         <div className="pixel-section-heading">
-                            <Text strong>发生了什么</Text>
-                            <Tag color="blue">第 {currentStep + 1} 步</Tag>
+                            <Text strong>{t('replay.pixel.step.title')}</Text>
+                            <Tag color="blue">{t('replay.pixel.step.tag', { step: currentStep + 1 })}</Tag>
                         </div>
                         <div className="pixel-step-summary">
-                            <Text type="secondary">阶段</Text>
-                            <Text strong>{formatPhase(envSnapshot?.current_phase)}</Text>
+                            <Text type="secondary">{t('replay.pixel.step.phase')}</Text>
+                            <Text strong>{formatPhase(envSnapshot?.current_phase, t)}</Text>
                         </div>
                         {envSnapshot?.latest_event !== undefined && (
                             <Text className="pixel-step-event">
@@ -2777,26 +2779,29 @@ export default function PixelReplay() {
 
                 <Card className="pixel-panel pixel-chat-card" variant="borderless">
                     <div className="pixel-section-heading">
-                        <Text strong>Agent 间聊天</Text>
+                        <Text strong>{t('replay.pixel.chat.title')}</Text>
                         <Tag color={communications.length > 0 ? 'blue' : undefined}>
-                            本步 {communications.length} 条
+                            {t('replay.pixel.chat.count', { count: communications.length })}
                         </Tag>
                     </div>
                     <div className="pixel-communication-list">
                         {communications.length === 0 ? (
-                            <Text type="secondary">这一小步没有新的 agent 间通信。请切换上一/下一步查看。</Text>
+                            <Text type="secondary">{t('replay.pixel.chat.empty')}</Text>
                         ) : communications.map((item, index) => (
                             <div className="pixel-communication-row" key={`${item.sender_name}-${index}`}>
                                 <div className="pixel-communication-meta">
-                                    <Text strong>{item.sender_name ?? '居民'}</Text>
+                                    <Text strong>{item.sender_name ?? t('replay.pixel.chat.resident')}</Text>
                                     <Tag color={item.type === 'direct' ? 'purple' : 'cyan'}>
-                                        {item.type === 'direct' ? '私信' : '群聊'}
+                                        {item.type === 'direct' ? t('replay.pixel.chat.direct') : t('replay.pixel.chat.group')}
                                     </Tag>
                                 </div>
                                 <Text type="secondary">
                                     {item.type === 'direct'
-                                        ? `发给 ${item.receiver_name ?? '居民'}`
-                                        : `发到 ${item.group_name ?? '群组'}${item.recipient_count ? `（${item.recipient_count} 人）` : ''}`}
+                                        ? t('replay.pixel.chat.sendTo', { name: item.receiver_name ?? t('replay.pixel.chat.resident') })
+                                        : t('replay.pixel.chat.sendToGroup', {
+                                            name: item.group_name ?? t('replay.pixel.chat.group'),
+                                            suffix: item.recipient_count ? t('replay.pixel.chat.recipientCount', { count: item.recipient_count }) : '',
+                                        })}
                                 </Text>
                                 <Text className="pixel-message-text">{item.content ?? ''}</Text>
                             </div>
@@ -2807,8 +2812,8 @@ export default function PixelReplay() {
                 <Card className="pixel-panel pixel-residents-card" variant="borderless">
                     <div className="pixel-section-heading">
                         <Space direction="vertical" size={0}>
-                            <Text strong>居民状态</Text>
-                            <Text type="secondary">点击选中，再次点击取消</Text>
+                            <Text strong>{t('replay.pixel.residents.title')}</Text>
+                            <Text type="secondary">{t('replay.pixel.residents.hint')}</Text>
                         </Space>
                         <Button
                             size="small"
@@ -2817,24 +2822,24 @@ export default function PixelReplay() {
                             icon={<UserAddOutlined />}
                             onClick={() => setAgentBuilderOpen(true)}
                         >
-                            Add Agent
+                            {t('replay.pixel.residents.addAgent')}
                         </Button>
                     </div>
                     {selectedAgent && (
                         <div className="pixel-replay-selected">
-                            <Text type="secondary">选中的居民</Text>
+                            <Text type="secondary">{t('replay.pixel.residents.selected')}</Text>
                             <Text strong>{selectedAgent.name}</Text>
                             <Text>{selectedAgent.action}</Text>
-                            <Text type="secondary">位置：{selectedAgent.location}</Text>
+                            <Text type="secondary">{t('replay.pixel.residents.location', { location: selectedAgent.location })}</Text>
                             <Space size={4} wrap>
                                 {selectedAgent.locationId && <Tag>{selectedAgent.locationId}</Tag>}
                                 {selectedAgent.movementStatus && (
                                     <Tag color={selectedAgent.movementStatus === 'moving' ? 'blue' : 'green'}>
-                                        {selectedAgent.movementStatus}
+                                        {formatStatusLabel(selectedAgent.movementStatus, t)}
                                     </Tag>
                                 )}
                                 <Tag color={selectedAgent.hasReplayTile ? 'geekblue' : 'orange'}>
-                                    tile {selectedAgent.tile.x}, {selectedAgent.tile.y}
+                                    {t('replay.pixel.residents.tile', { x: selectedAgent.tile.x, y: selectedAgent.tile.y })}
                                 </Tag>
                             </Space>
                             {selectedAgent.availableInteractions.length > 0 && (
@@ -2846,9 +2851,9 @@ export default function PixelReplay() {
                                     ))}
                                 </div>
                             )}
-                            {selectedAgent.emotion && <Text type="secondary">情绪：{selectedAgent.emotion}</Text>}
+                            {selectedAgent.emotion && <Text type="secondary">{t('replay.pixel.residents.emotion', { emotion: selectedAgent.emotion })}</Text>}
                             {selectedAgent.lastMessage && (
-                                <Text className="pixel-message-text">最近收到：{selectedAgent.lastMessage}</Text>
+                                <Text className="pixel-message-text">{t('replay.pixel.residents.lastReceived', { message: selectedAgent.lastMessage })}</Text>
                             )}
                             <Space size={8} wrap>
                                 <Button
@@ -2856,14 +2861,14 @@ export default function PixelReplay() {
                                     type="link"
                                     onClick={() => setAgentDetailOpen(true)}
                                 >
-                                    查看完整详情
+                                    {t('replay.pixel.residents.viewDetail')}
                                 </Button>
                                 <Button
                                     size="small"
                                     type="link"
                                     onClick={clearSelectedAgent}
                                 >
-                                    取消选中
+                                    {t('replay.pixel.residents.clearSelection')}
                                 </Button>
                             </Space>
                         </div>
@@ -2888,9 +2893,11 @@ export default function PixelReplay() {
                                 <span className="pixel-agent-action">{agent.action}</span>
                                 <span className="pixel-agent-location">{agent.location}</span>
                                 <span className="pixel-agent-location">
-                                    {agent.hasReplayTile ? `tile ${agent.tile.x},${agent.tile.y}` : '缺少地图坐标，使用兼容定位'}
+                                    {agent.hasReplayTile
+                                        ? t('replay.pixel.residents.tile', { x: agent.tile.x, y: agent.tile.y })
+                                        : t('replay.pixel.residents.missingCoords')}
                                 </span>
-                                {agent.lastMessage && <span className="pixel-agent-location">最近收到：{agent.lastMessage}</span>}
+                                {agent.lastMessage && <span className="pixel-agent-location">{t('replay.pixel.residents.lastReceived', { message: agent.lastMessage })}</span>}
                             </div>
                         ))}
                     </div>
@@ -2899,27 +2906,29 @@ export default function PixelReplay() {
             <Card className="pixel-live-console" variant="borderless">
                 <div className="pixel-live-console-header">
                     <Space size={8} wrap>
-                        <Text strong>Live Console</Text>
+                        <Text strong>{t('replay.pixel.live.title')}</Text>
                         <Tag color={liveMode === 'ask' ? 'blue' : 'orange'}>
-                            {liveMode === 'ask' ? 'Ask' : 'Intervene'}
+                            {liveMode === 'ask' ? t('replay.pixel.live.ask') : t('replay.pixel.live.intervene')}
                         </Tag>
                         <Tag>{promptTargetLabel}</Tag>
                     </Space>
                     <Text type="secondary">
-                        {liveWaiting ? '输入 @ 选择对象' : `当前状态：${liveStatus?.status ?? 'offline'}`}
+                        {liveWaiting
+                            ? t('replay.pixel.live.inputHint')
+                            : t('replay.pixel.live.status', { status: formatStatusLabel(liveStatus?.status, t, 'offline') })}
                     </Text>
                 </div>
                 <div className="pixel-live-result-stream">
                     {liveInteractions.length === 0 ? (
                         <div className="pixel-live-empty">
-                            <Text type="secondary">还没有实时交互记录。</Text>
+                            <Text type="secondary">{t('replay.pixel.live.empty')}</Text>
                         </div>
                     ) : liveInteractions.slice().reverse().slice(0, 4).map((item) => (
                         <div className="pixel-live-result-card" key={item.id}>
                             <div className="pixel-communication-meta">
                                 <Space size={6} wrap>
                                     <Tag color={item.type === 'ask' ? 'blue' : 'orange'}>
-                                        {item.type === 'ask' ? 'Ask' : 'Intervene'}
+                                        {item.type === 'ask' ? t('replay.pixel.live.ask') : t('replay.pixel.live.intervene')}
                                     </Tag>
                                     {item.targetLabel && <Tag>{item.targetLabel}</Tag>}
                                 </Space>
@@ -2927,7 +2936,7 @@ export default function PixelReplay() {
                             </div>
                             <Text strong className="pixel-live-prompt">{item.prompt}</Text>
                             <Text className="pixel-live-result-text">
-                                {item.result ?? '等待结果...'}
+                                {item.result ?? t('replay.pixel.live.waitingResult')}
                             </Text>
                         </div>
                     ))}
@@ -2939,14 +2948,14 @@ export default function PixelReplay() {
                             value={liveMode}
                             onChange={(value) => setLiveMode(value as 'ask' | 'intervene')}
                             options={[
-                                { label: 'Ask', value: 'ask' },
-                                { label: 'Intervene', value: 'intervene' },
+                                { label: t('replay.pixel.live.ask'), value: 'ask' },
+                                { label: t('replay.pixel.live.intervene'), value: 'intervene' },
                             ]}
                         />
                         <Text type="secondary" className="pixel-live-target-hint">
                             {liveMode === 'ask'
-                                ? describeAskTarget(promptTarget, profiles)
-                                : `${describeInteractionTarget(promptTarget, profiles, 'intervene')}；下一次 Run Step/Auto 生效`}
+                                ? describeInteractionTarget(promptTarget, profiles, 'ask', t)
+                                : `${describeInteractionTarget(promptTarget, profiles, 'intervene', t)} - ${t('replay.pixel.live.nextStepNote')}`}
                         </Text>
                     </div>
                     <Mentions
@@ -2957,8 +2966,8 @@ export default function PixelReplay() {
                         disabled={!liveWaiting || liveBusy}
                         rows={3}
                         placeholder={liveMode === 'ask'
-                            ? '@系统 当前小镇发生了什么？'
-                            : '@Jiuwen Alice#1 火山爆发了，通知其他人撤离'}
+                            ? t('replay.pixel.live.askPlaceholder')
+                            : t('replay.pixel.live.intervenePlaceholder')}
                         options={liveTargetMentions.map((mention) => ({
                             value: mention.value,
                             label: mention.label,
@@ -2972,12 +2981,12 @@ export default function PixelReplay() {
                         disabled={!liveWaiting || liveBusy || livePrompt.trim() === '' || !promptTargetReady}
                         onClick={submitLiveInteraction}
                     >
-                        发送
+                        {t('replay.pixel.live.send')}
                     </Button>
                 </div>
             </Card>
             <Drawer
-                title={selectedAgent ? `${selectedAgent.name} · 居民详情` : '居民详情'}
+                title={selectedAgent ? t('replay.pixel.drawer.detailTitle', { name: selectedAgent.name }) : t('replay.pixel.drawer.detailTitleFallback')}
                 open={agentDetailOpen && Boolean(selectedAgent)}
                 onClose={() => setAgentDetailOpen(false)}
                 width="min(520px, 92vw)"
@@ -2987,48 +2996,48 @@ export default function PixelReplay() {
                 {selectedAgent && (
                     <div className="pixel-agent-detail-drawer-content">
                         <div className="pixel-replay-selected compact">
-                            <Text type="secondary">选中的居民</Text>
+                            <Text type="secondary">{t('replay.pixel.drawer.selectedResident')}</Text>
                             <Text strong>{selectedAgent.name}</Text>
                             <Text>{selectedAgent.action}</Text>
-                            <Text type="secondary">位置：{selectedAgent.location}</Text>
+                            <Text type="secondary">{t('replay.pixel.residents.location', { location: selectedAgent.location })}</Text>
                             <Space size={4} wrap>
                                 {selectedAgent.locationId && <Tag>{selectedAgent.locationId}</Tag>}
                                 {selectedAgent.movementStatus && (
                                     <Tag color={selectedAgent.movementStatus === 'moving' ? 'blue' : 'green'}>
-                                        {selectedAgent.movementStatus}
+                                        {formatStatusLabel(selectedAgent.movementStatus, t)}
                                     </Tag>
                                 )}
                                 <Tag color={selectedAgent.hasReplayTile ? 'geekblue' : 'orange'}>
-                                    tile {selectedAgent.tile.x}, {selectedAgent.tile.y}
+                                    {t('replay.pixel.residents.tile', { x: selectedAgent.tile.x, y: selectedAgent.tile.y })}
                                 </Tag>
                             </Space>
                         </div>
                         {agentRuntimeLoadingId === selectedAgent.id && (
                             <Space>
                                 <Spin size="small" />
-                                <Text type="secondary">正在读取 agent 状态...</Text>
+                                <Text type="secondary">{t('replay.pixel.drawer.loadingStatus')}</Text>
                             </Space>
                         )}
-                        {renderPlainDetail('Token 消耗', formatTokenUsage(selectedAgentRuntime?.token_usage))}
-                        {renderPlainDetail('当前状态', formatInlineFields(selectedAgentSummary, '暂无状态'))}
+                        {renderPlainDetail(t('replay.pixel.drawer.tokenUsage'), formatTokenUsage(selectedAgentRuntime?.token_usage, t))}
+                        {renderPlainDetail(t('replay.pixel.drawer.currentStatus'), formatInlineFields(selectedAgentSummary, t('replay.pixel.drawer.noStatus')))}
                         {renderPlainDetail(
-                            '当前位置可交互',
+                            t('replay.pixel.drawer.interactions'),
                             selectedAgent.availableInteractions.length > 0
                                 ? selectedAgent.availableInteractions.map((interaction) => `${interaction.name} (${interaction.id}): ${interaction.description ?? ''}`).join('\n')
-                                : '暂无可交互动作',
+                                : t('replay.pixel.drawer.noInteractions'),
                         )}
-                        {renderPlainDetail('人物背景设定', formatInlineFields(selectedProfile?.profile ?? selectedSnapshotProfile, '暂无人物背景'))}
-                        {renderPlainDetail('Skill Runtime', formatInlineFields(selectedSkillRuntimeSummary, '暂无 skill runtime'))}
-                        {renderPlainDetail('会话状态', joinDetailBlocks([
-                            ['session_state', formatInlineFields(selectedAgentRuntime?.session_state, '暂无会话状态')],
-                            ['agent_state_snapshot', formatInlineFields(selectedAgentSnapshot, '暂无快照状态')],
-                            ['skill_states', formatInlineFields(selectedSkillStates, '暂无 skill states')],
+                        {renderPlainDetail(t('replay.pixel.drawer.profile'), formatInlineFields(selectedProfile?.profile ?? selectedSnapshotProfile, t('replay.pixel.drawer.noProfile')))}
+                        {renderPlainDetail(t('replay.pixel.drawer.skillRuntime'), formatInlineFields(selectedSkillRuntimeSummary, t('replay.pixel.drawer.noSkillRuntime')))}
+                        {renderPlainDetail(t('replay.pixel.drawer.sessionState'), joinDetailBlocks([
+                            ['session_state', formatInlineFields(selectedAgentRuntime?.session_state, t('replay.pixel.drawer.noSessionState'))],
+                            ['agent_state_snapshot', formatInlineFields(selectedAgentSnapshot, t('replay.pixel.drawer.noSnapshot'))],
+                            ['skill_states', formatInlineFields(selectedSkillStates, t('replay.pixel.drawer.noSkillStates'))],
                         ]))}
                     </div>
                 )}
             </Drawer>
             <Drawer
-                title="Agent 配置"
+                title={t('replay.pixel.drawer.agentConfig')}
                 open={agentBuilderOpen}
                 onClose={() => setAgentBuilderOpen(false)}
                 width="min(1180px, 96vw)"
@@ -3039,11 +3048,11 @@ export default function PixelReplay() {
                         type={liveStatus.status === 'waiting' ? 'success' : 'info'}
                         showIcon
                         message={liveStatus.status === 'waiting'
-                            ? '当前 Live 支持热加载新 Agent'
-                            : 'Agent 配置已支持热加载；等待 Live 回到 waiting 后同步'}
+                            ? t('replay.pixel.drawer.hotLoadReady')
+                            : t('replay.pixel.drawer.hotLoadPending')}
                         description={liveStatus.status === 'waiting'
-                            ? '保存新增或批量导入的 Agent 后，会同步到当前 Live session；下一个 Run Step/Auto 就会参与响应。已完成的 replay 不会被原地改写。'
-                            : '当前 Live 正在处理 step/ask/intervene/auto。配置可先保存，回到 waiting 后再次保存或同步即可在下一步生效。'}
+                            ? t('replay.pixel.drawer.hotLoadReadyDescription')
+                            : t('replay.pixel.drawer.hotLoadPendingDescription')}
                         style={{ marginBottom: 12 }}
                     />
                 )}
@@ -3061,10 +3070,10 @@ export default function PixelReplay() {
                             }>(withLiveWorkspace('/sync-agents'));
                             setLiveStatus(result.status);
                             if (result.added_agent_ids.length > 0) {
-                                messageApi.success(`已热加载 ${result.added_agent_ids.length} 个 Agent，下一个 step 会参与响应。`);
+                                messageApi.success(t('replay.pixel.drawer.hotLoadSuccess', { count: result.added_agent_ids.length }));
                             }
                         } else if (liveStatus && liveStatus.status !== 'waiting') {
-                            messageApi.warning('配置已保存；当前 Live 不在 waiting 状态，需恢复到 waiting 后才能热加载新 Agent。');
+                            messageApi.warning(t('replay.pixel.drawer.hotLoadWarning'));
                         }
                         await refreshReplayData(true);
                     }}
