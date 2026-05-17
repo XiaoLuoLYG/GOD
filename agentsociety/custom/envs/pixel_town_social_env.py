@@ -90,6 +90,9 @@ class PixelTownSocialEnv(EnvBase):
         ColumnDef("movement_status", "TEXT"),
         ColumnDef("target_location_id", "TEXT"),
         ColumnDef("path_json", "JSON"),
+        ColumnDef("movement_segment_json", "JSON"),
+        ColumnDef("movement_path_index", "INTEGER"),
+        ColumnDef("movement_path_length", "INTEGER"),
         ColumnDef("available_interactions_json", "JSON"),
     ]
     _env_state_columns: ClassVar[list[ColumnDef]] = [
@@ -141,6 +144,9 @@ class PixelTownSocialEnv(EnvBase):
         self._movement_targets: dict[int, str | None] = {}
         self._movement_paths: dict[int, list[Tile]] = {}
         self._movement_progress: dict[int, float] = {}
+        self._movement_step_segments: dict[int, list[Tile]] = {}
+        self._movement_path_indices: dict[int, int] = {}
+        self._movement_path_lengths: dict[int, int] = {}
         for agent_id in self._agent_names:
             initial_location = (initial_locations or {}).get(str(agent_id))
             self._place_agent_at_location(agent_id, initial_location, fallback_index=agent_id)
@@ -324,6 +330,9 @@ class PixelTownSocialEnv(EnvBase):
         self._movement_targets[agent_id] = None
         self._movement_paths[agent_id] = [self._tiles[agent_id]]
         self._movement_progress[agent_id] = 0.0
+        self._movement_step_segments[agent_id] = [self._tiles[agent_id]]
+        self._movement_path_indices[agent_id] = 0
+        self._movement_path_lengths[agent_id] = 1
         return location_id
 
     def _neighbors(self, tile: Tile) -> list[Tile]:
@@ -543,6 +552,9 @@ supports direct/group messages between agents.
             self._movement_paths[agent_id] = path
             self._movement_progress[agent_id] = 0.0
             self._movement_targets[agent_id] = target_location_id
+            self._movement_step_segments[agent_id] = [path[0]]
+            self._movement_path_indices[agent_id] = 0
+            self._movement_path_lengths[agent_id] = len(path)
             target_name = self._location_display_name(target_location_id)
             if len(path) <= 1:
                 self._finish_movement(agent_id, target_location_id)
@@ -798,6 +810,9 @@ supports direct/group messages between agents.
                         "movement_status",
                         "target_location_id",
                         "path_json",
+                        "movement_segment_json",
+                        "movement_path_index",
+                        "movement_path_length",
                     )
                     if column in columns
                 ]
@@ -858,8 +873,36 @@ supports direct/group messages between agents.
                     if "target_location_id" in row.keys() and row["target_location_id"]
                     else None
                 )
-                self._movement_paths[agent_id] = [self._tiles[agent_id]]
-                self._movement_progress[agent_id] = 0.0
+                path = self._tile_list_from_json(row["path_json"]) if "path_json" in row.keys() else []
+                if not path:
+                    path = [self._tiles[agent_id]]
+                segment = (
+                    self._tile_list_from_json(row["movement_segment_json"])
+                    if "movement_segment_json" in row.keys()
+                    else []
+                )
+                self._movement_paths[agent_id] = path
+                raw_path_index = (
+                    row["movement_path_index"]
+                    if "movement_path_index" in row.keys() and row["movement_path_index"] is not None
+                    else None
+                )
+                if raw_path_index is None:
+                    try:
+                        path_index = path.index(self._tiles[agent_id])
+                    except ValueError:
+                        path_index = 0
+                else:
+                    path_index = int(raw_path_index)
+                path_length = (
+                    int(row["movement_path_length"])
+                    if "movement_path_length" in row.keys() and row["movement_path_length"] is not None
+                    else len(path)
+                )
+                self._movement_path_indices[agent_id] = max(0, path_index)
+                self._movement_path_lengths[agent_id] = max(1, path_length)
+                self._movement_step_segments[agent_id] = segment or [self._tiles[agent_id]]
+                self._movement_progress[agent_id] = float(self._movement_path_indices[agent_id])
                 self._actions[agent_id] = str(row["action"] or "waiting")
                 self._statuses[agent_id] = str(row["status"] or "ready")
                 self._emotions[agent_id] = str(row["emotion"] or "neutral")
@@ -922,6 +965,12 @@ supports direct/group messages between agents.
 
     def _advance_movements(self, tick: int) -> None:
         del tick
+        for agent_id in self._agent_names:
+            tile = self._tiles.get(agent_id, (0, 0))
+            self._movement_step_segments[agent_id] = [tile]
+            if self._movement_statuses.get(agent_id) != "moving":
+                self._movement_path_indices[agent_id] = 0
+                self._movement_path_lengths[agent_id] = 1
         for agent_id, status in list(self._movement_statuses.items()):
             if status != "moving":
                 continue
@@ -929,7 +978,13 @@ supports direct/group messages between agents.
             target_location_id = self._movement_targets.get(agent_id)
             if not path or target_location_id is None:
                 self._movement_statuses[agent_id] = "idle"
+                self._movement_path_indices[agent_id] = 0
+                self._movement_path_lengths[agent_id] = 1
                 continue
+            previous_index = min(
+                int(self._movement_progress.get(agent_id, 0.0)),
+                len(path) - 1,
+            )
             distance = max(1, len(path) - 1)
             tiles_this_step = max(1.0, self._movement_tiles_per_second)
             if distance > 1 and self._movement_min_steps_per_trip > 1:
@@ -942,10 +997,24 @@ supports direct/group messages between agents.
             )
             next_index = min(int(self._movement_progress[agent_id]), len(path) - 1)
             self._tiles[agent_id] = path[next_index]
+            self._movement_path_indices[agent_id] = next_index
+            self._movement_path_lengths[agent_id] = len(path)
+            segment_start = min(previous_index, next_index)
+            segment_end = max(previous_index, next_index)
+            self._movement_step_segments[agent_id] = path[segment_start : segment_end + 1]
             if next_index >= len(path) - 1:
-                self._finish_movement(agent_id, target_location_id)
+                self._finish_movement(agent_id, target_location_id, preserve_path_metadata=True)
 
-    def _finish_movement(self, agent_id: int, location_id: str) -> None:
+    def _finish_movement(
+        self,
+        agent_id: int,
+        location_id: str,
+        *,
+        preserve_path_metadata: bool = False,
+    ) -> None:
+        path_index = self._movement_path_indices.get(agent_id, 0)
+        path_length = self._movement_path_lengths.get(agent_id, 1)
+        segment = self._movement_step_segments.get(agent_id)
         self._location_ids[agent_id] = location_id
         self._locations[agent_id] = self._location_display_name(location_id)
         self._tiles[agent_id] = self._location_tile(location_id)
@@ -953,6 +1022,15 @@ supports direct/group messages between agents.
         self._movement_targets[agent_id] = None
         self._movement_paths[agent_id] = [self._tiles[agent_id]]
         self._movement_progress[agent_id] = 0.0
+        if preserve_path_metadata:
+            self._movement_path_indices[agent_id] = path_index
+            self._movement_path_lengths[agent_id] = path_length
+            if segment:
+                self._movement_step_segments[agent_id] = segment
+        else:
+            self._movement_path_indices[agent_id] = 0
+            self._movement_path_lengths[agent_id] = 1
+            self._movement_step_segments[agent_id] = [self._tiles[agent_id]]
         self._statuses[agent_id] = "活跃"
         self._actions[agent_id] = f"已到达{self._location_display_name(location_id)}"
 
@@ -1220,12 +1298,39 @@ supports direct/group messages between agents.
         except Exception:
             return template
 
+    @staticmethod
+    def _tile_list_from_json(value: Any) -> list[Tile]:
+        if value in (None, ""):
+            return []
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError:
+                return []
+        if not isinstance(value, list):
+            return []
+        tiles: list[Tile] = []
+        for item in value:
+            try:
+                if isinstance(item, dict):
+                    tiles.append((int(item["x"]), int(item["y"])))
+                elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                    tiles.append((int(item[0]), int(item[1])))
+            except Exception:
+                continue
+        return tiles
+
+    @staticmethod
+    def _tiles_to_json(tiles: list[Tile]) -> str:
+        return json.dumps([{"x": x, "y": y} for x, y in tiles])
+
     def _snapshot_agent(self, agent_id: int) -> dict[str, Any]:
         messages = self._mailboxes.get(agent_id, [])
         last_message = messages[-1]["content"] if messages else ""
         tile = self._tiles.get(agent_id, (0, 0))
         location_id = self._location_ids.get(agent_id)
         path = self._movement_paths.get(agent_id) or [tile]
+        movement_segment = self._movement_step_segments.get(agent_id) or [tile]
         available_interactions = self._available_interactions(location_id)
         return {
             "agent_id": agent_id,
@@ -1247,7 +1352,10 @@ supports direct/group messages between agents.
             "location_id": location_id,
             "movement_status": self._movement_statuses.get(agent_id, "idle"),
             "target_location_id": self._movement_targets.get(agent_id),
-            "path_json": json.dumps([{"x": x, "y": y} for x, y in path]),
+            "path_json": self._tiles_to_json(path),
+            "movement_segment_json": self._tiles_to_json(movement_segment),
+            "movement_path_index": self._movement_path_indices.get(agent_id, 0),
+            "movement_path_length": self._movement_path_lengths.get(agent_id, len(path)),
             "available_interactions_json": json.dumps(available_interactions, ensure_ascii=False),
         }
 
@@ -1262,6 +1370,9 @@ supports direct/group messages between agents.
             "movement_targets": self._movement_targets,
             "movement_paths": self._movement_paths,
             "movement_progress": self._movement_progress,
+            "movement_step_segments": self._movement_step_segments,
+            "movement_path_indices": self._movement_path_indices,
+            "movement_path_lengths": self._movement_path_lengths,
             "actions": self._actions,
             "statuses": self._statuses,
             "emotions": self._emotions,
@@ -1295,6 +1406,16 @@ supports direct/group messages between agents.
         self._movement_progress = {
             int(k): float(v) for k, v in state.get("movement_progress", {}).items()
         }
+        self._movement_step_segments = {
+            int(k): [tuple(tile) for tile in path]  # type: ignore[misc]
+            for k, path in state.get("movement_step_segments", {}).items()
+        }
+        self._movement_path_indices = {
+            int(k): int(v) for k, v in state.get("movement_path_indices", {}).items()
+        }
+        self._movement_path_lengths = {
+            int(k): int(v) for k, v in state.get("movement_path_lengths", {}).items()
+        }
         self._actions = {int(k): v for k, v in state.get("actions", {}).items()}
         self._statuses = {int(k): v for k, v in state.get("statuses", {}).items()}
         self._emotions = {int(k): v for k, v in state.get("emotions", {}).items()}
@@ -1324,3 +1445,6 @@ supports direct/group messages between agents.
             self._movement_targets.setdefault(agent_id, None)
             self._movement_paths.setdefault(agent_id, [self._tiles[agent_id]])
             self._movement_progress.setdefault(agent_id, 0.0)
+            self._movement_step_segments.setdefault(agent_id, [self._tiles[agent_id]])
+            self._movement_path_indices.setdefault(agent_id, 0)
+            self._movement_path_lengths.setdefault(agent_id, len(self._movement_paths[agent_id]))

@@ -76,7 +76,7 @@ language: Prefer Chinese, switch to bilingual when necessary.
 PixelTownSocialEnv:
   map_manifest_path:           custom/maps/the_ville/map.yaml
   default_group_name:          The Ville Daily Life Chat
-  movement_tiles_per_second:   8.0      # visual movement speed on the map
+  movement_tiles_per_second:   8.0      # path tiles advanced per simulation step
   movement_min_steps_per_trip: 3        # minimum steps consumed when crossing locations
 ```
 

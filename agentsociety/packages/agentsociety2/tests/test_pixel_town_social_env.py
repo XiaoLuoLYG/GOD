@@ -5,6 +5,7 @@ from datetime import datetime
 import importlib.util
 import json
 from pathlib import Path
+import sqlite3
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _ENV_PATH = _REPO_ROOT / "custom" / "envs" / "pixel_town_social_env.py"
@@ -133,6 +134,9 @@ def test_pixel_town_alias_movement_and_replay_fields(tmp_path: Path) -> None:
         assert initial["tile_x"] == 0
         assert initial["tile_y"] == 0
         assert initial["movement_status"] == "idle"
+        assert json.loads(initial["movement_segment_json"]) == [{"x": 0, "y": 0}]
+        assert initial["movement_path_index"] == 0
+        assert initial["movement_path_length"] == 1
         assert json.loads(initial["available_interactions_json"])[0]["id"] == "meet_friend"
 
         move = await env.move_agent(1, "咖啡馆")
@@ -148,6 +152,9 @@ def test_pixel_town_alias_movement_and_replay_fields(tmp_path: Path) -> None:
         assert still_moving["movement_status"] == "moving"
         assert still_moving["tile_x"] == 1
         assert still_moving["tile_y"] == 0
+        assert json.loads(still_moving["movement_segment_json"]) == [{"x": 0, "y": 0}, {"x": 1, "y": 0}]
+        assert still_moving["movement_path_index"] == 1
+        assert still_moving["movement_path_length"] == 5
 
         await env.step(10, datetime(2026, 5, 9, 12, 1, 0))
         await env.step(10, datetime(2026, 5, 9, 12, 2, 0))
@@ -158,6 +165,19 @@ def test_pixel_town_alias_movement_and_replay_fields(tmp_path: Path) -> None:
         assert arrived["tile_x"] == 4
         assert arrived["tile_y"] == 0
         assert json.loads(arrived["path_json"]) == [{"x": 4, "y": 0}]
+        assert json.loads(arrived["movement_segment_json"]) == [
+            {"x": 2, "y": 0},
+            {"x": 3, "y": 0},
+            {"x": 4, "y": 0},
+        ]
+        assert arrived["movement_path_index"] == 4
+        assert arrived["movement_path_length"] == 5
+
+        await env.step(10, datetime(2026, 5, 9, 12, 3, 0))
+        idle_after_arrival = await env.observe_agent(1)
+        assert json.loads(idle_after_arrival["movement_segment_json"]) == [{"x": 4, "y": 0}]
+        assert idle_after_arrival["movement_path_index"] == 0
+        assert idle_after_arrival["movement_path_length"] == 1
 
     asyncio.run(scenario())
 
@@ -197,6 +217,97 @@ def test_pixel_town_unreachable_move_does_not_change_position(tmp_path: Path) ->
         assert observed["movement_status"] == "idle"
         assert observed["tile_x"] == 0
         assert observed["tile_y"] == 0
+        assert json.loads(observed["movement_segment_json"]) == [{"x": 0, "y": 0}]
+        assert observed["movement_path_index"] == 0
+        assert observed["movement_path_length"] == 1
+
+    asyncio.run(scenario())
+
+
+def test_pixel_town_load_replay_tail_infers_legacy_path_index(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        manifest = _write_map_package(tmp_path)
+        env = PixelTownSocialEnv(
+            agent_id_name_pairs=[[1, "阿莉"]],
+            initial_locations={"1": "公园"},
+            map_manifest_path=str(manifest),
+            movement_tiles_per_second=1,
+        )
+        db_path = tmp_path / "legacy.db"
+        path_json = json.dumps([{"x": x, "y": 0} for x in range(5)])
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                """
+                CREATE TABLE pixel_town_social_agent_state (
+                    agent_id INTEGER,
+                    step INTEGER,
+                    name TEXT,
+                    location TEXT,
+                    action TEXT,
+                    status TEXT,
+                    emotion TEXT,
+                    last_message TEXT,
+                    tile_x INTEGER,
+                    tile_y INTEGER,
+                    location_id TEXT,
+                    movement_status TEXT,
+                    target_location_id TEXT,
+                    path_json JSON
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE pixel_town_social_env_state (
+                    step INTEGER,
+                    total_messages_sent INTEGER,
+                    current_phase TEXT,
+                    latest_event TEXT,
+                    latest_communications JSON
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO pixel_town_social_agent_state
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    1,
+                    0,
+                    "阿莉",
+                    "公园",
+                    "moving",
+                    "ready",
+                    "calm",
+                    "",
+                    2,
+                    0,
+                    "park",
+                    "moving",
+                    "cafe",
+                    path_json,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO pixel_town_social_env_state VALUES (?, ?, ?, ?, ?)",
+                (0, 0, "setup", "", "[]"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        result = await env.load_replay_tail(db_path, 0)
+        assert result["restored"] is True
+
+        await env.step(10, datetime(2026, 5, 9, 12, 0, 0))
+        observed = await env.observe_agent(1)
+        assert observed["tile_x"] == 3
+        assert observed["tile_y"] == 0
+        assert json.loads(observed["movement_segment_json"]) == [{"x": 2, "y": 0}, {"x": 3, "y": 0}]
+        assert observed["movement_path_index"] == 3
+        assert observed["movement_path_length"] == 5
 
     asyncio.run(scenario())
 

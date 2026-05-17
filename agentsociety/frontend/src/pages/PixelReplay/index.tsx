@@ -46,6 +46,7 @@ const DEFAULT_EXPERIMENT_ID = import.meta.env.VITE_DEFAULT_REPLAY_EXPERIMENT_ID 
 const DEFAULT_WORKSPACE_PATH = import.meta.env.VITE_REPLAY_WORKSPACE_PATH ?? '';
 const INITIAL_REPLAY_READY_TIMEOUT_MS = 60_000;
 const INITIAL_REPLAY_RETRY_INTERVAL_MS = 1500;
+const LEGACY_PATH_SEGMENT_TILE_COUNT = 8;
 const PHASER_TEXT_FONT_FAMILY = 'Arial, "PingFang SC", "Microsoft YaHei", sans-serif';
 const AGENT_NAME_LABEL_HEIGHT = 17;
 const SPEECH_BUBBLE_LABEL_GAP = 6;
@@ -282,6 +283,7 @@ type PixelAgent = {
     name: string;
     spriteKey: string;
     tile: Tile;
+    movementSegment: Tile[];
     visualOffset: VisualOffset;
     action: string;
     status?: string;
@@ -341,6 +343,8 @@ type PhaserBridge = {
     labels: Map<number, Phaser.GameObjects.Text>;
     hitZones: Map<number, Phaser.GameObjects.Zone>;
     speechBubbles: Map<number, PhaserSpeechBubble>;
+    routeDrivers: Map<number, { x: number; y: number }>;
+    routeKeys: Map<number, string>;
     hoveredSpeechAgentId?: number;
     locationMarkers?: Phaser.GameObjects.GameObject[];
     selectedId?: number;
@@ -718,6 +722,53 @@ function parseInteractionList(value: unknown): ReplayMapInteraction[] {
     }
 }
 
+function parseTileList(value: unknown): Tile[] {
+    if (Array.isArray(value)) {
+        return value
+            .map((item) => {
+                if (item && typeof item === 'object' && !Array.isArray(item)) {
+                    const x = pickOptionalNumberValue(item as Record<string, unknown>, 'x');
+                    const y = pickOptionalNumberValue(item as Record<string, unknown>, 'y');
+                    return x === undefined || y === undefined ? undefined : { x, y };
+                }
+                if (Array.isArray(item) && item.length >= 2) {
+                    const x = Number(item[0]);
+                    const y = Number(item[1]);
+                    return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : undefined;
+                }
+                return undefined;
+            })
+            .filter((tile): tile is Tile => Boolean(tile));
+    }
+    if (typeof value !== 'string' || value.trim() === '') {
+        return [];
+    }
+    try {
+        return parseTileList(JSON.parse(value));
+    } catch {
+        return [];
+    }
+}
+
+function movementSegmentForRow(row: Record<string, unknown> | undefined, tile: Tile): Tile[] {
+    if (!row) {
+        return [tile];
+    }
+    const movementSegment = parseTileList(row.movement_segment_json);
+    if (movementSegment.length > 0) {
+        return movementSegment;
+    }
+    const legacyPath = parseTileList(row.path_json);
+    const currentIndex = legacyPath.findIndex((item) => item.x === tile.x && item.y === tile.y);
+    if (currentIndex >= 0) {
+        return legacyPath.slice(
+            Math.max(0, currentIndex - LEGACY_PATH_SEGMENT_TILE_COUNT),
+            currentIndex + 1,
+        );
+    }
+    return [tile];
+}
+
 function normalizeAgentId(value: unknown): number | undefined {
     if (typeof value === 'number' && Number.isFinite(value)) {
         return value;
@@ -842,6 +893,8 @@ function buildPixelFrame(
         const tileY = pickOptionalNumberValue(row, 'tile_y');
         const hasReplayTile = tileX !== undefined && tileY !== undefined;
         const fallbackTile = getAutoTile(profile.id, step, walkableMap);
+        const tile = hasReplayTile ? { x: tileX, y: tileY } : fallbackTile;
+        const movementSegment = movementSegmentForRow(row, tile);
         const availableInteractions = row
             ? parseInteractionList(row.available_interactions_json)
             : [];
@@ -849,7 +902,8 @@ function buildPixelFrame(
             id: profile.id,
             name: getAgentName(profile),
             spriteKey: spriteForAgent(index, walkableMap),
-            tile: hasReplayTile ? { x: tileX, y: tileY } : fallbackTile,
+            tile,
+            movementSegment,
             visualOffset: { x: 0, y: 0 },
             action: rawDescription ?? labels.idleAction,
             status,
@@ -1038,11 +1092,79 @@ function zoomCameraAtCenter(scene: Phaser.Scene, bridge: PhaserBridge, delta: nu
     zoomCameraAtScreenPoint(scene, bridge, scene.cameras.main.width / 2, scene.cameras.main.height / 2, delta);
 }
 
-function getAgentWorldPosition(agent: PixelAgent, tileSize: number): { x: number; y: number } {
+function getTileWorldPosition(tile: Tile, visualOffset: VisualOffset, tileSize: number): { x: number; y: number } {
     return {
-        x: agent.tile.x * tileSize + tileSize / 2 + agent.visualOffset.x * tileSize,
-        y: agent.tile.y * tileSize + tileSize / 2 + agent.visualOffset.y * tileSize,
+        x: tile.x * tileSize + tileSize / 2 + visualOffset.x * tileSize,
+        y: tile.y * tileSize + tileSize / 2 + visualOffset.y * tileSize,
     };
+}
+
+function getAgentWorldPosition(agent: PixelAgent, tileSize: number): { x: number; y: number } {
+    return getTileWorldPosition(agent.tile, agent.visualOffset, tileSize);
+}
+
+function getAgentRouteWorldPositions(agent: PixelAgent, tileSize: number): { x: number; y: number }[] {
+    const segment = agent.movementSegment.length > 0 ? agent.movementSegment : [agent.tile];
+    return segment.map((tile) => getTileWorldPosition(tile, agent.visualOffset, tileSize));
+}
+
+type MovementDirection = 'down' | 'left' | 'right' | 'up';
+
+const DIRECTION_IDLE_FRAMES: Record<MovementDirection, number> = {
+    down: 1,
+    left: 4,
+    right: 7,
+    up: 10,
+};
+
+const DIRECTION_WALK_FRAMES: Record<MovementDirection, number[]> = {
+    down: [0, 1, 2, 1],
+    left: [3, 4, 5, 4],
+    right: [6, 7, 8, 7],
+    up: [9, 10, 11, 10],
+};
+
+function directionBetween(
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+    fallback: MovementDirection = 'down',
+): MovementDirection {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    if (Math.abs(dx) > Math.abs(dy)) {
+        return dx >= 0 ? 'right' : 'left';
+    }
+    if (Math.abs(dy) > 0) {
+        return dy >= 0 ? 'down' : 'up';
+    }
+    return fallback;
+}
+
+function ensureAgentAnimations(scene: Phaser.Scene, spriteKey: string) {
+    (Object.keys(DIRECTION_WALK_FRAMES) as MovementDirection[]).forEach((direction) => {
+        const animationKey = `${spriteKey}-${direction}-walk`;
+        if (scene.anims.exists(animationKey)) {
+            return;
+        }
+        scene.anims.create({
+            key: animationKey,
+            frames: DIRECTION_WALK_FRAMES[direction].map((frame) => ({ key: spriteKey, frame })),
+            frameRate: 7,
+            repeat: -1,
+        });
+    });
+}
+
+function playWalkAnimation(sprite: Phaser.GameObjects.Sprite, direction: MovementDirection) {
+    const animationKey = `${sprite.texture.key}-${direction}-walk`;
+    if (sprite.scene.anims.exists(animationKey)) {
+        sprite.anims.play(animationKey, true);
+    }
+}
+
+function stopAtIdleFrame(sprite: Phaser.GameObjects.Sprite, direction: MovementDirection) {
+    sprite.anims.stop();
+    sprite.setFrame(DIRECTION_IDLE_FRAMES[direction]);
 }
 
 function getFitScreenPosition(agent: PixelAgent, map: WalkableMap, canvasSize: CanvasSize): AgentScreenPosition | undefined {
@@ -1233,6 +1355,7 @@ function PixelAgentSpeechBubble({
 function PixelTownCanvas({
     frame,
     map,
+    stepDurationMs,
     selectedAgentId,
     onSelectAgent,
     onOpenSetup,
@@ -1240,6 +1363,7 @@ function PixelTownCanvas({
 }: {
     frame?: PixelFrame;
     map: WalkableMap;
+    stepDurationMs: number;
     selectedAgentId?: number;
     onSelectAgent: (agentId: number) => void;
     onOpenSetup: () => void;
@@ -1253,10 +1377,13 @@ function PixelTownCanvas({
         labels: new Map(),
         hitZones: new Map(),
         speechBubbles: new Map(),
+        routeDrivers: new Map(),
+        routeKeys: new Map(),
         locationMarkers: [],
     });
     const frameRef = useRef<PixelFrame | undefined>(frame);
     const onSelectAgentRef = useRef(onSelectAgent);
+    const stepDurationMsRef = useRef(stepDurationMs);
     const agentScreenPositionsRef = useRef<Record<number, AgentScreenPosition>>({});
     const [hoverState, setHoverState] = useState<AgentHoverState | undefined>();
     const [speechHoverAgentId, setSpeechHoverAgentId] = useState<number | undefined>();
@@ -1371,6 +1498,10 @@ function PixelTownCanvas({
     useEffect(() => {
         onSelectAgentRef.current = onSelectAgent;
     }, [onSelectAgent]);
+
+    useEffect(() => {
+        stepDurationMsRef.current = stepDurationMs;
+    }, [stepDurationMs]);
 
     useEffect(() => {
         const element = containerRef.current;
@@ -1528,7 +1659,7 @@ function PixelTownCanvas({
                     syncAgentScreenPositions();
                 });
                 this.input.keyboard?.createCursorKeys();
-                renderFrame(this, frameRef.current, bridgeRef.current, onSelectAgentRef.current, handleHoverAgent);
+                renderFrame(this, frameRef.current, bridgeRef.current, onSelectAgentRef.current, handleHoverAgent, stepDurationMsRef.current);
                 syncAgentScreenPositions();
                 this.events.on(Phaser.Scenes.Events.POST_UPDATE, syncAgentScreenPositions);
             }
@@ -1561,6 +1692,8 @@ function PixelTownCanvas({
                 labels: new Map(),
                 hitZones: new Map(),
                 speechBubbles: new Map(),
+                routeDrivers: new Map(),
+                routeKeys: new Map(),
                 locationMarkers: [],
             };
         };
@@ -1568,10 +1701,10 @@ function PixelTownCanvas({
 
     useEffect(() => {
         if (bridgeRef.current.scene) {
-            renderFrame(bridgeRef.current.scene, frame, bridgeRef.current, onSelectAgentRef.current, handleHoverAgent);
+            renderFrame(bridgeRef.current.scene, frame, bridgeRef.current, onSelectAgentRef.current, handleHoverAgent, stepDurationMs);
             syncAgentScreenPositions();
         }
-    }, [frame, handleHoverAgent, syncAgentScreenPositions]);
+    }, [frame, handleHoverAgent, stepDurationMs, syncAgentScreenPositions]);
 
     useEffect(() => {
         if (hoverState && !hoveredAgent) {
@@ -1601,6 +1734,7 @@ function PixelTownCanvas({
                     bridgeRef.current,
                     onSelectAgentRef.current,
                     handleHoverAgent,
+                    stepDurationMsRef.current,
                 );
             }
             syncAgentScreenPositions();
@@ -1943,12 +2077,147 @@ function ensureCompactSpeechBubble(
     return speechBubble;
 }
 
+function routeKeyForAgent(frame: PixelFrame, agent: PixelAgent): string {
+    const tiles = (agent.movementSegment.length > 0 ? agent.movementSegment : [agent.tile])
+        .map((tile) => tileKey(tile))
+        .join('|');
+    return `${frame.step}:${agent.id}:${tiles}`;
+}
+
+function setAgentRenderPositions(
+    sprite: Phaser.GameObjects.Sprite,
+    label: Phaser.GameObjects.Text,
+    hitZone: Phaser.GameObjects.Zone,
+    speechBubble: PhaserSpeechBubble | undefined,
+    tileSize: number,
+    x: number,
+    y: number,
+    speechOffsetY: number,
+) {
+    sprite.setPosition(x, y);
+    label.setPosition(x, y - tileSize * 0.75);
+    hitZone.setPosition(x, y);
+    if (speechBubble) {
+        speechBubble.bubble.setPosition(x, y - speechOffsetY);
+        speechBubble.text.setPosition(x, y - speechOffsetY - tileSize * 0.02);
+        speechBubble.hitZone.setPosition(x, y - speechOffsetY);
+    }
+}
+
+function cancelAgentRoute(bridge: PhaserBridge, agentId: number) {
+    const scene = bridge.scene;
+    const driver = bridge.routeDrivers.get(agentId);
+    if (scene && driver) {
+        scene.tweens.killTweensOf(driver);
+    }
+    bridge.routeDrivers.delete(agentId);
+}
+
+function animateAgentRoute(
+    scene: Phaser.Scene,
+    bridge: PhaserBridge,
+    agent: PixelAgent,
+    route: { x: number; y: number }[],
+    stepDurationMs: number,
+    objects: {
+        sprite: Phaser.GameObjects.Sprite;
+        label: Phaser.GameObjects.Text;
+        hitZone: Phaser.GameObjects.Zone;
+        speechBubble?: PhaserSpeechBubble;
+        tileSize: number;
+        speechOffsetY: number;
+    },
+) {
+    cancelAgentRoute(bridge, agent.id);
+    if (route.length <= 1) {
+        const direction = directionBetween({ x: objects.sprite.x, y: objects.sprite.y }, route[0] ?? objects.sprite);
+        setAgentRenderPositions(
+            objects.sprite,
+            objects.label,
+            objects.hitZone,
+            objects.speechBubble,
+            objects.tileSize,
+            route[0]?.x ?? objects.sprite.x,
+            route[0]?.y ?? objects.sprite.y,
+            objects.speechOffsetY,
+        );
+        stopAtIdleFrame(objects.sprite, direction);
+        return;
+    }
+
+    const first = route[0];
+    if (Math.hypot(objects.sprite.x - first.x, objects.sprite.y - first.y) > objects.tileSize * 1.1) {
+        setAgentRenderPositions(
+            objects.sprite,
+            objects.label,
+            objects.hitZone,
+            objects.speechBubble,
+            objects.tileSize,
+            first.x,
+            first.y,
+            objects.speechOffsetY,
+        );
+    }
+
+    const driver = { x: objects.sprite.x, y: objects.sprite.y };
+    bridge.routeDrivers.set(agent.id, driver);
+    const totalDuration = Phaser.Math.Clamp(stepDurationMs * 0.8, 260, 2200);
+    const segmentDuration = totalDuration / Math.max(1, route.length - 1);
+    let lastDirection = directionBetween(route[0], route[1]);
+
+    const runSegment = (index: number) => {
+        if (index >= route.length) {
+            bridge.routeDrivers.delete(agent.id);
+            stopAtIdleFrame(objects.sprite, lastDirection);
+            return;
+        }
+        const target = route[index];
+        lastDirection = directionBetween({ x: driver.x, y: driver.y }, target, lastDirection);
+        playWalkAnimation(objects.sprite, lastDirection);
+        scene.tweens.add({
+            targets: driver,
+            x: target.x,
+            y: target.y,
+            duration: segmentDuration,
+            ease: 'Linear',
+            onUpdate: () => {
+                setAgentRenderPositions(
+                    objects.sprite,
+                    objects.label,
+                    objects.hitZone,
+                    objects.speechBubble,
+                    objects.tileSize,
+                    driver.x,
+                    driver.y,
+                    objects.speechOffsetY,
+                );
+            },
+            onComplete: () => {
+                setAgentRenderPositions(
+                    objects.sprite,
+                    objects.label,
+                    objects.hitZone,
+                    objects.speechBubble,
+                    objects.tileSize,
+                    target.x,
+                    target.y,
+                    objects.speechOffsetY,
+                );
+                runSegment(index + 1);
+            },
+        });
+    };
+
+    runSegment(1);
+}
+
 function renderFrame(
     scene: Phaser.Scene,
     frame: PixelFrame | undefined,
     bridge: PhaserBridge,
     onSelectAgent: (agentId: number) => void,
     onHoverAgent: (agentId: number | undefined, pointer?: Phaser.Input.Pointer) => void,
+    stepDurationMs: number,
 ) {
     if (!frame) {
         return;
@@ -1964,28 +2233,34 @@ function renderFrame(
             bridge.hitZones.get(agentId)?.destroy();
             bridge.hitZones.delete(agentId);
             destroySpeechBubble(bridge, agentId);
+            cancelAgentRoute(bridge, agentId);
+            bridge.routeKeys.delete(agentId);
         }
     }
 
     frame.agents.forEach((agent) => {
         const tileSize = frame.map.tileSize || TILE_SIZE;
-        const { x, y } = getAgentWorldPosition(agent, tileSize);
+        const routePositions = getAgentRouteWorldPositions(agent, tileSize);
+        const finalPosition = routePositions[routePositions.length - 1] ?? getAgentWorldPosition(agent, tileSize);
+        const { x, y } = finalPosition;
         let sprite = bridge.sprites.get(agent.id);
         let label = bridge.labels.get(agent.id);
         let hitZone = bridge.hitZones.get(agent.id);
         let speechBubble: PhaserSpeechBubble | undefined;
         const hasSpeech = getAgentSpeechItems(agent).length > 0;
         const speechMetrics = getCompactSpeechBubbleMetrics(tileSize, scene.cameras.main.zoom);
-        const speechY = y - speechMetrics.offsetY;
+        const routeKey = routeKeyForAgent(frame, agent);
 
         if (!sprite) {
-            sprite = scene.add.sprite(x, y, agent.spriteKey, 1);
+            const firstPosition = routePositions[0] ?? { x, y };
+            sprite = scene.add.sprite(firstPosition.x, firstPosition.y, agent.spriteKey, 1);
             sprite.setDepth(10);
             bridge.sprites.set(agent.id, sprite);
         }
-        sprite.setDepth(10 + y / 10000);
+        ensureAgentAnimations(scene, agent.spriteKey);
+        sprite.setDepth(10 + sprite.y / 10000);
         if (!hitZone) {
-            hitZone = scene.add.zone(x, y, tileSize * 5, tileSize * 5);
+            hitZone = scene.add.zone(sprite.x, sprite.y, tileSize * 5, tileSize * 5);
             hitZone.setDepth(40);
             hitZone.setInteractive({ useHandCursor: true });
             hitZone.on('pointerdown', () => onSelectAgent(agent.id));
@@ -1995,7 +2270,7 @@ function renderFrame(
             bridge.hitZones.set(agent.id, hitZone);
         }
         if (!label) {
-            label = scene.add.text(x, y - tileSize * 0.75, agent.name, {
+            label = scene.add.text(sprite.x, sprite.y - tileSize * 0.75, agent.name, {
                 fontFamily: PHASER_TEXT_FONT_FAMILY,
                 fontSize: '10.5px',
                 color: '#ffffff',
@@ -2014,8 +2289,8 @@ function renderFrame(
                 scene,
                 bridge,
                 agent,
-                x,
-                speechY,
+                sprite.x,
+                sprite.y - speechMetrics.offsetY,
                 tileSize,
                 onSelectAgent,
                 onHoverAgent,
@@ -2026,52 +2301,50 @@ function renderFrame(
             destroySpeechBubble(bridge, agent.id);
         }
 
-        const duration = Math.hypot(sprite.x - x, sprite.y - y) > 1 ? 240 : 0;
-        scene.tweens.killTweensOf([
+        const sameRoute = bridge.routeKeys.get(agent.id) === routeKey;
+        if (sameRoute && bridge.routeDrivers.has(agent.id)) {
+            label.setText(agent.name);
+            label.setVisible(false);
+            return;
+        }
+        if (sameRoute) {
+            const direction = routePositions.length > 1
+                ? directionBetween(routePositions[routePositions.length - 2], finalPosition)
+                : directionBetween({ x: sprite.x, y: sprite.y }, finalPosition);
+            setAgentRenderPositions(
+                sprite,
+                label,
+                hitZone,
+                speechBubble,
+                tileSize,
+                finalPosition.x,
+                finalPosition.y,
+                speechMetrics.offsetY,
+            );
+            stopAtIdleFrame(sprite, direction);
+            label.setText(agent.name);
+            label.setVisible(false);
+            return;
+        }
+        if (!sameRoute) {
+            scene.tweens.killTweensOf([
+                sprite,
+                label,
+                hitZone,
+                speechBubble?.bubble,
+                speechBubble?.text,
+                speechBubble?.hitZone,
+            ].filter(Boolean));
+            bridge.routeKeys.set(agent.id, routeKey);
+        }
+        animateAgentRoute(scene, bridge, agent, routePositions, stepDurationMs, {
             sprite,
             label,
             hitZone,
-            speechBubble?.bubble,
-            speechBubble?.text,
-            speechBubble?.hitZone,
-        ].filter(Boolean));
-        scene.tweens.add({
-            targets: sprite,
-            x,
-            y,
-            duration,
-            ease: 'Linear',
+            speechBubble,
+            tileSize,
+            speechOffsetY: speechMetrics.offsetY,
         });
-        scene.tweens.add({
-            targets: label,
-            x,
-            y: y - tileSize * 0.75,
-            duration,
-            ease: 'Linear',
-        });
-        scene.tweens.add({
-            targets: hitZone,
-            x,
-            y,
-            duration,
-            ease: 'Linear',
-        });
-        if (speechBubble) {
-            scene.tweens.add({
-                targets: [speechBubble.bubble, speechBubble.hitZone],
-                x,
-                y: speechY,
-                duration,
-                ease: 'Linear',
-            });
-            scene.tweens.add({
-                targets: speechBubble.text,
-                x,
-                y: speechY - tileSize * 0.02,
-                duration,
-                ease: 'Linear',
-            });
-        }
         label.setText(agent.name);
         label.setVisible(false);
     });
@@ -2570,7 +2843,8 @@ export default function PixelReplay() {
         if (!walkableMap) {
             return undefined;
         }
-        return buildPixelFrame(profiles, bundle, currentStep, walkableMap, {
+        const frameStep = bundle?.step ?? currentStep;
+        return buildPixelFrame(profiles, bundle, frameStep, walkableMap, {
             idleAction: formatStatusLabel(undefined, t),
             defaultLocation: walkableMap.displayName,
         });
@@ -2649,6 +2923,7 @@ export default function PixelReplay() {
                 key={frame.map.mapId}
                 frame={frame}
                 map={frame.map}
+                stepDurationMs={intervalMs}
                 selectedAgentId={selectedAgentId}
                 onSelectAgent={setSelectedAgentId}
                 onOpenSetup={() => navigate('/setup')}

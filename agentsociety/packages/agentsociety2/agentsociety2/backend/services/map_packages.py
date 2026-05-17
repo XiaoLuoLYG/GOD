@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import heapq
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,14 @@ import yaml
 
 DEFAULT_MAP_ID = "the_ville"
 MANIFEST_FILENAMES = ("map.yaml", "map.yml", "town.yaml", "town.yml", "map.json", "town.json")
+REQUIRED_ROUTE_PAIRS: dict[str, tuple[tuple[str, str], ...]] = {
+    "the_ville": (("park", "cafe"), ("home", "market")),
+    "pku": (
+        ("west_gate", "centennial_hall"),
+        ("dormitory", "library"),
+        ("weiming_lake", "teaching_building"),
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -92,6 +101,35 @@ def _load_structured(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"Expected object in map manifest: {path}")
     return data
+
+
+def _has_walkable_route(
+    start: tuple[int, int],
+    goal: tuple[int, int],
+    walkable: set[tuple[int, int]],
+    width: int,
+    height: int,
+) -> bool:
+    if start not in walkable or goal not in walkable:
+        return False
+
+    frontier: list[tuple[int, tuple[int, int]]] = [(0, start)]
+    cost_so_far: dict[tuple[int, int], int] = {start: 0}
+    while frontier:
+        _, current = heapq.heappop(frontier)
+        if current == goal:
+            return True
+        x, y = current
+        for neighbor in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            if not (0 <= neighbor[0] < width and 0 <= neighbor[1] < height and neighbor in walkable):
+                continue
+            next_cost = cost_so_far[current] + 1
+            if neighbor in cost_so_far and cost_so_far[neighbor] <= next_cost:
+                continue
+            cost_so_far[neighbor] = next_cost
+            priority = next_cost + abs(goal[0] - neighbor[0]) + abs(goal[1] - neighbor[1])
+            heapq.heappush(frontier, (priority, neighbor))
+    return False
 
 
 def is_within(path: Path, root: Path) -> bool:
@@ -228,6 +266,7 @@ def validate_manifest_path(manifest_path: Path) -> MapValidation:
     for key in ("map_id", "display_name", "tile_size", "tiled_map_path", "locations"):
         if key not in manifest or manifest.get(key) in (None, ""):
             errors.append(f"missing required field: {key}")
+    map_id = str(manifest.get("map_id") or package_root.name)
 
     try:
         map_path = safe_resolve(package_root, str(manifest.get("tiled_map_path") or "visuals/map.json"), package_root)
@@ -291,6 +330,7 @@ def validate_manifest_path(manifest_path: Path) -> MapValidation:
         errors.append("locations must be a non-empty list")
         locations = []
     location_ids: set[str] = set()
+    location_anchors: dict[str, tuple[int, int]] = {}
     for item in locations:
         if not isinstance(item, dict):
             errors.append(f"invalid location entry: {item!r}")
@@ -313,6 +353,8 @@ def validate_manifest_path(manifest_path: Path) -> MapValidation:
             errors.append(f"location {location_id} anchor out of bounds: ({x}, {y})")
         elif collisions and (x, y) not in walkable:
             warnings.append(f"location {location_id} anchor is not walkable: ({x}, {y})")
+        else:
+            location_anchors[location_id] = (x, y)
         visual_asset = str(item.get("visual_asset") or "").strip()
         if visual_asset:
             try:
@@ -322,6 +364,15 @@ def validate_manifest_path(manifest_path: Path) -> MapValidation:
                 continue
             if not visual_path.exists() or not visual_path.is_file():
                 errors.append(f"location {location_id} visual_asset missing: {visual_path}")
+
+    if walkable and width > 0 and height > 0:
+        for start_id, goal_id in REQUIRED_ROUTE_PAIRS.get(map_id, ()):
+            start = location_anchors.get(start_id)
+            goal = location_anchors.get(goal_id)
+            if start is None or goal is None:
+                errors.append(f"required route {start_id}->{goal_id} references unknown location")
+            elif not _has_walkable_route(start, goal, walkable, width, height):
+                errors.append(f"required route {start_id}->{goal_id} is not reachable")
 
     interactions = manifest.get("interactions") or []
     if not isinstance(interactions, list):

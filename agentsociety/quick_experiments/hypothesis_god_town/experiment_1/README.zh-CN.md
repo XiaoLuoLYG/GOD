@@ -75,7 +75,7 @@ language: 优先中文，必要时双语补充
 PixelTownSocialEnv:
   map_manifest_path:           custom/maps/the_ville/map.yaml
   default_group_name:          The Ville Daily Life Chat
-  movement_tiles_per_second:   8.0      # 角色在地图上的视觉移动速度
+  movement_tiles_per_second:   8.0      # 每个 simulation step 推进的路径格数
   movement_min_steps_per_trip: 3        # 跨地点最少占多少 step
 ```
 
