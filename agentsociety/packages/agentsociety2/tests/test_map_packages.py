@@ -10,6 +10,7 @@ def _write_package(root: Path) -> Path:
     (package / "visuals" / "tiles").mkdir(parents=True)
     (package / "characters").mkdir()
     (package / "visuals" / "tiles" / "ground.png").write_bytes(b"png")
+    (package / "visuals" / "preview.png").write_bytes(b"preview")
     (package / "characters" / "Resident.png").write_bytes(b"png")
     (package / "visuals" / "map.json").write_text(
         json.dumps(
@@ -95,6 +96,9 @@ def test_map_package_validation_and_replay_metadata(tmp_path: Path) -> None:
 
     info = replay._map_info_response(str(workspace), "demo", "1")
     assert info.map_id == "demo_map"
+    assert info.preview_url == (
+        "/api/v1/replay/demo/1/map/preview?workspace_path=" + str(workspace)
+    )
     assert info.tilesets[0].image_url.startswith("/api/v1/replay/demo/1/map/assets/0")
     assert info.character_sprites[0].name == "Resident"
     assert info.locations[0].id == "plaza"

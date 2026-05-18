@@ -176,6 +176,7 @@ type ReplayMapInfo = {
     width: number;
     height: number;
     tiled_map_url: string;
+    preview_url?: string | null;
     tilesets: ReplayMapTileset[];
     character_root_url?: string | null;
     character_sprites?: ReplayMapCharacter[];
@@ -268,6 +269,7 @@ type WalkableMap = {
     displayName: string;
     tileSize: number;
     tiledMapUrl: string;
+    previewUrl?: string | null;
     tilesets: ReplayMapTileset[];
     characterSprites: ReplayMapCharacter[];
     locations: ReplayMapLocation[];
@@ -1009,6 +1011,7 @@ async function loadWalkableMap(mapInfo: ReplayMapInfo, t: TFunction): Promise<Wa
         displayName: mapInfo.display_name,
         tileSize: mapInfo.tile_size || TILE_SIZE,
         tiledMapUrl: mapInfo.tiled_map_url,
+        previewUrl: mapInfo.preview_url,
         tilesets: mapInfo.tilesets,
         characterSprites: mapInfo.character_sprites || [],
         locations: mapInfo.locations,
@@ -1670,7 +1673,8 @@ function PixelTownCanvas({
             parent: containerRef.current,
             width: containerRef.current.clientWidth,
             height: containerRef.current.clientHeight,
-            backgroundColor: '#111827',
+            backgroundColor: map.previewUrl ? 'rgba(17, 24, 39, 0)' : '#111827',
+            transparent: Boolean(map.previewUrl),
             pixelArt: true,
             physics: {
                 default: 'arcade',
@@ -1762,6 +1766,14 @@ function PixelTownCanvas({
 
     return (
         <div className="pixel-town-canvas" ref={containerRef}>
+            {map.previewUrl ? (
+                <img
+                    aria-hidden="true"
+                    className="pixel-map-preview-bg"
+                    src={map.previewUrl}
+                    alt=""
+                />
+            ) : null}
             <div className="pixel-canvas-controls">
                 <Tooltip title={t('replay.pixel.canvas.resetFit', { map: map.displayName })}>
                     <Button
@@ -1811,6 +1823,12 @@ function PixelTownCanvas({
                         {t('replay.pixel.canvas.skills')}
                     </Button>
                 </Tooltip>
+                <LanguageToggle
+                    className="pixel-canvas-language-toggle"
+                    showLabel={false}
+                    shape="circle"
+                    size="small"
+                />
             </div>
             {frame?.agents.map((agent) => {
                 const position = agentScreenPositions[agent.id] ?? getFitScreenPosition(agent, map, canvasSize);
@@ -2996,7 +3014,6 @@ export default function PixelReplay() {
                     {liveStatus && <Tag color="geekblue">{t('replay.pixel.topbar.liveSteps', { count: liveStatus.step_count })}</Tag>}
                     <Text>{formatTime(bundle?.t ?? timeline[currentIndex]?.t)}</Text>
                     {stepLoading && <Spin size="small" />}
-                    <LanguageToggle />
                 </Space>
                 <input
                     className="pixel-replay-range"

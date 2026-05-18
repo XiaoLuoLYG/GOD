@@ -15,8 +15,7 @@
 
 <p align="center">
   <a href="README.md">🌏 English</a> ·
-  <a href="OPERATOR_SCRIPT.zh-CN.md">📜 操作脚本（中文）</a> ·
-  <a href="OPERATOR_SCRIPT.md">📜 Operator Script (EN)</a>
+  <a href="OPERATOR_SCRIPT.md">📜 操作脚本 / Operator Script</a>
 </p>
 
 ---
@@ -57,17 +56,17 @@ http://127.0.0.1:5174/pixel-replay/pku_trump_visit/1
 | 群体 | 数量 | 代表角色 |
 | --- | --- | --- |
 | 🎓 北大校园 | 18 | 学生、教职、行政、校媒、社团组织者、访客 |
-| 🛩️ 代表团 | 4 | Donald Trump、Elon Musk、Jensen Huang、代表团协调员 |
+| 🛩️ 代表团 | 4 | Donald Trump、Elon Musk、Jensen Huang、王协调员 |
 
 > 代表团 agent 是 **风格化的虚构模拟人物**，不代表真实人物的真实表态。
 
 ## 🎬 Operator Flow
 
-完整的逐步提示词序列见 [`OPERATOR_SCRIPT.zh-CN.md`](OPERATOR_SCRIPT.zh-CN.md)。
+完整的逐步提示词序列见 [`OPERATOR_SCRIPT.md`](OPERATOR_SCRIPT.md)。
 高层节奏：
 
 1. 🌱 粘贴日常导演提示，跑前 1–2 个 step，呈现普通校园日常。
-2. 📣 粘贴访问通知 intervention（来自 `OPERATOR_SCRIPT.zh-CN.md`）。
+2. 📣 粘贴访问通知 intervention（来自 `OPERATOR_SCRIPT.md`）。
 3. 💬 跑 1–2 个 step，观察校园讨论。
 4. 🚪 粘贴代表团抵达 intervention，再让全员集合到 `centennial_hall`。
 5. ❓ 使用 Q&A 段落：每个问题先以 `direct_message` 送达对应 agent，再用 `Ask`

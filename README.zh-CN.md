@@ -56,10 +56,10 @@
 ## 🖼️ 截图
 
 <p align="center">
-  <img src="docs/assets/screenshots/01-control-room.png" alt="GOD 控制台" width="94%" />
+  <img src="docs/assets/screenshots/01-control-room-zh.png" alt="GOD 控制台" width="94%" />
 </p>
 
-<p align="center"><sub>实时控制台：像素小镇、step 控制、定向提问、居民列表 —— 全在一个界面里。</sub></p>
+<p align="center"><sub>实时控制台：PKU 地图、step 控制、定向提问、居民列表 —— 全在一个界面里。</sub></p>
 
 ## 🚀 快速开始
 
