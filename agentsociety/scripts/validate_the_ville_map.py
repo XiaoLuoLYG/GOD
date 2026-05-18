@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -35,10 +36,10 @@ REMOVED_GENERATED_LOCATIONS = {
     "volcano",
     "volcano_edge",
 }
-DEFAULT_GENERATIVE_MATRIX_ROOT = Path(
-    "/Users/luoyige/Documents/projects/generative_agents/"
-    "environment/frontend_server/static_dirs/assets/the_ville/matrix"
-)
+DEFAULT_GENERATIVE_MATRIX_ROOT = os.environ.get(
+    "GOD_GENERATIVE_MATRIX_ROOT",
+    "",
+).strip()
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -52,6 +53,14 @@ def _load(path: Path) -> dict[str, Any]:
 def _resolve(base: Path, raw: str) -> Path:
     path = Path(raw).expanduser()
     return path if path.is_absolute() else (base / path).resolve()
+
+
+def _resolve_matrix_root(matrix_root: Path | None) -> Path | None:
+    if matrix_root is not None:
+        return matrix_root
+    if DEFAULT_GENERATIVE_MATRIX_ROOT:
+        return Path(DEFAULT_GENERATIVE_MATRIX_ROOT).expanduser()
+    return None
 
 
 def _walkable_tiles(tiled_map: dict[str, Any]) -> set[tuple[int, int]]:
@@ -202,8 +211,14 @@ def validate_manifest(manifest_path: Path, matrix_root: Path | None = None) -> l
             errors.append(f"generated AgentSociety tileset must not be used: {image_path}")
 
     matrix: OriginalVilleMatrix | None = None
-    resolved_matrix_root = matrix_root or DEFAULT_GENERATIVE_MATRIX_ROOT
-    if resolved_matrix_root.exists():
+    resolved_matrix_root = _resolve_matrix_root(matrix_root)
+    if resolved_matrix_root is None:
+        warnings.append(
+            "original generative_agents matrix not configured; set "
+            "GOD_GENERATIVE_MATRIX_ROOT or pass --generative-matrix-root to enable "
+            "semantic-source validation"
+        )
+    elif resolved_matrix_root.exists():
         matrix = OriginalVilleMatrix(resolved_matrix_root)
     else:
         warnings.append(f"original generative_agents matrix not found; skipped semantic-source validation: {resolved_matrix_root}")
@@ -313,13 +328,20 @@ def main() -> int:
     )
     parser.add_argument(
         "--generative-matrix-root",
-        default=str(DEFAULT_GENERATIVE_MATRIX_ROOT),
-        help="Path to generative_agents The Ville matrix directory.",
+        default=DEFAULT_GENERATIVE_MATRIX_ROOT,
+        help=(
+            "Path to generative_agents The Ville matrix directory. Defaults to "
+            "GOD_GENERATIVE_MATRIX_ROOT; if unset, semantic-source validation is skipped."
+        ),
     )
     args = parser.parse_args()
     messages = validate_manifest(
         Path(args.manifest),
-        matrix_root=Path(args.generative_matrix_root).expanduser(),
+        matrix_root=(
+            Path(args.generative_matrix_root).expanduser()
+            if args.generative_matrix_root
+            else None
+        ),
     )
     if messages:
         print("\n".join(messages))

@@ -208,10 +208,7 @@
             "食堂、宿舍、图书馆、实验楼和体育馆用于展示日常生活"
           ],
           "language": "优先中文，必要时双语补充"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     },
     {
@@ -274,10 +271,7 @@
           "background": "2026-05-15，北京大学燕园。北大演讲是虚构 what-if simulation。",
           "simulation_goal": "观察校园社会对虚构国际访问事件的反应。",
           "language": "优先中文"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     },
     {
@@ -340,10 +334,7 @@
           "background": "北大演讲为虚构模拟。",
           "simulation_goal": "观察 AI 科研群体如何回应国际访问事件。",
           "language": "优先中文"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     },
     {
@@ -404,10 +395,7 @@
           "background": "北大演讲为虚构模拟。",
           "simulation_goal": "观察校园信息流动。",
           "language": "优先中文"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     },
     {
@@ -470,10 +458,7 @@
           "background": "北大演讲为虚构模拟。",
           "simulation_goal": "观察国际关系课堂如何吸收热点。",
           "language": "优先中文"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     },
     {
@@ -535,10 +520,7 @@
           "background": "北大演讲为虚构模拟。",
           "simulation_goal": "观察 AI 安全讨论。",
           "language": "优先中文"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     },
     {
@@ -602,10 +584,7 @@
           "background": "北大演讲为虚构模拟。",
           "simulation_goal": "观察外部访客视角。",
           "language": "优先中文"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     },
     {
@@ -665,10 +644,7 @@
           "background": "北大演讲为虚构模拟。",
           "simulation_goal": "观察校园服务人员视角。",
           "language": "优先中文"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     },
     {
@@ -732,10 +708,7 @@
           "background": "北大演讲为虚构模拟。",
           "simulation_goal": "观察校园导览和访问叙事。",
           "language": "优先中文"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     },
     {
@@ -797,10 +770,7 @@
           "background": "北大演讲为虚构模拟。",
           "simulation_goal": "观察学生组织者如何协调热点活动。",
           "language": "优先中文"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     },
     {
@@ -861,10 +831,7 @@
           "background": "北大演讲为虚构模拟。",
           "simulation_goal": "观察问答控场。",
           "language": "优先中文"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     },
     {
@@ -926,10 +893,7 @@
           "background": "北大演讲为虚构模拟。",
           "simulation_goal": "观察校园媒体叙事。",
           "language": "优先中文"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     },
     {
@@ -991,10 +955,7 @@
           "background": "北大演讲为虚构模拟。",
           "simulation_goal": "观察国际关系学生提问。",
           "language": "优先中文"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     },
     {
@@ -1058,10 +1019,7 @@
           "background": "北大演讲为虚构模拟。",
           "simulation_goal": "观察开源社区视角。",
           "language": "优先中文"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     },
     {
@@ -1123,10 +1081,7 @@
           "background": "北大演讲为虚构模拟。",
           "simulation_goal": "观察芯片方向学生提问。",
           "language": "优先中文"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     },
     {
@@ -1188,10 +1143,7 @@
           "background": "北大演讲为虚构模拟。",
           "simulation_goal": "观察创业学生视角。",
           "language": "优先中文"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     },
     {
@@ -1254,10 +1206,7 @@
           "background": "北大演讲为虚构模拟。",
           "simulation_goal": "观察普通学生视角。",
           "language": "优先中文"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     },
     {
@@ -1320,10 +1269,7 @@
           "background": "北大演讲为虚构模拟。",
           "simulation_goal": "观察宿舍和内容传播视角。",
           "language": "优先中文"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     },
     {
@@ -1387,10 +1333,7 @@
           "background": "此 Donald Trump agent 仅为虚构模拟，不代表真实人物发言。",
           "simulation_goal": "触发校园问答和舆论反应。",
           "language": "中英皆可，优先中文回答学生"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     },
     {
@@ -1452,10 +1395,7 @@
           "background": "此 Elon Musk agent 仅为虚构模拟。",
           "simulation_goal": "回应 AI 安全和开源问题。",
           "language": "中英皆可，优先中文回答学生"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     },
     {
@@ -1517,10 +1457,7 @@
           "background": "此 Jensen Huang agent 仅为虚构模拟。",
           "simulation_goal": "回应算力和科研基础设施问题。",
           "language": "中英皆可，优先中文回答学生"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     },
     {
@@ -1586,10 +1523,7 @@
           "background": "北大演讲为虚构模拟。",
           "simulation_goal": "保持访问流程清楚且不误导。",
           "language": "优先中文"
-        },
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ]
+        }
       }
     }
   ],

@@ -1,8 +1,6 @@
 # Pixel Town Assets
 
-The Smallville pixel map, tilesets, and character sprites in this directory are copied from:
-
-`/Users/luoyige/Documents/projects/generative_agents/environment/frontend_server/static_dirs/assets`
+The Smallville pixel map, tilesets, and character sprites in this directory are copied from the original Generative Agents asset directory.
 
 Original project:
 
