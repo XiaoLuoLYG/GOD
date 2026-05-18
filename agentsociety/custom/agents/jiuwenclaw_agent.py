@@ -276,7 +276,7 @@ Initialization example:
   "jiuwenclaw_ws_url": "ws://127.0.0.1:18092",
   "session_id": "agentsociety_agent_0",
   "mode": "agent.plan",
-  "trusted_dirs": ["/Users/luoyige/Documents/projects/GOD/agentsociety"],
+  "trusted_dirs": ["<path-to-GOD>/agentsociety"],
   "enable_memory": true,
   "enable_skill_runtime": true,
   "common_skill_ids": ["routine.daily", "social.reply", "memory.record", "map.navigate", "safety.respond"],

@@ -153,9 +153,6 @@
         "jiuwenclaw_ws_url": "ws://127.0.0.1:19092",
         "session_id": "god_town_fresh_20260514_112514_agent_1",
         "mode": "agent.plan",
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ],
         "enable_memory": true,
         "enable_skill_runtime": true,
         "request_timeout": 900,
@@ -290,9 +287,6 @@
         "jiuwenclaw_ws_url": "ws://127.0.0.1:19092",
         "session_id": "god_town_fresh_20260514_112514_agent_2",
         "mode": "agent.plan",
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ],
         "enable_memory": true,
         "enable_skill_runtime": true,
         "request_timeout": 900,
@@ -427,9 +421,6 @@
         "jiuwenclaw_ws_url": "ws://127.0.0.1:19092",
         "session_id": "god_town_fresh_20260514_112514_agent_3",
         "mode": "agent.plan",
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ],
         "enable_memory": true,
         "enable_skill_runtime": true,
         "request_timeout": 900,
@@ -563,9 +554,6 @@
         "jiuwenclaw_ws_url": "ws://127.0.0.1:19092",
         "session_id": "god_town_fresh_20260514_112514_agent_4",
         "mode": "agent.plan",
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ],
         "enable_memory": true,
         "enable_skill_runtime": true,
         "request_timeout": 900,
@@ -701,9 +689,6 @@
         "jiuwenclaw_ws_url": "ws://127.0.0.1:19092",
         "session_id": "god_town_fresh_20260514_112514_agent_5",
         "mode": "agent.plan",
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ],
         "enable_memory": true,
         "enable_skill_runtime": true,
         "request_timeout": 900,
@@ -839,9 +824,6 @@
         "jiuwenclaw_ws_url": "ws://127.0.0.1:19092",
         "session_id": "god_town_fresh_20260514_112514_agent_6",
         "mode": "agent.plan",
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ],
         "enable_memory": true,
         "enable_skill_runtime": true,
         "request_timeout": 900,
@@ -977,9 +959,6 @@
         "jiuwenclaw_ws_url": "ws://127.0.0.1:19092",
         "session_id": "god_town_fresh_20260514_112514_agent_7",
         "mode": "agent.plan",
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ],
         "enable_memory": true,
         "enable_skill_runtime": true,
         "request_timeout": 900,
@@ -1116,9 +1095,6 @@
         "jiuwenclaw_ws_url": "ws://127.0.0.1:19092",
         "session_id": "god_town_fresh_20260514_112514_agent_8",
         "mode": "agent.plan",
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ],
         "enable_memory": true,
         "enable_skill_runtime": true,
         "request_timeout": 900,
@@ -1251,9 +1227,6 @@
         "jiuwenclaw_ws_url": "ws://127.0.0.1:19092",
         "session_id": "god_town_fresh_20260514_112514_agent_9",
         "mode": "agent.plan",
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ],
         "enable_memory": true,
         "enable_skill_runtime": true,
         "request_timeout": 900,
@@ -1388,9 +1361,6 @@
         "jiuwenclaw_ws_url": "ws://127.0.0.1:19092",
         "session_id": "god_town_fresh_20260514_112514_agent_10",
         "mode": "agent.plan",
-        "trusted_dirs": [
-          "/Users/luoyige/Documents/projects/GOD/agentsociety"
-        ],
         "enable_memory": true,
         "enable_skill_runtime": true,
         "request_timeout": 900,
