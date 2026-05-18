@@ -15,8 +15,7 @@
 
 <p align="center">
   <a href="README.zh-CN.md">🌏 中文</a> ·
-  <a href="OPERATOR_SCRIPT.md">📜 Operator Script (EN)</a> ·
-  <a href="OPERATOR_SCRIPT.zh-CN.md">📜 操作脚本 (中文)</a>
+  <a href="OPERATOR_SCRIPT.md">📜 Operator Script / 操作脚本</a>
 </p>
 
 ---

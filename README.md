@@ -59,7 +59,7 @@
   <img src="docs/assets/screenshots/01-control-room.png" alt="GOD control room" width="94%" />
 </p>
 
-<p align="center"><sub>Live control room — pixel town, step controls, targeted ask, and resident roster in one view.</sub></p>
+<p align="center"><sub>Live control room — PKU map, step controls, targeted ask, and resident roster in one view.</sub></p>
 
 ## 🚀 Quick Start
 

@@ -158,6 +158,7 @@ class ReplayMapInfo(BaseModel):
     width: int
     height: int
     tiled_map_url: str
+    preview_url: Optional[str] = None
     tilesets: List[ReplayMapTileset] = Field(default_factory=list)
     character_root_url: Optional[str] = None
     character_sprites: List[ReplayMapCharacter] = Field(default_factory=list)
@@ -493,6 +494,7 @@ def _map_info_response(
     manifest_path = package.manifest_path
     manifest = package.manifest
     tiled_map_path, tiled_map = load_tiled_map(package)
+    preview_path = package.package_path / "visuals" / "preview.png"
     tilesets: list[ReplayMapTileset] = []
     for index, tileset in enumerate(tiled_map.get("tilesets", []) or []):
         if not isinstance(tileset, dict):
@@ -604,6 +606,16 @@ def _map_info_response(
             experiment_id,
             workspace_path,
             "/map/tiled",
+        ),
+        preview_url=(
+            _map_base_url(
+                hypothesis_id,
+                experiment_id,
+                workspace_path,
+                "/map/preview",
+            )
+            if preview_path.exists() and preview_path.is_file()
+            else None
         ),
         tilesets=tilesets,
         character_root_url=_map_base_url(
@@ -972,6 +984,23 @@ async def get_replay_map_asset(
         image_path = tileset_image_path(package, tileset_index)
     except Exception as exc:
         raise HTTPException(status_code=404, detail=f"Tileset image not found: {exc}") from exc
+    return FileResponse(image_path)
+
+
+@router.get("/{hypothesis_id}/{experiment_id}/map/preview")
+async def get_replay_map_preview(
+    hypothesis_id: str,
+    experiment_id: str,
+    workspace_path: str = Query(..., description="Workspace root path"),
+) -> FileResponse:
+    package = _resolve_experiment_map_package(
+        workspace_path,
+        hypothesis_id,
+        experiment_id,
+    )
+    image_path = package.package_path / "visuals" / "preview.png"
+    if not image_path.exists() or not image_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Map preview not found: {image_path}")
     return FileResponse(image_path)
 
 

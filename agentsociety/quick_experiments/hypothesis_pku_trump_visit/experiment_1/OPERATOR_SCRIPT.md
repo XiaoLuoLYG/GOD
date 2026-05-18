@@ -8,7 +8,7 @@ All prompts assume the fixed agent IDs in this experiment:
 - `#19 Donald Trump`
 - `#20 Elon Musk`
 - `#21 Jensen Huang`
-- `#22 代表团协调员`
+- `#22 王协调员`
 
 ## Warmup
 
@@ -41,7 +41,7 @@ Then click `Run Step`.
 Mode: `Intervene`
 
 ```text
-@Donald Trump#19 @Elon Musk#20 @Jensen Huang#21 @代表团协调员#22 请作为虚构访问代表团前往 west_gate（北京大学西门），完成到访寒暄和路线确认。不要模拟真实安保细节，只表现公开访问、校园导览、礼貌交流和对校园文化的观察。
+@Donald Trump#19 @Elon Musk#20 @Jensen Huang#21 @王协调员#22 请作为虚构访问代表团前往 west_gate（北京大学西门），完成到访寒暄和路线确认。不要模拟真实安保细节，只表现公开访问、校园导览、礼貌交流和对校园文化的观察。
 ```
 
 Then click `Run Step`.
@@ -51,7 +51,7 @@ Then click `Run Step`.
 Mode: `Intervene`
 
 ```text
-@博雅志愿者#9 @Donald Trump#19 @Elon Musk#20 @Jensen Huang#21 @代表团协调员#22 请前往 weiming_lake（未名湖）进行简短校园导览。博雅志愿者介绍未名湖、博雅塔和北大校园气质；代表团成员只做简短观察，不发表真实政治承诺。
+@王同学#9 @Donald Trump#19 @Elon Musk#20 @Jensen Huang#21 @王协调员#22 请前往 weiming_lake（未名湖）进行简短校园导览。王同学介绍未名湖、博雅塔和北大校园气质；代表团成员只做简短观察，不发表真实政治承诺。
 ```
 
 Then click `Run Step`.
@@ -61,7 +61,7 @@ Optional second landmark shot:
 Mode: `Intervene`
 
 ```text
-@博雅志愿者#9 @Donald Trump#19 @Elon Musk#20 @Jensen Huang#21 @代表团协调员#22 请前往 boya_pagoda（博雅塔）拍照和短暂停留。博雅志愿者继续做公开导览，代表团成员只回应校园文化和青年交流，不涉及真实政策承诺。
+@王同学#9 @Donald Trump#19 @Elon Musk#20 @Jensen Huang#21 @王协调员#22 请前往 boya_pagoda（博雅塔）拍照和短暂停留。王同学继续做公开导览，代表团成员只回应校园文化和青年交流，不涉及真实政策承诺。
 ```
 
 Then click `Run Step`.
@@ -91,7 +91,7 @@ Then click `Run Step`.
 Mode: `Intervene`
 
 ```text
-@陈芯然#15 下一步请你在百周年纪念讲堂向 Donald Trump 提问。请把这次提问落实为 action_proposal：action_type=direct_message, receiver_id=19, content=作为一名芯片方向博士生，我关心中美 AI 合作和芯片限制之间的矛盾。如果青年科研人员希望做开放、可复现、跨国合作的 AI 研究，政策应该如何避免伤害普通学生和研究者？不要代替 Trump 回答，只负责提问。
+@陈同学#15 下一步请你在百周年纪念讲堂向 Donald Trump 提问。请把这次提问落实为 action_proposal：action_type=direct_message, receiver_id=19, content=作为一名芯片方向博士生，我关心中美 AI 合作和芯片限制之间的矛盾。如果青年科研人员希望做开放、可复现、跨国合作的 AI 研究，政策应该如何避免伤害普通学生和研究者？不要代替 Trump 回答，只负责提问。
 ```
 
 Then click `Run Step`.
@@ -107,7 +107,7 @@ Mode: `Ask`
 Mode: `Intervene`
 
 ```text
-@代码猫同学#14 下一步请你向 Elon Musk 提问。请把这次提问落实为 action_proposal：action_type=direct_message, receiver_id=20, content=如果最强 AI 模型越来越集中在少数公司和国家手里，学生、开源社区和小团队还能怎样参与 AI 安全与创新？不要代替 Musk 回答，只负责提问。
+@沈同学#14 下一步请你向 Elon Musk 提问。请把这次提问落实为 action_proposal：action_type=direct_message, receiver_id=20, content=如果最强 AI 模型越来越集中在少数公司和国家手里，学生、开源社区和小团队还能怎样参与 AI 安全与创新？不要代替 Musk 回答，只负责提问。
 ```
 
 Then click `Run Step`.
@@ -123,7 +123,7 @@ Mode: `Ask`
 Mode: `Intervene`
 
 ```text
-@秋然研究员#3 下一步请你向 Jensen Huang 提问。请把这次提问落实为 action_proposal：action_type=direct_message, receiver_id=21, content=如果未来 AI 算力成为大学科研的关键基础设施，像北大这样的高校如何让更多学生公平获得训练、实验和部署模型的机会？不要代替 Jensen 回答。
+@李同学#3 下一步请你向 Jensen Huang 提问。请把这次提问落实为 action_proposal：action_type=direct_message, receiver_id=21, content=如果未来 AI 算力成为大学科研的关键基础设施，像北大这样的高校如何让更多学生公平获得训练、实验和部署模型的机会？不要代替 Jensen 回答。
 ```
 
 Then click `Run Step`.
@@ -139,7 +139,7 @@ Mode: `Ask`
 Mode: `Intervene`
 
 ```text
-@许远航#13 下一步请你向 Donald Trump 提问。请把这次提问落实为 action_proposal：action_type=direct_message, receiver_id=19, content=很多中国学生希望去美国交流、读书或创业，但也担心签证、政治气氛和不确定性。你会如何向普通学生保证青年交流不会被大国竞争完全吞没？不要代替 Trump 回答。
+@郑同学#13 下一步请你向 Donald Trump 提问。请把这次提问落实为 action_proposal：action_type=direct_message, receiver_id=19, content=很多中国学生希望去美国交流、读书或创业，但也担心签证、政治气氛和不确定性。你会如何向普通学生保证青年交流不会被大国竞争完全吞没？不要代替 Trump 回答。
 ```
 
 Then click `Run Step`.
@@ -155,7 +155,7 @@ Mode: `Ask`
 Mode: `Intervene`
 
 ```text
-@梁创业#16 下一步请你向 Donald Trump、Elon Musk 和 Jensen Huang 提问。请把这次提问先落实为 action_proposal：action_type=direct_message, receiver_id=19, content=如果中国和美国的年轻创业者都想做 AI 产品，但面对监管、算力、市场准入和地缘政治不确定性，你们认为小团队最应该押注什么？不要代替代表团回答，只负责提问。
+@梁同学#16 下一步请你向 Donald Trump、Elon Musk 和 Jensen Huang 提问。请把这次提问先落实为 action_proposal：action_type=direct_message, receiver_id=19, content=如果中国和美国的年轻创业者都想做 AI 产品，但面对监管、算力、市场准入和地缘政治不确定性，你们认为小团队最应该押注什么？不要代替代表团回答，只负责提问。
 ```
 
 Then click `Run Step`.
@@ -181,7 +181,7 @@ Then click `Run Step`.
 Mode: `Ask`
 
 ```text
-@南星记者#12 请以校园媒体记者身份，为这场虚构的“特朗普北大演讲”写 5 个不同风格的标题：理性新闻风、B站爆款风、小红书风、英文 X/Twitter 风、学术观察风。每个标题后用一句话解释为什么会传播。
+@林记者#12 请以校园媒体记者身份，为这场虚构的“特朗普北大演讲”写 5 个不同风格的标题：理性新闻风、B站爆款风、小红书风、英文 X/Twitter 风、学术观察风。每个标题后用一句话解释为什么会传播。
 ```
 
 ## N. 实验总结
