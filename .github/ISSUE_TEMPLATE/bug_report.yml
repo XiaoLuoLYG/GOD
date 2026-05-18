@@ -1,0 +1,68 @@
+name: Bug report
+description: Report something that is not working in GOD.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. Clear reproduction steps are the fastest way to help us fix it.
+  - type: input
+    id: version
+    attributes:
+      label: Commit or version
+      description: Paste the commit SHA, branch name, or release tag you are running.
+      placeholder: main @ abc1234
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Area
+      options:
+        - Startup / scripts
+        - Setup wizard
+        - Live control room
+        - PixelReplay
+        - Agent runtime / JiuwenClaw
+        - Map packages
+        - Experiment config
+        - Docs
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: What did you do, and what happened?
+      placeholder: |
+        1. Run ...
+        2. Open ...
+        3. Click ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: Status output
+      description: Paste `./scripts/god.sh status` and any relevant log excerpt. Redact API keys or private data.
+      render: text
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python, Node.js, browser, and model provider/base URL if relevant.
+      placeholder: macOS 15, Python 3.11, Node 22, Chrome, OpenAI-compatible endpoint
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or recordings
+      description: Drag in images or short clips if the issue is visual.

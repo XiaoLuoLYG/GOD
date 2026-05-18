@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-hygiene:
+    name: Release hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check diff whitespace
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if git rev-parse --verify "${BASE_SHA}^{commit}" >/dev/null 2>&1; then
+            git diff --check "${BASE_SHA}...${HEAD_SHA}"
+          elif git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            git diff --check HEAD~1..HEAD
+          else
+            git diff --check
+          fi
+
+      - name: Guard release-only artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          banned_paths="$(
+            git ls-files | grep -E '(^promos/|^docs/press-kit/|^agentsociety/custom/maps/pku/|^agentsociety/quick_experiments/hypothesis_pku_trump_visit/experiment_2/|^\.god/|^\.live/|(^|/)\.DS_Store$|(^|/)run_launcher\.log$|^agentsociety/quick_experiments/.*/run(_[^/]*)?/)' || true
+          )"
+          if [[ -n "${banned_paths}" ]]; then
+            echo "These paths should not be committed to the public release branch:"
+            echo "${banned_paths}"
+            exit 1
+          fi
+
+      - name: Check local README images
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          public_docs = [
+              pathlib.Path("README.md"),
+              pathlib.Path("README.zh-CN.md"),
+              pathlib.Path("QUICKSTART.md"),
+              pathlib.Path("QUICKSTART.zh-CN.md"),
+              pathlib.Path("CONTRIBUTING.md"),
+              pathlib.Path("CONTRIBUTING.zh-CN.md"),
+              pathlib.Path("docs/MAP_PACKAGES.md"),
+              pathlib.Path("docs/MAP_PACKAGES.zh-CN.md"),
+          ]
+
+          failures = []
+          for md_path in public_docs:
+              if not md_path.exists():
+                  continue
+              text = md_path.read_text(encoding="utf-8")
+              targets = []
+              targets.extend(re.findall(r"<img[^>]+src=[\"']([^\"']+)[\"']", text, flags=re.I))
+              targets.extend(re.findall(r"!\[[^\]]*\]\(([^)]+)\)", text))
+              for raw_target in targets:
+                  target = raw_target.strip().split("#", 1)[0].split("?", 1)[0]
+                  if not target or re.match(r"^[a-z][a-z0-9+.-]*:", target, flags=re.I):
+                      continue
+                  resolved = (md_path.parent / target).resolve()
+                  if not resolved.exists():
+                      failures.append(f"{md_path}: missing image asset {raw_target}")
+
+          if failures:
+              print("\n".join(failures))
+              sys.exit(1)
+          PY
+
+  python-tests:
+    name: Python targeted tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: agentsociety
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: agentsociety/uv.lock
+
+      - name: Run targeted backend tests
+        run: |
+          uv run pytest -q \
+            packages/agentsociety2/tests/test_god_setup_router.py \
+            packages/agentsociety2/tests/test_map_packages.py \
+            packages/agentsociety2/tests/test_pixel_town_social_env.py
+
+  frontend-build:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: agentsociety/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix agentsociety/frontend
+
+      - name: Build frontend
+        run: npm run build --prefix agentsociety/frontend

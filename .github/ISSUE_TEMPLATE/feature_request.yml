@@ -1,0 +1,46 @@
+name: Feature request
+description: Suggest an improvement or new capability for GOD.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to do that GOD cannot do well today?
+      placeholder: I want to...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What should happen instead?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Setup wizard
+        - Live control room
+        - PixelReplay
+        - Agent runtime
+        - Map packages
+        - Experiment authoring
+        - Evaluation / metrics
+        - Docs
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workaround or different design you have considered?
+  - type: textarea
+    id: media
+    attributes:
+      label: References or sketches
+      description: Links, screenshots, sketches, or examples from other tools.
