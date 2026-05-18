@@ -173,6 +173,12 @@ A late-spring Tuesday morning at 8:20. Sunny, 18°C, light breeze. A 200-person 
 
 ➡️ See [`hypothesis_god_town/experiment_1/`](agentsociety/quick_experiments/hypothesis_god_town/experiment_1/README.md) for the full breakdown of locations, profiles, and interactions.
 
+<p align="center">
+  <img src="docs/assets/screenshots/map-the-ville.png" alt="The Ville map" width="94%" />
+</p>
+
+<p align="center"><sub>The Ville — all 10 residents going about a typical day across home, school, library, cafe, park, market, pharmacy, pub, and dorm.</sub></p>
+
 <table>
 <tr><td colspan="5" align="center"><b>🗺️ 10 Locations · 65 location-scoped interactions</b></td></tr>
 <tr>
@@ -218,6 +224,12 @@ A campus public-situation experiment on a stylized PKU map. Daily routines begin
 ➡️ **Choose `pku_trump_visit` in the Setup Wizard to make this the current experiment.** It is bound to `hypothesis_pku_trump_visit/experiment_1` and the `pku` map.
 
 ➡️ See [`hypothesis_pku_trump_visit/experiment_1/`](agentsociety/quick_experiments/hypothesis_pku_trump_visit/experiment_1/README.md) for the full scenario, cast, operator notes, and replay data.
+
+<p align="center">
+  <img src="docs/assets/screenshots/map-pku.png" alt="PKU campus map" width="94%" />
+</p>
+
+<p align="center"><sub>PKU campus map — gates, classrooms, library, Weiming Lake, Boya Pagoda, dining hall, dorm, and Centennial Hall, with named residents and the Trump-visit cast.</sub></p>
 
 ## 🗺️ Pluggable Map Packages
 
