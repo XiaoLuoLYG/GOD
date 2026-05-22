@@ -46,6 +46,11 @@ def _write_package(root: Path) -> Path:
                 "schema_version: 1",
                 "map_id: demo_map",
                 "display_name: Demo Map",
+                "localized:",
+                "  en:",
+                "    display_name: Demo Map",
+                "  zh:",
+                "    display_name: 演示地图",
                 "tiled_map_path: visuals/map.json",
                 "tile_size: 32",
                 "character_root: characters",
@@ -53,11 +58,26 @@ def _write_package(root: Path) -> Path:
                 "- id: plaza",
                 "  name: Plaza",
                 "  aliases: [plaza]",
+                "  localized:",
+                "    en:",
+                "      name: Plaza",
+                "      aliases: [plaza]",
+                "    zh:",
+                "      name: 广场",
+                "      aliases: [广场]",
                 "  anchor_tile: {x: 0, y: 0}",
                 "  interaction_ids: [wait]",
                 "interactions:",
                 "- id: wait",
                 "  name: Wait",
+                "  description: Wait in place.",
+                "  localized:",
+                "    en:",
+                "      name: Wait",
+                "      description: Wait in place.",
+                "    zh:",
+                "      name: 等待",
+                "      description: 原地等待。",
                 "  allowed_location_ids: [plaza]",
                 "",
             ]
@@ -102,6 +122,12 @@ def test_map_package_validation_and_replay_metadata(tmp_path: Path) -> None:
     assert info.tilesets[0].image_url.startswith("/api/v1/replay/demo/1/map/assets/0")
     assert info.character_sprites[0].name == "Resident"
     assert info.locations[0].id == "plaza"
+    assert info.localized["zh"]["display_name"] == "演示地图"
+    assert info.locations[0].localized["zh"]["name"] == "广场"
+    assert info.interactions[0].localized["en"]["description"] == "Wait in place."
+
+    summary = map_packages.map_package_summary(package_info, agentsociety_root)
+    assert summary["localized"]["zh"]["display_name"] == "演示地图"
 
 
 def test_map_package_rejects_resource_escape(tmp_path: Path) -> None:

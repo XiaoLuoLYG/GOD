@@ -77,6 +77,36 @@ interactions:
 | `visual_asset` | `location_assets/` 下的图标相对路径。 |
 | `effects` | 交互产出字段：`action`、`status`、`emotion`、`latest_event`、`group_message`。 |
 
+运行时多语言字段是可选且兼容旧清单的。保留现有 `display_name`、`name`、`description`
+作为后端/运行时默认值，只在 `localized.en` 与 `localized.zh` 中补前端展示文本：
+
+```yaml
+localized:
+  en:
+    display_name: Your Map Name
+  zh:
+    display_name: 你的地图名
+locations:
+  - id: plaza
+    name: Plaza
+    localized:
+      en:
+        name: Plaza
+      zh:
+        name: 广场
+interactions:
+  - id: wait
+    name: Wait
+    description: Wait in place.
+    localized:
+      en:
+        name: Wait
+        description: Wait in place.
+      zh:
+        name: 等待
+        description: 原地等待。
+```
+
 ## 🧱 Tiled JSON 规则
 
 v1 仅支持正交（orthogonal）Tiled JSON 地图：

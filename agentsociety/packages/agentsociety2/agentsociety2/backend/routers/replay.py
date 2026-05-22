@@ -39,6 +39,7 @@ from ...backend.services.map_packages import (
     load_map_package_by_manifest,
     load_tiled_map,
     location_asset_path,
+    localized_metadata,
     tileset_image_path,
 )
 from ...storage.replay_metadata import AGENT_PROFILE_DATASET_CAPABILITY
@@ -136,6 +137,7 @@ class ReplayMapLocation(BaseModel):
     id: str
     name: str
     aliases: List[str] = Field(default_factory=list)
+    localized: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     anchor_tile: Dict[str, int]
     scene_type: str = ""
     bounds: Optional[Dict[str, int]] = None
@@ -148,12 +150,14 @@ class ReplayMapInteraction(BaseModel):
     id: str
     name: str
     description: str = ""
+    localized: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     allowed_location_ids: List[str] = Field(default_factory=list)
 
 
 class ReplayMapInfo(BaseModel):
     map_id: str
     display_name: str
+    localized: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     tile_size: int = 32
     width: int
     height: int
@@ -561,6 +565,7 @@ def _map_info_response(
                 id=location_id,
                 name=str(item.get("name") or item.get("id") or ""),
                 aliases=[str(alias) for alias in item.get("aliases", []) or []],
+                localized=localized_metadata(item.get("localized")),
                 anchor_tile={"x": int(anchor["x"]), "y": int(anchor["y"])},
                 scene_type=str(item.get("scene_type") or ""),
                 bounds=(
@@ -589,6 +594,7 @@ def _map_info_response(
                 id=str(item.get("id") or ""),
                 name=str(item.get("name") or item.get("id") or ""),
                 description=str(item.get("description") or ""),
+                localized=localized_metadata(item.get("localized")),
                 allowed_location_ids=[
                     str(value) for value in item.get("allowed_location_ids", []) or []
                 ],
@@ -598,6 +604,7 @@ def _map_info_response(
     return ReplayMapInfo(
         map_id=str(manifest.get("map_id") or manifest_path.parent.name),
         display_name=str(manifest.get("display_name") or manifest.get("map_id") or "Pixel Town"),
+        localized=localized_metadata(manifest.get("localized")),
         tile_size=int(manifest.get("tile_size") or tiled_map.get("tilewidth") or 32),
         width=int(tiled_map.get("width") or 0),
         height=int(tiled_map.get("height") or 0),

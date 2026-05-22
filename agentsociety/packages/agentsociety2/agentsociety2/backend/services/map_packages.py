@@ -473,10 +473,22 @@ def relative_manifest_path(package: MapPackage, root: Path | None = None) -> str
         return str(package.manifest_path)
 
 
+def localized_metadata(value: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(value, dict):
+        return {}
+    localized: dict[str, dict[str, Any]] = {}
+    for locale, fields in value.items():
+        if not isinstance(fields, dict):
+            continue
+        localized[str(locale)] = {str(key): item for key, item in fields.items()}
+    return localized
+
+
 def map_package_summary(package: MapPackage, root: Path | None = None) -> dict[str, Any]:
     return {
         "map_id": package.map_id,
         "display_name": package.display_name,
+        "localized": localized_metadata(package.manifest.get("localized")),
         "package_path": str(package.package_path),
         "manifest_path": str(package.manifest_path),
         "manifest_config_path": relative_manifest_path(package, root),

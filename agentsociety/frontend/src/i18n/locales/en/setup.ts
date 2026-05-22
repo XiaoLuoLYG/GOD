@@ -71,6 +71,16 @@ export default {
         customDescription: 'Generate a new experiment draft, edit agents and environment settings, then publish it as the current experiment.',
         createCustom: 'Create Experiment Config',
     },
+    defaultExperiments: {
+        god_town: {
+            label: 'GOD Town',
+            description: 'A normal weekday in The Ville.',
+        },
+        pku_trump_visit: {
+            label: 'PKU Trump Visit',
+            description: 'A PKU campus visit and public-situation experiment.',
+        },
+    },
     launchPending: {
         title: 'Startup request handed to GOD',
         description: 'Keep this terminal task running. After services restart and the first frame is ready, the town control room will open automatically.',
