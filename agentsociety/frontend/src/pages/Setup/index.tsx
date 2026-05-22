@@ -37,6 +37,11 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { fetchCustom } from '../../components/fetch';
 import LanguageToggle from '../../components/LanguageToggle';
+import {
+    localizeMapDisplayName,
+    localizeMapLocationName,
+    type LocalizedFields,
+} from '../../utils/runtimeLocalization';
 import { AgentEditorModal } from '../AgentBuilder/AgentEditorModal';
 import {
     jsonStringify,
@@ -73,6 +78,7 @@ type MapLocation = {
     id: string;
     name: string;
     aliases?: string[];
+    localized?: LocalizedFields;
     interaction_ids?: string[];
 };
 
@@ -85,6 +91,7 @@ type MapValidationStatus = {
 type MapPackageSummary = {
     map_id: string;
     display_name: string;
+    localized?: LocalizedFields;
     manifest_config_path: string;
     location_count: number;
     interaction_count: number;
@@ -338,19 +345,33 @@ export default function SetupPage() {
         || (status?.maps || [])[0]
     ), [selectedMapId, status?.maps, status?.selected_map_id]);
     const mapLocations = selectedMap?.locations?.length ? selectedMap.locations : (status?.map_locations || []);
+    const mapDisplayName = (item: MapPackageSummary | undefined, fallback = basicsValues.map_id) => (
+        item ? localizeMapDisplayName(item, i18n.language) : fallback
+    );
+    const locationDisplayName = (location: MapLocation) => (
+        localizeMapLocationName(selectedMap?.map_id || selectedMapId, location, i18n.language)
+    );
+    const defaultExperimentLabel = (item: NonNullable<SetupStatus['default_experiments']>[number]) => (
+        t(`setup.defaultExperiments.${item.key}.label`, { defaultValue: item.label }) as string
+    );
+    const defaultExperimentDescription = (item: NonNullable<SetupStatus['default_experiments']>[number]) => (
+        t(`setup.defaultExperiments.${item.key}.description`, {
+            defaultValue: item.description || `${item.hypothesis_id} / ${item.experiment_id}`,
+        }) as string
+    );
     const mapOptions = useMemo(() => (
         (status?.maps || []).map((item) => ({
             value: item.map_id,
-            label: `${item.display_name} (${item.location_count}/${item.interaction_count})`,
+            label: `${mapDisplayName(item)} (${item.location_count}/${item.interaction_count})`,
             disabled: !item.validation_status?.ok,
         }))
-    ), [status?.maps]);
+    ), [i18n.language, status?.maps]);
     const locationOptions = useMemo(() => (
         mapLocations.map((location) => ({
             value: location.id,
-            label: `${location.name} (${location.id})`,
+            label: `${locationDisplayName(location)} (${location.id})`,
         }))
-    ), [mapLocations]);
+    ), [i18n.language, mapLocations, selectedMap?.map_id, selectedMapId]);
 
     const loadStatus = async () => {
         setLoadingStatus(true);
@@ -867,10 +888,10 @@ export default function SetupPage() {
                     <div className="setup-choice-panel" key={item.key}>
                         <Space direction="vertical" size={10} style={{ width: '100%' }}>
                             <Space wrap>
-                                <Title level={4} style={{ margin: 0 }}>{item.label}</Title>
-                                <Tag>{item.map_id}</Tag>
+                                <Title level={4} style={{ margin: 0 }}>{defaultExperimentLabel(item)}</Title>
+                                <Tag>{mapDisplayName((status?.maps || []).find((map) => map.map_id === item.map_id), item.map_id)}</Tag>
                             </Space>
-                            <Text type="secondary">{item.description || `${item.hypothesis_id} / ${item.experiment_id}`}</Text>
+                            <Text type="secondary">{defaultExperimentDescription(item)}</Text>
                             <Text code>{item.hypothesis_id} / experiment_{item.experiment_id}</Text>
                             <Button
                                 type="primary"
@@ -1009,7 +1030,7 @@ export default function SetupPage() {
                     type={selectedMap.validation_status?.ok ? 'info' : 'warning'}
                     showIcon
                     message={copy('basics.mapSummary', {
-                        map: selectedMap.display_name,
+                        map: mapDisplayName(selectedMap),
                         locations: selectedMap.location_count,
                         interactions: selectedMap.interaction_count,
                         characters: selectedMap.character_count,
@@ -1050,7 +1071,7 @@ export default function SetupPage() {
                         {copy('generate.description')}
                     </Paragraph>
                     <Space wrap>
-                        <Tag color="blue">{copy('generate.tagMap', { map: selectedMap?.display_name || basicsValues.map_id })}</Tag>
+                        <Tag color="blue">{copy('generate.tagMap', { map: mapDisplayName(selectedMap) })}</Tag>
                         <Tag color="green">{copy('generate.tagProfiles')}</Tag>
                         <Tag color="purple">{copy('generate.tagCopy')}</Tag>
                     </Space>
@@ -1073,7 +1094,7 @@ export default function SetupPage() {
                 description={(
                     <Space direction="vertical" size={4} style={{ width: '100%' }}>
                         <Text>{copy('generate.previewExperimentTitle', { title: basicsValues.title })}</Text>
-                        <Text>{copy('generate.previewMap', { map: selectedMap?.display_name || basicsValues.map_id })}</Text>
+                        <Text>{copy('generate.previewMap', { map: mapDisplayName(selectedMap) })}</Text>
                         <Text>
                             {copy('generate.previewSchedule', {
                                 agents: basicsValues.agent_count,

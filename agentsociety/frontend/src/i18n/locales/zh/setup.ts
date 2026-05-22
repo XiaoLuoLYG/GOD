@@ -71,6 +71,16 @@ export default {
         customDescription: '用模型生成新实验草案，编辑智能体和环境参数，然后发布为当前实验。',
         createCustom: '新建实验配置',
     },
+    defaultExperiments: {
+        god_town: {
+            label: 'GOD 小镇',
+            description: '维尔小镇里的普通工作日。',
+        },
+        pku_trump_visit: {
+            label: '北大访问实验',
+            description: '北京大学校园访问与公共情境实验。',
+        },
+    },
     launchPending: {
         title: '启动请求已交给 GOD',
         description: '请保持这个终端任务运行；服务重启并创建第一帧后，会自动打开小镇控制台。',

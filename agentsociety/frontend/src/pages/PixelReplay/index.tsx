@@ -34,6 +34,20 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { fetchCustom } from '../../components/fetch';
 import LanguageToggle from '../../components/LanguageToggle';
+import {
+    isMovingRuntimeStatus,
+    localizeEmotionLabel,
+    localizeGroupName,
+    localizeLocationReference,
+    localizeMapDisplayName,
+    localizeMapInteraction,
+    localizeMapLocationAliases,
+    localizeMapLocationName,
+    localizeRuntimeAction,
+    localizeStatusLabel,
+    localizeSystemEvent,
+    type LocalizedFields,
+} from '../../utils/runtimeLocalization';
 import { AgentBuilderPanel } from '../AgentBuilder';
 import './style.css';
 
@@ -154,6 +168,7 @@ type ReplayMapLocation = {
     id: string;
     name: string;
     aliases: string[];
+    localized?: LocalizedFields;
     anchor_tile: Tile;
     scene_type?: string;
     bounds?: { x: number; y: number; w: number; h: number };
@@ -166,12 +181,14 @@ type ReplayMapInteraction = {
     id: string;
     name: string;
     description?: string;
+    localized?: LocalizedFields;
     allowed_location_ids: string[];
 };
 
 type ReplayMapInfo = {
     map_id: string;
     display_name: string;
+    localized?: LocalizedFields;
     tile_size: number;
     width: number;
     height: number;
@@ -630,6 +647,54 @@ function formatInlineFields(data: Record<string, unknown> | undefined, emptyText
         .join('\n');
 }
 
+function formatFieldLabel(key: string, t: TFunction): string {
+    return t(`replay.pixel.fields.${key}`, {
+        defaultValue: key.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
+    });
+}
+
+function formatRuntimeFieldValue(value: unknown, key: string, frame: PixelFrame, t: TFunction, language: string, emptyValue = '-'): string {
+    if (value === undefined || value === null || value === '') {
+        return emptyValue;
+    }
+    if (key === 'status' || key === 'movement_status') {
+        return localizeStatusLabel(value, language);
+    }
+    if (key === 'location' || key === 'target_location_id') {
+        return localizeLocationReference(value, language, frame.map, frame.map.locations);
+    }
+    if (key === 'emotion') {
+        return localizeEmotionLabel(value, language) ?? emptyValue;
+    }
+    if (key === 'current_phase') {
+        return formatPhase(value, t);
+    }
+    if (key === 'latest_event') {
+        return localizeSystemEvent(value, language, frame.map, frame.map.locations) ?? emptyValue;
+    }
+    return formatValue(value, emptyValue);
+}
+
+function formatRuntimeInlineFields(
+    data: Record<string, unknown> | undefined,
+    frame: PixelFrame,
+    t: TFunction,
+    language: string,
+    emptyText = '-',
+    emptyValue = '-',
+): string {
+    if (!data || Object.keys(data).length === 0) {
+        return emptyText;
+    }
+    const entries = Object.entries(data).filter(([, value]) => value !== undefined && value !== null && value !== '');
+    if (entries.length === 0) {
+        return emptyText;
+    }
+    return entries
+        .map(([key, value]) => `${formatFieldLabel(key, t)}: ${formatRuntimeFieldValue(value, key, frame, t, language, emptyValue)}`)
+        .join('\n');
+}
+
 function formatTokenUsage(tokenUsage: Record<string, TokenUsage> | undefined, t: TFunction): string {
     if (!tokenUsage || Object.keys(tokenUsage).length === 0) {
         return t('replay.pixel.drawer.tokenEmpty');
@@ -656,9 +721,8 @@ function renderPlainDetail(label: string, value: string) {
     );
 }
 
-function formatStatusLabel(value: string | undefined, t: TFunction, fallback = 'idle') {
-    const status = value || fallback;
-    return t(`replay.pixel.status.${status}`, { defaultValue: status });
+function formatStatusLabel(value: string | undefined, language: string, fallback = 'idle') {
+    return localizeStatusLabel(value, language, fallback);
 }
 
 function buildAgentSummary(agent: PixelAgent | undefined): Record<string, unknown> | undefined {
@@ -722,6 +786,22 @@ function parseInteractionList(value: unknown): ReplayMapInteraction[] {
     } catch {
         return [];
     }
+}
+
+function localizeAvailableInteractions(
+    value: unknown,
+    walkableMap: WalkableMap,
+    language: string,
+): ReplayMapInteraction[] {
+    const byId = new Map(walkableMap.interactions.map((interaction) => [interaction.id, interaction]));
+    return parseInteractionList(value).map((interaction) => (
+        localizeMapInteraction(
+            walkableMap.mapId,
+            interaction,
+            language,
+            byId.get(interaction.id),
+        ) as ReplayMapInteraction
+    ));
 }
 
 function parseTileList(value: unknown): Tile[] {
@@ -878,7 +958,7 @@ function buildPixelFrame(
     bundle: ReplayStepBundle | undefined,
     step: number,
     walkableMap: WalkableMap,
-    labels: { idleAction: string; defaultLocation: string },
+    labels: { idleAction: string; defaultLocation: string; language: string },
 ): PixelFrame {
     const envRow = firstEnvRow(bundle);
     const stepCommunications = parseCommunications(envRow);
@@ -887,10 +967,13 @@ function buildPixelFrame(
         const rawDescription = row ? pickDisplayValue(row, ['description', 'action', 'activity', 'state', 'status']) : undefined;
         const status = row ? pickDisplayValue(row, ['status']) : undefined;
         const location = row ? pickDisplayValue(row, ['location', 'target_address', 'place', 'address']) : undefined;
+        const locationId = row ? pickDisplayValue(row, ['location_id']) : undefined;
         const lastMessage = row ? pickDisplayValue(row, ['last_message']) : undefined;
         const emotion = row ? pickDisplayValue(row, ['emotion']) : undefined;
         const currentPhase = row ? pickDisplayValue(row, ['current_phase']) : undefined;
         const latestEvent = row ? pickDisplayValue(row, ['latest_event']) : undefined;
+        const targetLocationId = row ? pickDisplayValue(row, ['target_location_id']) : undefined;
+        const movementStatus = row ? pickDisplayValue(row, ['movement_status']) : undefined;
         const tileX = pickOptionalNumberValue(row, 'tile_x');
         const tileY = pickOptionalNumberValue(row, 'tile_y');
         const hasReplayTile = tileX !== undefined && tileY !== undefined;
@@ -898,7 +981,7 @@ function buildPixelFrame(
         const tile = hasReplayTile ? { x: tileX, y: tileY } : fallbackTile;
         const movementSegment = movementSegmentForRow(row, tile);
         const availableInteractions = row
-            ? parseInteractionList(row.available_interactions_json)
+            ? localizeAvailableInteractions(row.available_interactions_json, walkableMap, labels.language)
             : [];
         return {
             id: profile.id,
@@ -907,18 +990,25 @@ function buildPixelFrame(
             tile,
             movementSegment,
             visualOffset: { x: 0, y: 0 },
-            action: rawDescription ?? labels.idleAction,
-            status,
-            location: location ?? labels.defaultLocation,
-            locationId: row ? pickDisplayValue(row, ['location_id']) : undefined,
-            movementStatus: row ? pickDisplayValue(row, ['movement_status']) : undefined,
-            targetLocationId: row ? pickDisplayValue(row, ['target_location_id']) : undefined,
+            action: localizeRuntimeAction(
+                rawDescription,
+                labels.language,
+                walkableMap,
+                walkableMap.locations,
+                walkableMap.interactions,
+                labels.idleAction,
+            ),
+            status: status ? localizeStatusLabel(status, labels.language) : undefined,
+            location: localizeLocationReference(location ?? locationId ?? labels.defaultLocation, labels.language, walkableMap, walkableMap.locations),
+            locationId,
+            movementStatus: movementStatus ? localizeStatusLabel(movementStatus, labels.language) : undefined,
+            targetLocationId: targetLocationId ? localizeLocationReference(targetLocationId, labels.language, walkableMap, walkableMap.locations) : undefined,
             hasReplayTile,
-            emotion,
+            emotion: localizeEmotionLabel(emotion, labels.language),
             lastMessage,
             messageCount: pickNumberValue(row, 'message_count'),
             currentPhase: currentPhase ?? pickDisplayValue(envRow ?? {}, ['current_phase']),
-            latestEvent: latestEvent ?? pickDisplayValue(envRow ?? {}, ['latest_event']),
+            latestEvent: localizeSystemEvent(latestEvent ?? pickDisplayValue(envRow ?? {}, ['latest_event']), labels.language, walkableMap, walkableMap.locations),
             stepCommunications: filterAgentStepCommunications(profile.id, stepCommunications),
             availableInteractions,
         };
@@ -981,7 +1071,7 @@ async function waitForInitialReplay<T>(
     throw lastError ?? new Error('Replay loading was cancelled');
 }
 
-async function loadWalkableMap(mapInfo: ReplayMapInfo, t: TFunction): Promise<WalkableMap> {
+async function loadWalkableMap(mapInfo: ReplayMapInfo, t: TFunction, language: string): Promise<WalkableMap> {
     const response = await fetchCustom(mapInfo.tiled_map_url);
     if (!response.ok) {
         throw new Error(t('replay.pixel.error.mapLoadFailed', { status: response.status, statusText: response.statusText }));
@@ -1008,14 +1098,20 @@ async function loadWalkableMap(mapInfo: ReplayMapInfo, t: TFunction): Promise<Wa
     });
     return {
         mapId: mapInfo.map_id,
-        displayName: mapInfo.display_name,
+        displayName: localizeMapDisplayName(mapInfo, language),
         tileSize: mapInfo.tile_size || TILE_SIZE,
         tiledMapUrl: mapInfo.tiled_map_url,
         previewUrl: mapInfo.preview_url,
         tilesets: mapInfo.tilesets,
         characterSprites: mapInfo.character_sprites || [],
-        locations: mapInfo.locations,
-        interactions: mapInfo.interactions,
+        locations: mapInfo.locations.map((location) => ({
+            ...location,
+            name: localizeMapLocationName(mapInfo.map_id, location, language),
+            aliases: localizeMapLocationAliases(mapInfo.map_id, location, language),
+        })),
+        interactions: mapInfo.interactions.map((interaction) => (
+            localizeMapInteraction(mapInfo.map_id, interaction, language) as ReplayMapInteraction
+        )),
         width,
         height,
         walkable,
@@ -1267,7 +1363,8 @@ function PixelAgentHoverCard({
     agent: PixelAgent;
     frame: PixelFrame;
 }) {
-    const { t } = useTranslation();
+    const { t, i18n } = useTranslation();
+    const language = i18n.language;
     return (
         <div className="pixel-agent-hover-card">
             <div className="pixel-agent-hover-header">
@@ -1275,8 +1372,8 @@ function PixelAgentHoverCard({
                     <Text strong>{agent.name}</Text>
                     <Text type="secondary">#{agent.id} · {t('replay.pixel.hover.step', { step: frame.step + 1 })}</Text>
                 </div>
-                <Tag className="pixel-agent-hover-status" color={agent.movementStatus === 'moving' ? 'blue' : 'green'}>
-                    {formatStatusLabel(agent.movementStatus ?? agent.status, t)}
+                <Tag className="pixel-agent-hover-status" color={isMovingRuntimeStatus(agent.movementStatus ?? agent.status) ? 'blue' : 'green'}>
+                    {formatStatusLabel(agent.movementStatus ?? agent.status, language)}
                 </Tag>
             </div>
 
@@ -2386,7 +2483,8 @@ function updateSelection(bridge: PhaserBridge) {
 }
 
 export default function PixelReplay() {
-    const { t } = useTranslation();
+    const { t, i18n } = useTranslation();
+    const currentLanguage = i18n.language;
     const [messageApi, messageContextHolder] = message.useMessage();
     const navigate = useNavigate();
     const { hypothesisId, experimentId } = useParams();
@@ -2465,7 +2563,7 @@ export default function PixelReplay() {
 
         async function init() {
             if (!workspacePath) {
-                setError('Missing workspace_path query parameter.');
+                setError(t('replay.pixel.error.missingWorkspace'));
                 setLoading(false);
                 return;
             }
@@ -2481,7 +2579,7 @@ export default function PixelReplay() {
                 const { nextMap, nextLiveStatus } = await waitForInitialReplay(
                     async () => {
                         const mapInfo = await fetchJson<ReplayMapInfo>(withWorkspace('/map'));
-                        const loadedMap = await loadWalkableMap(mapInfo, t);
+                        const loadedMap = await loadWalkableMap(mapInfo, t, currentLanguage);
                         let loadedLiveStatus: LiveStatus | undefined;
                         if (liveBaseUrl) {
                             try {
@@ -2529,7 +2627,7 @@ export default function PixelReplay() {
         return () => {
             cancelled = true;
         };
-    }, [liveBaseUrl, refreshReplayData, replayBaseUrl, withLiveWorkspace, workspacePath]);
+    }, [currentLanguage, liveBaseUrl, refreshReplayData, replayBaseUrl, t, withLiveWorkspace, workspacePath]);
 
     const liveSessionReady = Boolean(liveStatus);
 
@@ -2863,16 +2961,16 @@ export default function PixelReplay() {
         }
         const frameStep = bundle?.step ?? currentStep;
         return buildPixelFrame(profiles, bundle, frameStep, walkableMap, {
-            idleAction: formatStatusLabel(undefined, t),
+            idleAction: formatStatusLabel(undefined, currentLanguage),
             defaultLocation: walkableMap.displayName,
+            language: currentLanguage,
         });
-    }, [bundle, currentStep, profiles, t, walkableMap]);
+    }, [bundle, currentLanguage, currentStep, profiles, walkableMap]);
 
     const selectedAgent = frame?.agents.find((agent) => agent.id === selectedAgentId);
     const selectedProfile = profiles.find((profile) => profile.id === selectedAgentId);
-    const selectedAgentRow = selectedAgentId === undefined ? undefined : findAgentRow(bundle, selectedAgentId);
     const selectedAgentRuntime = selectedAgentId === undefined ? undefined : agentRuntimeById[selectedAgentId];
-    const selectedAgentSummary = selectedAgentRow ?? buildAgentSummary(selectedAgent);
+    const selectedAgentSummary = buildAgentSummary(selectedAgent);
     const selectedAgentSnapshot = selectedAgentRuntime?.agent_state_snapshot;
     const selectedSnapshotProfile = asRecord(selectedAgentSnapshot?.profile);
     const selectedSkillStates = asRecord(selectedAgentSnapshot?.skill_states);
@@ -2916,6 +3014,9 @@ export default function PixelReplay() {
     if (error) {
         return (
             <div className="pixel-replay-error">
+                <div className="pixel-replay-error-actions">
+                    <LanguageToggle />
+                </div>
                 <Alert
                     type="error"
                     showIcon
@@ -2996,7 +3097,7 @@ export default function PixelReplay() {
                             disabled
                             className={`pixel-live-status-button status-${liveStatus?.status ?? 'offline'}`}
                         >
-                            {formatStatusLabel(liveStatus?.status, t, 'offline')}
+                            {formatStatusLabel(liveStatus?.status, currentLanguage, 'offline')}
                         </Button>
                     </Space.Compact>
                     <Select
@@ -3063,7 +3164,7 @@ export default function PixelReplay() {
                         </div>
                         {envSnapshot?.latest_event !== undefined && (
                             <Text className="pixel-step-event">
-                                {String(envSnapshot.latest_event)}
+                                {localizeSystemEvent(envSnapshot.latest_event, currentLanguage, frame.map, frame.map.locations)}
                             </Text>
                         )}
                     </div>
@@ -3091,7 +3192,7 @@ export default function PixelReplay() {
                                     {item.type === 'direct'
                                         ? t('replay.pixel.chat.sendTo', { name: item.receiver_name ?? t('replay.pixel.chat.resident') })
                                         : t('replay.pixel.chat.sendToGroup', {
-                                            name: item.group_name ?? t('replay.pixel.chat.group'),
+                                            name: localizeGroupName(item.group_name, currentLanguage) || t('replay.pixel.chat.group'),
                                             suffix: item.recipient_count ? t('replay.pixel.chat.recipientCount', { count: item.recipient_count }) : '',
                                         })}
                                 </Text>
@@ -3126,8 +3227,8 @@ export default function PixelReplay() {
                             <Space size={4} wrap>
                                 {selectedAgent.locationId && <Tag>{selectedAgent.locationId}</Tag>}
                                 {selectedAgent.movementStatus && (
-                                    <Tag color={selectedAgent.movementStatus === 'moving' ? 'blue' : 'green'}>
-                                        {formatStatusLabel(selectedAgent.movementStatus, t)}
+                                    <Tag color={isMovingRuntimeStatus(selectedAgent.movementStatus) ? 'blue' : 'green'}>
+                                        {formatStatusLabel(selectedAgent.movementStatus, currentLanguage)}
                                     </Tag>
                                 )}
                                 <Tag color={selectedAgent.hasReplayTile ? 'geekblue' : 'orange'}>
@@ -3207,7 +3308,7 @@ export default function PixelReplay() {
                     <Text type="secondary">
                         {liveWaiting
                             ? t('replay.pixel.live.inputHint')
-                            : t('replay.pixel.live.status', { status: formatStatusLabel(liveStatus?.status, t, 'offline') })}
+                            : t('replay.pixel.live.status', { status: formatStatusLabel(liveStatus?.status, currentLanguage, 'offline') })}
                     </Text>
                 </div>
                 <div className="pixel-live-result-stream">
@@ -3295,8 +3396,8 @@ export default function PixelReplay() {
                             <Space size={4} wrap>
                                 {selectedAgent.locationId && <Tag>{selectedAgent.locationId}</Tag>}
                                 {selectedAgent.movementStatus && (
-                                    <Tag color={selectedAgent.movementStatus === 'moving' ? 'blue' : 'green'}>
-                                        {formatStatusLabel(selectedAgent.movementStatus, t)}
+                                    <Tag color={isMovingRuntimeStatus(selectedAgent.movementStatus) ? 'blue' : 'green'}>
+                                        {formatStatusLabel(selectedAgent.movementStatus, currentLanguage)}
                                     </Tag>
                                 )}
                                 <Tag color={selectedAgent.hasReplayTile ? 'geekblue' : 'orange'}>
@@ -3311,7 +3412,16 @@ export default function PixelReplay() {
                             </Space>
                         )}
                         {renderPlainDetail(t('replay.pixel.drawer.tokenUsage'), formatTokenUsage(selectedAgentRuntime?.token_usage, t))}
-                        {renderPlainDetail(t('replay.pixel.drawer.currentStatus'), formatInlineFields(selectedAgentSummary, t('replay.pixel.drawer.noStatus')))}
+                        {renderPlainDetail(
+                            t('replay.pixel.drawer.currentStatus'),
+                            formatRuntimeInlineFields(
+                                selectedAgentSummary,
+                                frame,
+                                t,
+                                currentLanguage,
+                                t('replay.pixel.drawer.noStatus'),
+                            ),
+                        )}
                         {renderPlainDetail(
                             t('replay.pixel.drawer.interactions'),
                             selectedAgent.availableInteractions.length > 0

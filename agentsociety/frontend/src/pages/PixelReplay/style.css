@@ -905,6 +905,10 @@
     background: #ffffff;
 }
 
+.pixel-replay-error {
+    flex-direction: column;
+}
+
 @media (max-width: 900px) {
     .pixel-replay-page {
         height: auto;

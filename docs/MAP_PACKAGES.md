@@ -78,6 +78,37 @@ Recommended optional fields:
 | `visual_asset` | Relative path to an icon in `location_assets/`. |
 | `effects` | Interaction output fields: `action`, `status`, `emotion`, `latest_event`, `group_message`. |
 
+Runtime localization is optional and non-breaking. Keep the existing
+`display_name`, `name`, and `description` fields as the backend/runtime defaults,
+then add `localized.en` and `localized.zh` only for frontend display:
+
+```yaml
+localized:
+  en:
+    display_name: Your Map Name
+  zh:
+    display_name: 你的地图名
+locations:
+  - id: plaza
+    name: Plaza
+    localized:
+      en:
+        name: Plaza
+      zh:
+        name: 广场
+interactions:
+  - id: wait
+    name: Wait
+    description: Wait in place.
+    localized:
+      en:
+        name: Wait
+        description: Wait in place.
+      zh:
+        name: 等待
+        description: 原地等待。
+```
+
 ## 🧱 Tiled JSON Rules
 
 v1 supports only orthogonal Tiled JSON maps:
