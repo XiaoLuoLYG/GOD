@@ -8,10 +8,10 @@ import {
     Empty,
     message,
     Mentions,
-    Segmented,
     Select,
     Space,
     Spin,
+    Tabs,
     Tag,
     Tooltip,
     Typography,
@@ -262,13 +262,26 @@ type LiveTargetMention = {
     target: AskTarget;
 };
 
+type LiveCommandMode = 'ask' | 'intervene';
+
 type LiveInteraction = {
     id: string;
-    type: 'ask' | 'intervene';
+    type: LiveCommandMode;
     prompt: string;
     result?: string;
     artifactName?: string;
     targetLabel?: string;
+};
+
+type LiveCommandParseResult = {
+    ok: true;
+    mode: LiveCommandMode;
+    prompt: string;
+    target: AskTarget;
+} | {
+    ok: false;
+    errorKey: string;
+    errorValues?: Record<string, unknown>;
 };
 
 type Tile = {
@@ -555,6 +568,35 @@ function agentIdMentionPattern(flags = ''): RegExp {
     return new RegExp(`@[^@\\n，。,.!?；;:：]*?#\\s*(\\d+)${mentionBoundary}`, flags);
 }
 
+function plainAgentMentionPattern(flags = ''): RegExp {
+    return new RegExp('@([^@\\s#，。,.!?；;:：/]+)', flags);
+}
+
+function normalizeMentionName(value: string): string {
+    return value
+        .trim()
+        .toLocaleLowerCase()
+        .replace(/[\s_\-·.#]+/g, '');
+}
+
+function findPlainMentionProfiles(value: string, profiles: AgentProfile[]): AgentProfile[] {
+    const normalizedValue = normalizeMentionName(value);
+    if (!normalizedValue) {
+        return [];
+    }
+    return profiles.filter((profile) => {
+        const name = getAgentName(profile);
+        const normalizedName = normalizeMentionName(name);
+        const nameParts = name
+            .split(/[\s_\-·.]+/)
+            .map(normalizeMentionName)
+            .filter(Boolean);
+        return normalizedName === normalizedValue
+            || nameParts.includes(normalizedValue)
+            || normalizedName.endsWith(normalizedValue);
+    });
+}
+
 function stripTargetMentions(text: string, mentions: LiveTargetMention[]): string {
     const withoutKnownMentions = mentions.reduce((current, mention) => (
         current.replace(mentionPattern(mention.value, 'g'), '')
@@ -563,25 +605,26 @@ function stripTargetMentions(text: string, mentions: LiveTargetMention[]): strin
         .replace(systemMentionPattern('gi'), '')
         .replace(allAgentsMentionPattern('gi'), '')
         .replace(agentIdMentionPattern('g'), '')
+        .replace(plainAgentMentionPattern('g'), '')
         .replace(/\s+/g, ' ')
         .trim();
 }
 
-function resolveTargetFromPrompt(
+function resolveExplicitTargetFromPrompt(
     text: string,
     mentions: LiveTargetMention[],
-    fallback: AskTarget,
-): AskTarget {
+    profiles: AgentProfile[],
+): { target?: AskTarget; errorKey?: string; errorValues?: Record<string, unknown> } {
     const selected = mentions.filter((mention) => (
         mentionPattern(mention.value).test(text)
     ));
     const systemTarget = selected.find((mention) => mention.target.type === 'society');
     if (systemTarget || systemMentionPattern('i').test(text)) {
-        return { type: 'society' };
+        return { target: { type: 'society' } };
     }
     const allTarget = selected.find((mention) => mention.target.type === 'all_agents');
     if (allTarget || allAgentsMentionPattern('i').test(text)) {
-        return { type: 'all_agents' };
+        return { target: { type: 'all_agents' } };
     }
     const selectedAgentIds = selected
         .map((mention) => mention.target.agent_id)
@@ -592,12 +635,137 @@ function resolveTargetFromPrompt(
     const agentIds = [...selectedAgentIds, ...genericAgentIds];
     const uniqueAgentIds = Array.from(new Set(agentIds));
     if (uniqueAgentIds.length === 1) {
-        return { type: 'agent', agent_id: uniqueAgentIds[0] };
+        return { target: { type: 'agent', agent_id: uniqueAgentIds[0] } };
     }
     if (uniqueAgentIds.length > 1) {
-        return { type: 'agents', agent_ids: uniqueAgentIds };
+        return { target: { type: 'agents', agent_ids: uniqueAgentIds } };
     }
-    return fallback;
+    const plainMentionMatches = Array.from(text.matchAll(plainAgentMentionPattern('g')))
+        .map((match) => String(match[1] ?? '').trim())
+        .filter(Boolean)
+        .filter((value) => {
+            const normalized = normalizeMentionName(value);
+            return normalized !== normalizeMentionName('system')
+                && normalized !== normalizeMentionName('系统')
+                && normalized !== normalizeMentionName('all')
+                && normalized !== normalizeMentionName('all_residents')
+                && normalized !== normalizeMentionName('所有居民');
+        });
+    if (plainMentionMatches.length === 0) {
+        return {};
+    }
+    const plainAgentIds: number[] = [];
+    for (const mention of plainMentionMatches) {
+        const matches = findPlainMentionProfiles(mention, profiles);
+        if (matches.length === 0) {
+            return {
+                errorKey: 'unknownTarget',
+                errorValues: { target: mention },
+            };
+        }
+        if (matches.length > 1) {
+            return {
+                errorKey: 'ambiguousTarget',
+                errorValues: { target: mention },
+            };
+        }
+        plainAgentIds.push(matches[0].id);
+    }
+    const uniquePlainAgentIds = Array.from(new Set(plainAgentIds));
+    if (uniquePlainAgentIds.length === 1) {
+        return { target: { type: 'agent', agent_id: uniquePlainAgentIds[0] } };
+    }
+    return { target: { type: 'agents', agent_ids: uniquePlainAgentIds } };
+}
+
+function parseLiveCommandInput(
+    text: string,
+    mentions: LiveTargetMention[],
+    profiles: AgentProfile[],
+    fallbackTarget: AskTarget,
+): LiveCommandParseResult {
+    const rawCommand = text.trim();
+    const commandMatch = rawCommand.match(/^\/(ask|intervene)(?:\s+|$)/i);
+    if (!commandMatch) {
+        return { ok: false, errorKey: 'commandRequired' };
+    }
+    const mode = commandMatch[1].toLocaleLowerCase() as LiveCommandMode;
+    const body = rawCommand.slice(commandMatch[0].length).trim();
+    if (!body) {
+        return { ok: false, errorKey: 'bodyRequired' };
+    }
+    const explicitTarget = resolveExplicitTargetFromPrompt(body, mentions, profiles);
+    if (explicitTarget.errorKey) {
+        return {
+            ok: false,
+            errorKey: explicitTarget.errorKey,
+            errorValues: explicitTarget.errorValues,
+        };
+    }
+    const prompt = stripTargetMentions(body, mentions);
+    if (!prompt) {
+        return { ok: false, errorKey: 'bodyRequired' };
+    }
+    return {
+        ok: true,
+        mode,
+        prompt,
+        target: explicitTarget.target ?? fallbackTarget,
+    };
+}
+
+function formatLiveCommandError(result: LiveCommandParseResult, t: TFunction): string | undefined {
+    if (result.ok === true) {
+        return undefined;
+    }
+    return t(`replay.pixel.command.errors.${result.errorKey}`, result.errorValues);
+}
+
+function completeLivePromptAtCursor(
+    text: string,
+    cursor: number,
+    mentions: LiveTargetMention[],
+): { value: string; cursor: number } | undefined {
+    const beforeCursor = text.slice(0, cursor);
+    const afterCursor = text.slice(cursor);
+    const slashMatch = beforeCursor.match(/(^|\s)(\/[a-z]*)$/i);
+    if (slashMatch) {
+        const token = slashMatch[2];
+        const query = token.slice(1).toLocaleLowerCase();
+        const match = ['ask', 'intervene'].find((option) => option.startsWith(query));
+        if (!match) {
+            return undefined;
+        }
+        const start = cursor - token.length;
+        const replacement = `/${match}`;
+        const separator = afterCursor === '' || !/^\s/.test(afterCursor) ? ' ' : '';
+        return {
+            value: `${text.slice(0, start)}${replacement}${separator}${afterCursor}`,
+            cursor: start + replacement.length + separator.length,
+        };
+    }
+
+    const mentionStart = beforeCursor.lastIndexOf('@');
+    if (mentionStart < 0) {
+        return undefined;
+    }
+    const query = beforeCursor.slice(mentionStart + 1);
+    if (/[\n，。,.!?；;:：/]/.test(query)) {
+        return undefined;
+    }
+    const normalizedQuery = normalizeMentionName(query);
+    const match = mentions.find((mention) => (
+        normalizeMentionName(mention.value).startsWith(normalizedQuery)
+    ));
+    if (!match) {
+        return undefined;
+    }
+    const replacement = `@${match.value}`;
+    const separator = afterCursor === '' || !/^\s/.test(afterCursor) ? ' ' : '';
+    return {
+        value: `${text.slice(0, mentionStart)}${replacement}${separator}${afterCursor}`,
+        cursor: mentionStart + replacement.length + separator.length,
+    };
 }
 
 function pickDisplayValue(row: Record<string, unknown>, keys: string[]): string | undefined {
@@ -1416,7 +1584,7 @@ function PixelAgentHoverCard({
                     <Text className="pixel-agent-hover-muted">{t('replay.pixel.hover.noInteractions')}</Text>
                 ) : (
                     <div className="pixel-agent-hover-tags">
-                        {agent.availableInteractions.slice(0, 4).map((interaction) => (
+                        {agent.availableInteractions.map((interaction) => (
                             <Tag color="cyan" key={interaction.id}>{interaction.name}</Tag>
                         ))}
                     </div>
@@ -1457,6 +1625,7 @@ function PixelTownCanvas({
     map,
     stepDurationMs,
     selectedAgentId,
+    commandComposer,
     onSelectAgent,
     onOpenSetup,
     onOpenSkills,
@@ -1465,6 +1634,7 @@ function PixelTownCanvas({
     map: WalkableMap;
     stepDurationMs: number;
     selectedAgentId?: number;
+    commandComposer?: React.ReactNode;
     onSelectAgent: (agentId: number) => void;
     onOpenSetup: () => void;
     onOpenSkills: () => void;
@@ -1500,8 +1670,8 @@ function PixelTownCanvas({
     const clampHoverPosition = useCallback((rawX: number, rawY: number): [number, number] => {
         const width = containerRef.current?.clientWidth ?? 0;
         const height = containerRef.current?.clientHeight ?? 0;
-        const cardWidth = 270;
-        const cardHeight = 230;
+        const cardWidth = 242;
+        const cardHeight = 196;
         const gap = 10;
         const maxX = Math.max(gap, width - cardWidth - gap);
         const maxY = Math.max(gap, height - cardHeight - gap);
@@ -1927,6 +2097,7 @@ function PixelTownCanvas({
                     size="small"
                 />
             </div>
+            {commandComposer}
             {frame?.agents.map((agent) => {
                 const position = agentScreenPositions[agent.id] ?? getFitScreenPosition(agent, map, canvasSize);
                 if (!position) {
@@ -2506,10 +2677,8 @@ export default function PixelReplay() {
     const [error, setError] = useState<string | undefined>();
     const [liveStatus, setLiveStatus] = useState<LiveStatus | undefined>();
     const [liveBusy, setLiveBusy] = useState(false);
-    const [liveMode, setLiveMode] = useState<'ask' | 'intervene'>('ask');
-    const [askTargetType, setAskTargetType] = useState<AskTargetType>('all_agents');
-    const [askTargetAgentIds, setAskTargetAgentIds] = useState<number[]>([]);
     const [livePrompt, setLivePrompt] = useState('');
+    const [liveCompletionPrefix, setLiveCompletionPrefix] = useState<'/' | '@'>('/');
     const [liveInteractions, setLiveInteractions] = useState<LiveInteraction[]>([]);
     const [followLatest, setFollowLatest] = useState(true);
     const [agentBuilderOpen, setAgentBuilderOpen] = useState(false);
@@ -2794,49 +2963,42 @@ export default function PixelReplay() {
         ...profiles.map((profile) => {
             const name = getAgentName(profile);
             return {
-                value: `${name}#${profile.id}`,
+                value: `${name} #${profile.id}`,
                 label: `@${name} #${profile.id}`,
                 target: { type: 'agent', agent_id: profile.id } as AskTarget,
             };
         }),
     ], [profiles, t]);
 
-    const askTarget = useMemo<AskTarget>(() => {
-        if (askTargetType === 'agent') {
-            return { type: 'agent', agent_id: askTargetAgentIds[0] };
-        }
-        if (askTargetType === 'agents') {
-            return { type: 'agents', agent_ids: askTargetAgentIds };
-        }
-        return { type: askTargetType };
-    }, [askTargetAgentIds, askTargetType]);
+    const fallbackCommandTarget = useMemo<AskTarget>(() => (
+        selectedAgentId === undefined
+            ? { type: 'all_agents' }
+            : { type: 'agent', agent_id: selectedAgentId }
+    ), [selectedAgentId]);
 
-    const promptTarget = useMemo(() => (
-        resolveTargetFromPrompt(livePrompt, liveTargetMentions, askTarget)
-    ), [askTarget, livePrompt, liveTargetMentions]);
+    const liveCommandParseResult = useMemo(() => (
+        parseLiveCommandInput(livePrompt, liveTargetMentions, profiles, fallbackCommandTarget)
+    ), [fallbackCommandTarget, livePrompt, liveTargetMentions, profiles]);
 
-    const promptTargetReady = promptTarget.type === 'society'
-        || promptTarget.type === 'all_agents'
-        || Boolean(promptTarget.agent_id)
-        || Boolean(promptTarget.agent_ids?.length);
+    const liveCommandError = livePrompt.trim() === ''
+        ? undefined
+        : formatLiveCommandError(liveCommandParseResult, t);
 
-    const promptTargetLabel = describeInteractionTarget(promptTarget, profiles, liveMode, t);
+    const liveCommandTargetLabel = liveCommandParseResult.ok
+        ? describeInteractionTarget(liveCommandParseResult.target, profiles, liveCommandParseResult.mode, t)
+        : describeTargetSubject(fallbackCommandTarget, profiles, t);
 
-    const applyMentionTarget = useCallback((value: string) => {
-        const mention = liveTargetMentions.find((item) => item.value === value);
-        if (!mention) {
-            return;
-        }
-        if (mention.target.type === 'society' || mention.target.type === 'all_agents') {
-            setAskTargetType(mention.target.type);
-            setAskTargetAgentIds([]);
-            return;
-        }
-        if (mention.target.agent_id !== undefined) {
-            setAskTargetType('agent');
-            setAskTargetAgentIds([mention.target.agent_id]);
-        }
-    }, [liveTargetMentions]);
+    const liveCommandOptions = useMemo(() => (
+        liveCompletionPrefix === '/'
+            ? [
+                { value: 'ask', label: t('replay.pixel.command.askOption') },
+                { value: 'intervene', label: t('replay.pixel.command.interveneOption') },
+            ]
+            : liveTargetMentions.map((mention) => ({
+                value: mention.value,
+                label: mention.label,
+            }))
+    ), [liveCompletionPrefix, liveTargetMentions, t]);
 
     const runLiveStep = useCallback(async () => {
         if (!liveBaseUrl) {
@@ -2882,17 +3044,24 @@ export default function PixelReplay() {
     }, [intervalMs, liveAuto, liveBaseUrl, liveStatus?.default_tick, messageApi, withLiveWorkspace]);
 
     const submitLiveInteraction = useCallback(async () => {
-        const rawPrompt = livePrompt.trim();
-        const prompt = stripTargetMentions(rawPrompt, liveTargetMentions) || rawPrompt;
-        const target = resolveTargetFromPrompt(rawPrompt, liveTargetMentions, askTarget);
-        if (!liveBaseUrl || !prompt || !promptTargetReady) {
+        const parsedCommand = parseLiveCommandInput(
+            livePrompt,
+            liveTargetMentions,
+            profiles,
+            fallbackCommandTarget,
+        );
+        if (!liveBaseUrl || !parsedCommand.ok) {
+            const errorMessage = formatLiveCommandError(parsedCommand, t);
+            if (errorMessage) {
+                messageApi.warning(errorMessage);
+            }
             return;
         }
         const pending: LiveInteraction = {
             id: `${Date.now()}`,
-            type: liveMode,
-            prompt: rawPrompt,
-            targetLabel: describeInteractionTarget(target, profiles, liveMode, t),
+            type: parsedCommand.mode,
+            prompt: livePrompt.trim(),
+            targetLabel: describeInteractionTarget(parsedCommand.target, profiles, parsedCommand.mode, t),
         };
         setLiveInteractions((items) => [...items, pending]);
         setLivePrompt('');
@@ -2905,10 +3074,10 @@ export default function PixelReplay() {
                 step_count: number;
                 simulation_time?: string;
             }>(
-                withLiveWorkspace(liveMode === 'ask' ? '/ask' : '/intervene'),
-                liveMode === 'ask'
-                    ? { question: prompt, target }
-                    : { instruction: prompt, target },
+                withLiveWorkspace(parsedCommand.mode === 'ask' ? '/ask' : '/intervene'),
+                parsedCommand.mode === 'ask'
+                    ? { question: parsedCommand.prompt, target: parsedCommand.target }
+                    : { instruction: parsedCommand.prompt, target: parsedCommand.target },
             );
             setLiveStatus((status) => status ? {
                 ...status,
@@ -2953,7 +3122,7 @@ export default function PixelReplay() {
         } finally {
             setLiveBusy(false);
         }
-    }, [askTarget, liveBaseUrl, liveMode, livePrompt, liveTargetMentions, messageApi, profiles, promptTargetReady, t, withLiveWorkspace]);
+    }, [fallbackCommandTarget, liveBaseUrl, livePrompt, liveTargetMentions, messageApi, profiles, t, withLiveWorkspace]);
 
     const frame = useMemo(() => {
         if (!walkableMap) {
@@ -2998,6 +3167,94 @@ export default function PixelReplay() {
         setSelectedAgentId(undefined);
         setAgentDetailOpen(false);
     }, []);
+
+    const canSendLiveCommand = Boolean(liveBaseUrl)
+        && liveWaiting
+        && !liveBusy
+        && liveCommandParseResult.ok;
+
+    const liveCommandMode = liveCommandParseResult.ok ? liveCommandParseResult.mode : undefined;
+
+    const handleLiveCommandKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (event.key === 'Tab' && !event.shiftKey) {
+            const completion = completeLivePromptAtCursor(
+                event.currentTarget.value,
+                event.currentTarget.selectionStart ?? event.currentTarget.value.length,
+                liveTargetMentions,
+            );
+            if (completion) {
+                event.preventDefault();
+                const textarea = event.currentTarget;
+                setLivePrompt(completion.value);
+                window.requestAnimationFrame(() => {
+                    textarea.focus();
+                    textarea.setSelectionRange(completion.cursor, completion.cursor);
+                });
+                return;
+            }
+        }
+        if (event.key !== 'Enter' || event.shiftKey) {
+            return;
+        }
+        event.preventDefault();
+        submitLiveInteraction();
+    }, [liveTargetMentions, submitLiveInteraction]);
+
+    const commandComposer = (
+        <div
+            className="pixel-map-command-composer"
+            onMouseDown={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            onWheel={(event) => event.stopPropagation()}
+        >
+            <div className="pixel-command-header">
+                <Space size={6} wrap>
+                    <Text strong>{t('replay.pixel.command.title')}</Text>
+                    {liveCommandMode && (
+                        <Tag color={liveCommandMode === 'ask' ? 'blue' : 'orange'}>
+                            {liveCommandMode === 'ask' ? t('replay.pixel.live.ask') : t('replay.pixel.live.intervene')}
+                        </Tag>
+                    )}
+                    <Tag>{liveCommandTargetLabel}</Tag>
+                </Space>
+                <Text type="secondary">
+                    {liveWaiting
+                        ? t('replay.pixel.command.hint')
+                        : t('replay.pixel.live.status', { status: formatStatusLabel(liveStatus?.status, currentLanguage, 'offline') })}
+                </Text>
+            </div>
+            <div className="pixel-command-row">
+                <Mentions
+                    className="pixel-command-input"
+                    value={livePrompt}
+                    onChange={setLivePrompt}
+                    onKeyDown={handleLiveCommandKeyDown}
+                    onSearch={(_text, prefix) => setLiveCompletionPrefix(prefix === '/' ? '/' : '@')}
+                    disabled={!liveWaiting || liveBusy}
+                    rows={2}
+                    prefix={['/', '@']}
+                    placeholder={t('replay.pixel.command.placeholder')}
+                    status={liveCommandError ? 'error' : undefined}
+                    options={liveCommandOptions}
+                />
+                <Button
+                    className="pixel-command-send"
+                    type="primary"
+                    icon={<SendOutlined />}
+                    loading={liveBusy && (liveStatus?.status === 'asking' || liveStatus?.status === 'intervening')}
+                    disabled={!canSendLiveCommand}
+                    onClick={submitLiveInteraction}
+                >
+                    {t('replay.pixel.live.send')}
+                </Button>
+            </div>
+            <div className="pixel-command-footer">
+                <Text type={liveCommandError ? 'danger' : 'secondary'}>
+                    {liveCommandError ?? t('replay.pixel.command.defaultTargetHint')}
+                </Text>
+            </div>
+        </div>
+    );
 
     if (loading) {
         return (
@@ -3044,340 +3301,335 @@ export default function PixelReplay() {
                 map={frame.map}
                 stepDurationMs={intervalMs}
                 selectedAgentId={selectedAgentId}
+                commandComposer={commandComposer}
                 onSelectAgent={setSelectedAgentId}
                 onOpenSetup={() => navigate('/setup')}
                 onOpenSkills={() => navigate('/skills')}
             />
 
-            <Card className="pixel-replay-topbar" variant="borderless">
-                <Space align="center" wrap>
-                    <Button
-                        icon={playing ? <PauseOutlined /> : <CaretRightOutlined />}
-                        type="primary"
-                        onClick={() => setPlaying((value) => !value)}
-                    >
-                        {playing ? t('replay.pixel.topbar.pause') : t('replay.pixel.topbar.play')}
-                    </Button>
-                    <Button
-                        icon={<StepBackwardOutlined />}
-                        disabled={timeline.length <= 1}
-                        onClick={() => {
+            <aside className="pixel-right-rail">
+                <Card className="pixel-rail-controls" variant="borderless">
+                    <div className="pixel-rail-control-header">
+                        <Space size={6} wrap>
+                            <Tag color="blue">{t('replay.pixel.topbar.stepTag', { step: currentStep + 1 })}</Tag>
+                            {liveStatus && <Tag color="geekblue">{t('replay.pixel.topbar.liveSteps', { count: liveStatus.step_count })}</Tag>}
+                            <Button
+                                disabled
+                                className={`pixel-live-status-button status-${liveStatus?.status ?? 'offline'}`}
+                            >
+                                {formatStatusLabel(liveStatus?.status, currentLanguage, 'offline')}
+                            </Button>
+                        </Space>
+                        <Text type="secondary">{formatTime(bundle?.t ?? timeline[currentIndex]?.t)}</Text>
+                    </div>
+                    <div className="pixel-rail-control-actions">
+                        <div className="pixel-rail-main-actions">
+                            <Button
+                                icon={playing ? <PauseOutlined /> : <CaretRightOutlined />}
+                                type="primary"
+                                onClick={() => setPlaying((value) => !value)}
+                            >
+                                {playing ? t('replay.pixel.topbar.pause') : t('replay.pixel.topbar.play')}
+                            </Button>
+                            <div className="pixel-step-nav-buttons">
+                                <Button
+                                    shape="circle"
+                                    icon={<StepBackwardOutlined />}
+                                    disabled={timeline.length <= 1}
+                                    onClick={() => {
+                                        setFollowLatest(false);
+                                        setCurrentIndex((index) => Math.max(0, index - 1));
+                                    }}
+                                />
+                                <Button
+                                    shape="circle"
+                                    icon={<StepForwardOutlined />}
+                                    disabled={timeline.length <= 1}
+                                    onClick={() => {
+                                        setFollowLatest(false);
+                                        setCurrentIndex((index) => Math.min(timeline.length - 1, index + 1));
+                                    }}
+                                />
+                            </div>
+                            <Button
+                                className="pixel-run-step-button"
+                                type="primary"
+                                icon={<StepForwardOutlined />}
+                                loading={liveBusy && liveStatus?.status === 'running_step'}
+                                disabled={!liveWaiting || liveBusy}
+                                onClick={runLiveStep}
+                            >
+                                {t('replay.pixel.topbar.runStep')}
+                            </Button>
+                        </div>
+                        <div className="pixel-rail-auto-actions">
+                            <Button
+                                icon={liveAuto ? <PauseOutlined /> : <CaretRightOutlined />}
+                                loading={liveBusy && !liveAuto}
+                                disabled={liveBusy || (!liveAuto && !liveWaiting)}
+                                onClick={toggleLiveAuto}
+                            >
+                                {liveAuto ? t('replay.pixel.topbar.pauseAuto') : t('replay.pixel.topbar.auto')}
+                            </Button>
+                            <Select
+                                value={intervalMs}
+                                className="pixel-rail-speed-select"
+                                onChange={setIntervalMs}
+                                options={[
+                                    { value: 1500, label: '0.7x' },
+                                    { value: 1000, label: '1x' },
+                                    { value: 500, label: '2x' },
+                                    { value: 250, label: '4x' },
+                                ]}
+                            />
+                            {stepLoading && <Spin size="small" />}
+                        </div>
+                    </div>
+                    <input
+                        className="pixel-replay-range"
+                        type="range"
+                        min={0}
+                        max={Math.max(0, timeline.length - 1)}
+                        value={Math.min(currentIndex, Math.max(0, timeline.length - 1))}
+                        disabled={timeline.length === 0}
+                        onChange={(event) => {
                             setFollowLatest(false);
-                            setCurrentIndex((index) => Math.max(0, index - 1));
+                            setCurrentIndex(Number(event.target.value));
                         }}
                     />
-                    <Button
-                        icon={<StepForwardOutlined />}
-                        disabled={timeline.length <= 1}
-                        onClick={() => {
-                            setFollowLatest(false);
-                            setCurrentIndex((index) => Math.min(timeline.length - 1, index + 1));
-                        }}
-                    />
-                    <Space.Compact className="pixel-live-control-cluster">
-                        <Button
-                            className="pixel-run-step-button"
-                            type="primary"
-                            icon={<StepForwardOutlined />}
-                            loading={liveBusy && liveStatus?.status === 'running_step'}
-                            disabled={!liveWaiting || liveBusy}
-                            onClick={runLiveStep}
-                        >
-                            {t('replay.pixel.topbar.runStep')}
-                        </Button>
-                        <Button
-                            icon={liveAuto ? <PauseOutlined /> : <CaretRightOutlined />}
-                            loading={liveBusy && !liveAuto}
-                            disabled={liveBusy || (!liveAuto && !liveWaiting)}
-                            onClick={toggleLiveAuto}
-                        >
-                            {liveAuto ? t('replay.pixel.topbar.pauseAuto') : t('replay.pixel.topbar.auto')}
-                        </Button>
-                        <Button
-                            disabled
-                            className={`pixel-live-status-button status-${liveStatus?.status ?? 'offline'}`}
-                        >
-                            {formatStatusLabel(liveStatus?.status, currentLanguage, 'offline')}
-                        </Button>
-                    </Space.Compact>
-                    <Select
-                        value={intervalMs}
-                        style={{ width: 116 }}
-                        onChange={setIntervalMs}
-                        options={[
-                            { value: 1500, label: '0.7x' },
-                            { value: 1000, label: '1x' },
-                            { value: 500, label: '2x' },
-                            { value: 250, label: '4x' },
+                </Card>
+
+                <div className="pixel-rail-tabs-shell">
+                    <Tabs
+                        className="pixel-rail-tabs"
+                        defaultActiveKey="summary"
+                        items={[
+                            {
+                                key: 'summary',
+                                label: t('replay.pixel.rail.summary'),
+                                children: (
+                                    <div className="pixel-rail-pane pixel-summary-pane">
+                                        <section className="pixel-rail-section pixel-overview-card">
+                                            <Title level={4}>{t('replay.pixel.overview.title')}</Title>
+                                            <Text type="secondary">
+                                                {t('replay.pixel.overview.subtitle', { hypothesis: effectiveHypothesisId, experiment: effectiveExperimentId })}
+                                            </Text>
+                                            <div className="pixel-replay-stats">
+                                                <Tag>{t('replay.pixel.overview.residents', { count: info?.agent_count ?? profiles.length })}</Tag>
+                                                <Tag>{t('replay.pixel.overview.steps', { count: info?.total_steps ?? timeline.length })}</Tag>
+                                                <Tag color="geekblue">{frame.map.displayName}</Tag>
+                                                {envSnapshot?.total_messages_sent !== undefined && (
+                                                    <Tag color="green">{t('replay.pixel.overview.messages', { count: Number(envSnapshot.total_messages_sent) || 0 })}</Tag>
+                                                )}
+                                                <Tag color={communications.length > 0 ? 'blue' : undefined}>
+                                                    {t('replay.pixel.overview.communications', { count: communications.length })}
+                                                </Tag>
+                                                {missingReplayTileCount > 0 && (
+                                                    <Tag color="orange">{t('replay.pixel.overview.missingTiles', { count: missingReplayTileCount })}</Tag>
+                                                )}
+                                            </div>
+                                        </section>
+
+                                        <section className="pixel-rail-section pixel-step-card">
+                                            <div className="pixel-section-heading">
+                                                <Text strong>{t('replay.pixel.step.title')}</Text>
+                                                <Tag color="blue">{t('replay.pixel.step.tag', { step: currentStep + 1 })}</Tag>
+                                            </div>
+                                            <div className="pixel-step-summary">
+                                                <Text type="secondary">{t('replay.pixel.step.phase')}</Text>
+                                                <Text strong>{formatPhase(envSnapshot?.current_phase, t)}</Text>
+                                            </div>
+                                            {envSnapshot?.latest_event !== undefined && (
+                                                <Text className="pixel-step-event">
+                                                    {localizeSystemEvent(envSnapshot.latest_event, currentLanguage, frame.map, frame.map.locations)}
+                                                </Text>
+                                            )}
+                                        </section>
+                                    </div>
+                                ),
+                            },
+                            {
+                                key: 'chat',
+                                label: t('replay.pixel.rail.chat'),
+                                children: (
+                                    <div className="pixel-rail-pane pixel-chat-pane">
+                                        <div className="pixel-section-heading">
+                                            <Text strong>{t('replay.pixel.chat.title')}</Text>
+                                            <Tag color={communications.length > 0 ? 'blue' : undefined}>
+                                                {t('replay.pixel.chat.count', { count: communications.length })}
+                                            </Tag>
+                                        </div>
+                                        <div className="pixel-communication-list">
+                                            {communications.length === 0 ? (
+                                                <Text type="secondary">{t('replay.pixel.chat.empty')}</Text>
+                                            ) : communications.map((item, index) => (
+                                                <div className="pixel-communication-row" key={`${item.sender_name}-${index}`}>
+                                                    <div className="pixel-communication-meta">
+                                                        <Text strong>{item.sender_name ?? t('replay.pixel.chat.resident')}</Text>
+                                                        <Tag color={item.type === 'direct' ? 'purple' : 'cyan'}>
+                                                            {item.type === 'direct' ? t('replay.pixel.chat.direct') : t('replay.pixel.chat.group')}
+                                                        </Tag>
+                                                    </div>
+                                                    <Text type="secondary">
+                                                        {item.type === 'direct'
+                                                            ? t('replay.pixel.chat.sendTo', { name: item.receiver_name ?? t('replay.pixel.chat.resident') })
+                                                            : t('replay.pixel.chat.sendToGroup', {
+                                                                name: localizeGroupName(item.group_name, currentLanguage) || t('replay.pixel.chat.group'),
+                                                                suffix: item.recipient_count ? t('replay.pixel.chat.recipientCount', { count: item.recipient_count }) : '',
+                                                            })}
+                                                    </Text>
+                                                    <Text className="pixel-message-text">{item.content ?? ''}</Text>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ),
+                            },
+                            {
+                                key: 'residents',
+                                label: t('replay.pixel.rail.residents'),
+                                children: (
+                                    <div className="pixel-rail-pane pixel-residents-pane">
+                                        <div className="pixel-section-heading">
+                                            <Space direction="vertical" size={0}>
+                                                <Text strong>{t('replay.pixel.residents.title')}</Text>
+                                                <Text type="secondary">{t('replay.pixel.residents.hint')}</Text>
+                                            </Space>
+                                            <Button
+                                                size="small"
+                                                type="primary"
+                                                ghost
+                                                icon={<UserAddOutlined />}
+                                                onClick={() => setAgentBuilderOpen(true)}
+                                            >
+                                                {t('replay.pixel.residents.addAgent')}
+                                            </Button>
+                                        </div>
+                                        {selectedAgent && (
+                                            <div className="pixel-replay-selected">
+                                                <Text type="secondary">{t('replay.pixel.residents.selected')}</Text>
+                                                <Text strong>{selectedAgent.name}</Text>
+                                                <Text>{selectedAgent.action}</Text>
+                                                <Text type="secondary">{t('replay.pixel.residents.location', { location: selectedAgent.location })}</Text>
+                                                <Space size={4} wrap>
+                                                    {selectedAgent.locationId && <Tag>{selectedAgent.locationId}</Tag>}
+                                                    {selectedAgent.movementStatus && (
+                                                        <Tag color={isMovingRuntimeStatus(selectedAgent.movementStatus) ? 'blue' : 'green'}>
+                                                            {formatStatusLabel(selectedAgent.movementStatus, currentLanguage)}
+                                                        </Tag>
+                                                    )}
+                                                    <Tag color={selectedAgent.hasReplayTile ? 'geekblue' : 'orange'}>
+                                                        {t('replay.pixel.residents.tile', { x: selectedAgent.tile.x, y: selectedAgent.tile.y })}
+                                                    </Tag>
+                                                </Space>
+                                                {selectedAgent.availableInteractions.length > 0 && (
+                                                    <div className="pixel-interaction-list">
+                                                        {selectedAgent.availableInteractions.map((interaction) => (
+                                                            <Tooltip title={interaction.description} key={interaction.id}>
+                                                                <Tag color="cyan">{interaction.name}</Tag>
+                                                            </Tooltip>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                                {selectedAgent.emotion && <Text type="secondary">{t('replay.pixel.residents.emotion', { emotion: selectedAgent.emotion })}</Text>}
+                                                {selectedAgent.lastMessage && (
+                                                    <Text className="pixel-message-text">{t('replay.pixel.residents.lastReceived', { message: selectedAgent.lastMessage })}</Text>
+                                                )}
+                                                <Space size={8} wrap>
+                                                    <Button
+                                                        size="small"
+                                                        type="link"
+                                                        onClick={() => setAgentDetailOpen(true)}
+                                                    >
+                                                        {t('replay.pixel.residents.viewDetail')}
+                                                    </Button>
+                                                    <Button
+                                                        size="small"
+                                                        type="link"
+                                                        onClick={clearSelectedAgent}
+                                                    >
+                                                        {t('replay.pixel.residents.clearSelection')}
+                                                    </Button>
+                                                </Space>
+                                            </div>
+                                        )}
+                                        <div className="pixel-agent-list">
+                                            {frame.agents.map((agent) => (
+                                                <div
+                                                    key={agent.id}
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    aria-pressed={agent.id === selectedAgentId}
+                                                    className={`pixel-agent-row ${agent.id === selectedAgentId ? 'selected' : ''}`}
+                                                    onClick={() => toggleSelectedAgent(agent.id)}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === 'Enter' || event.key === ' ') {
+                                                            event.preventDefault();
+                                                            toggleSelectedAgent(agent.id);
+                                                        }
+                                                    }}
+                                                >
+                                                    <span className="pixel-agent-name">{agent.name}</span>
+                                                    <span className="pixel-agent-action">{agent.action}</span>
+                                                    <span className="pixel-agent-location">{agent.location}</span>
+                                                    <span className="pixel-agent-location">
+                                                        {agent.hasReplayTile
+                                                            ? t('replay.pixel.residents.tile', { x: agent.tile.x, y: agent.tile.y })
+                                                            : t('replay.pixel.residents.missingCoords')}
+                                                    </span>
+                                                    {agent.lastMessage && <span className="pixel-agent-location">{t('replay.pixel.residents.lastReceived', { message: agent.lastMessage })}</span>}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ),
+                            },
+                            {
+                                key: 'live',
+                                label: t('replay.pixel.rail.live'),
+                                children: (
+                                    <div className="pixel-rail-pane pixel-live-pane">
+                                        <div className="pixel-live-console-header">
+                                            <Space size={8} wrap>
+                                                <Text strong>{t('replay.pixel.live.title')}</Text>
+                                                <Tag>{liveCommandTargetLabel}</Tag>
+                                            </Space>
+                                            <Text type="secondary">
+                                                {liveWaiting
+                                                    ? t('replay.pixel.command.inputHint')
+                                                    : t('replay.pixel.live.status', { status: formatStatusLabel(liveStatus?.status, currentLanguage, 'offline') })}
+                                            </Text>
+                                        </div>
+                                        <div className="pixel-live-result-stream">
+                                            {liveInteractions.length === 0 ? (
+                                                <div className="pixel-live-empty">
+                                                    <Text type="secondary">{t('replay.pixel.live.empty')}</Text>
+                                                </div>
+                                            ) : liveInteractions.slice().reverse().slice(0, 8).map((item) => (
+                                                <div className="pixel-live-result-card" key={item.id}>
+                                                    <div className="pixel-communication-meta">
+                                                        <Space size={6} wrap>
+                                                            <Tag color={item.type === 'ask' ? 'blue' : 'orange'}>
+                                                                {item.type === 'ask' ? t('replay.pixel.live.ask') : t('replay.pixel.live.intervene')}
+                                                            </Tag>
+                                                            {item.targetLabel && <Tag>{item.targetLabel}</Tag>}
+                                                        </Space>
+                                                        {item.artifactName && <Text type="secondary">{item.artifactName}</Text>}
+                                                    </div>
+                                                    <Text strong className="pixel-live-prompt">{item.prompt}</Text>
+                                                    <Text className="pixel-live-result-text">
+                                                        {item.result ?? t('replay.pixel.live.waitingResult')}
+                                                    </Text>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ),
+                            },
                         ]}
                     />
-                    <Tag color="blue">{t('replay.pixel.topbar.stepTag', { step: currentStep + 1 })}</Tag>
-                    {liveStatus && <Tag color="geekblue">{t('replay.pixel.topbar.liveSteps', { count: liveStatus.step_count })}</Tag>}
-                    <Text>{formatTime(bundle?.t ?? timeline[currentIndex]?.t)}</Text>
-                    {stepLoading && <Spin size="small" />}
-                </Space>
-                <input
-                    className="pixel-replay-range"
-                    type="range"
-                    min={0}
-                    max={Math.max(0, timeline.length - 1)}
-                    value={Math.min(currentIndex, Math.max(0, timeline.length - 1))}
-                    disabled={timeline.length === 0}
-                    onChange={(event) => {
-                        setFollowLatest(false);
-                        setCurrentIndex(Number(event.target.value));
-                    }}
-                />
-            </Card>
-
-            <div className="pixel-dashboard">
-                <Card className="pixel-panel pixel-overview-card" variant="borderless">
-                    <Title level={4}>{t('replay.pixel.overview.title')}</Title>
-                    <Text type="secondary">
-                        {t('replay.pixel.overview.subtitle', { hypothesis: effectiveHypothesisId, experiment: effectiveExperimentId })}
-                    </Text>
-                    <div className="pixel-replay-stats">
-                        <Tag>{t('replay.pixel.overview.residents', { count: info?.agent_count ?? profiles.length })}</Tag>
-                        <Tag>{t('replay.pixel.overview.steps', { count: info?.total_steps ?? timeline.length })}</Tag>
-                        <Tag color="geekblue">{frame.map.displayName}</Tag>
-                        {envSnapshot?.total_messages_sent !== undefined && (
-                            <Tag color="green">{t('replay.pixel.overview.messages', { count: Number(envSnapshot.total_messages_sent) || 0 })}</Tag>
-                        )}
-                        <Tag color={communications.length > 0 ? 'blue' : undefined}>
-                            {t('replay.pixel.overview.communications', { count: communications.length })}
-                        </Tag>
-                        {missingReplayTileCount > 0 && (
-                            <Tag color="orange">{t('replay.pixel.overview.missingTiles', { count: missingReplayTileCount })}</Tag>
-                        )}
-                    </div>
-                </Card>
-
-                <Card className="pixel-panel pixel-step-card" variant="borderless">
-                    <div className="pixel-panel-content pixel-step-content">
-                        <div className="pixel-section-heading">
-                            <Text strong>{t('replay.pixel.step.title')}</Text>
-                            <Tag color="blue">{t('replay.pixel.step.tag', { step: currentStep + 1 })}</Tag>
-                        </div>
-                        <div className="pixel-step-summary">
-                            <Text type="secondary">{t('replay.pixel.step.phase')}</Text>
-                            <Text strong>{formatPhase(envSnapshot?.current_phase, t)}</Text>
-                        </div>
-                        {envSnapshot?.latest_event !== undefined && (
-                            <Text className="pixel-step-event">
-                                {localizeSystemEvent(envSnapshot.latest_event, currentLanguage, frame.map, frame.map.locations)}
-                            </Text>
-                        )}
-                    </div>
-                </Card>
-
-                <Card className="pixel-panel pixel-chat-card" variant="borderless">
-                    <div className="pixel-section-heading">
-                        <Text strong>{t('replay.pixel.chat.title')}</Text>
-                        <Tag color={communications.length > 0 ? 'blue' : undefined}>
-                            {t('replay.pixel.chat.count', { count: communications.length })}
-                        </Tag>
-                    </div>
-                    <div className="pixel-communication-list">
-                        {communications.length === 0 ? (
-                            <Text type="secondary">{t('replay.pixel.chat.empty')}</Text>
-                        ) : communications.map((item, index) => (
-                            <div className="pixel-communication-row" key={`${item.sender_name}-${index}`}>
-                                <div className="pixel-communication-meta">
-                                    <Text strong>{item.sender_name ?? t('replay.pixel.chat.resident')}</Text>
-                                    <Tag color={item.type === 'direct' ? 'purple' : 'cyan'}>
-                                        {item.type === 'direct' ? t('replay.pixel.chat.direct') : t('replay.pixel.chat.group')}
-                                    </Tag>
-                                </div>
-                                <Text type="secondary">
-                                    {item.type === 'direct'
-                                        ? t('replay.pixel.chat.sendTo', { name: item.receiver_name ?? t('replay.pixel.chat.resident') })
-                                        : t('replay.pixel.chat.sendToGroup', {
-                                            name: localizeGroupName(item.group_name, currentLanguage) || t('replay.pixel.chat.group'),
-                                            suffix: item.recipient_count ? t('replay.pixel.chat.recipientCount', { count: item.recipient_count }) : '',
-                                        })}
-                                </Text>
-                                <Text className="pixel-message-text">{item.content ?? ''}</Text>
-                            </div>
-                        ))}
-                    </div>
-                </Card>
-
-                <Card className="pixel-panel pixel-residents-card" variant="borderless">
-                    <div className="pixel-section-heading">
-                        <Space direction="vertical" size={0}>
-                            <Text strong>{t('replay.pixel.residents.title')}</Text>
-                            <Text type="secondary">{t('replay.pixel.residents.hint')}</Text>
-                        </Space>
-                        <Button
-                            size="small"
-                            type="primary"
-                            ghost
-                            icon={<UserAddOutlined />}
-                            onClick={() => setAgentBuilderOpen(true)}
-                        >
-                            {t('replay.pixel.residents.addAgent')}
-                        </Button>
-                    </div>
-                    {selectedAgent && (
-                        <div className="pixel-replay-selected">
-                            <Text type="secondary">{t('replay.pixel.residents.selected')}</Text>
-                            <Text strong>{selectedAgent.name}</Text>
-                            <Text>{selectedAgent.action}</Text>
-                            <Text type="secondary">{t('replay.pixel.residents.location', { location: selectedAgent.location })}</Text>
-                            <Space size={4} wrap>
-                                {selectedAgent.locationId && <Tag>{selectedAgent.locationId}</Tag>}
-                                {selectedAgent.movementStatus && (
-                                    <Tag color={isMovingRuntimeStatus(selectedAgent.movementStatus) ? 'blue' : 'green'}>
-                                        {formatStatusLabel(selectedAgent.movementStatus, currentLanguage)}
-                                    </Tag>
-                                )}
-                                <Tag color={selectedAgent.hasReplayTile ? 'geekblue' : 'orange'}>
-                                    {t('replay.pixel.residents.tile', { x: selectedAgent.tile.x, y: selectedAgent.tile.y })}
-                                </Tag>
-                            </Space>
-                            {selectedAgent.availableInteractions.length > 0 && (
-                                <div className="pixel-interaction-list">
-                                    {selectedAgent.availableInteractions.map((interaction) => (
-                                        <Tooltip title={interaction.description} key={interaction.id}>
-                                            <Tag color="cyan">{interaction.name}</Tag>
-                                        </Tooltip>
-                                    ))}
-                                </div>
-                            )}
-                            {selectedAgent.emotion && <Text type="secondary">{t('replay.pixel.residents.emotion', { emotion: selectedAgent.emotion })}</Text>}
-                            {selectedAgent.lastMessage && (
-                                <Text className="pixel-message-text">{t('replay.pixel.residents.lastReceived', { message: selectedAgent.lastMessage })}</Text>
-                            )}
-                            <Space size={8} wrap>
-                                <Button
-                                    size="small"
-                                    type="link"
-                                    onClick={() => setAgentDetailOpen(true)}
-                                >
-                                    {t('replay.pixel.residents.viewDetail')}
-                                </Button>
-                                <Button
-                                    size="small"
-                                    type="link"
-                                    onClick={clearSelectedAgent}
-                                >
-                                    {t('replay.pixel.residents.clearSelection')}
-                                </Button>
-                            </Space>
-                        </div>
-                    )}
-                    <div className="pixel-agent-list">
-                        {frame.agents.map((agent) => (
-                            <div
-                                key={agent.id}
-                                role="button"
-                                tabIndex={0}
-                                aria-pressed={agent.id === selectedAgentId}
-                                className={`pixel-agent-row ${agent.id === selectedAgentId ? 'selected' : ''}`}
-                                onClick={() => toggleSelectedAgent(agent.id)}
-                                onKeyDown={(event) => {
-                                    if (event.key === 'Enter' || event.key === ' ') {
-                                        event.preventDefault();
-                                        toggleSelectedAgent(agent.id);
-                                    }
-                                }}
-                            >
-                                <span className="pixel-agent-name">{agent.name}</span>
-                                <span className="pixel-agent-action">{agent.action}</span>
-                                <span className="pixel-agent-location">{agent.location}</span>
-                                <span className="pixel-agent-location">
-                                    {agent.hasReplayTile
-                                        ? t('replay.pixel.residents.tile', { x: agent.tile.x, y: agent.tile.y })
-                                        : t('replay.pixel.residents.missingCoords')}
-                                </span>
-                                {agent.lastMessage && <span className="pixel-agent-location">{t('replay.pixel.residents.lastReceived', { message: agent.lastMessage })}</span>}
-                            </div>
-                        ))}
-                    </div>
-                </Card>
-            </div>
-            <Card className="pixel-live-console" variant="borderless">
-                <div className="pixel-live-console-header">
-                    <Space size={8} wrap>
-                        <Text strong>{t('replay.pixel.live.title')}</Text>
-                        <Tag color={liveMode === 'ask' ? 'blue' : 'orange'}>
-                            {liveMode === 'ask' ? t('replay.pixel.live.ask') : t('replay.pixel.live.intervene')}
-                        </Tag>
-                        <Tag>{promptTargetLabel}</Tag>
-                    </Space>
-                    <Text type="secondary">
-                        {liveWaiting
-                            ? t('replay.pixel.live.inputHint')
-                            : t('replay.pixel.live.status', { status: formatStatusLabel(liveStatus?.status, currentLanguage, 'offline') })}
-                    </Text>
                 </div>
-                <div className="pixel-live-result-stream">
-                    {liveInteractions.length === 0 ? (
-                        <div className="pixel-live-empty">
-                            <Text type="secondary">{t('replay.pixel.live.empty')}</Text>
-                        </div>
-                    ) : liveInteractions.slice().reverse().slice(0, 4).map((item) => (
-                        <div className="pixel-live-result-card" key={item.id}>
-                            <div className="pixel-communication-meta">
-                                <Space size={6} wrap>
-                                    <Tag color={item.type === 'ask' ? 'blue' : 'orange'}>
-                                        {item.type === 'ask' ? t('replay.pixel.live.ask') : t('replay.pixel.live.intervene')}
-                                    </Tag>
-                                    {item.targetLabel && <Tag>{item.targetLabel}</Tag>}
-                                </Space>
-                                {item.artifactName && <Text type="secondary">{item.artifactName}</Text>}
-                            </div>
-                            <Text strong className="pixel-live-prompt">{item.prompt}</Text>
-                            <Text className="pixel-live-result-text">
-                                {item.result ?? t('replay.pixel.live.waitingResult')}
-                            </Text>
-                        </div>
-                    ))}
-                </div>
-                <div className="pixel-live-composer">
-                    <div className="pixel-live-mode-rail">
-                        <Segmented
-                            block
-                            value={liveMode}
-                            onChange={(value) => setLiveMode(value as 'ask' | 'intervene')}
-                            options={[
-                                { label: t('replay.pixel.live.ask'), value: 'ask' },
-                                { label: t('replay.pixel.live.intervene'), value: 'intervene' },
-                            ]}
-                        />
-                        <Text type="secondary" className="pixel-live-target-hint">
-                            {liveMode === 'ask'
-                                ? describeInteractionTarget(promptTarget, profiles, 'ask', t)
-                                : `${describeInteractionTarget(promptTarget, profiles, 'intervene', t)} - ${t('replay.pixel.live.nextStepNote')}`}
-                        </Text>
-                    </div>
-                    <Mentions
-                        className="pixel-live-input"
-                        value={livePrompt}
-                        onChange={setLivePrompt}
-                        onSelect={(option) => applyMentionTarget(String(option.value ?? ''))}
-                        disabled={!liveWaiting || liveBusy}
-                        rows={3}
-                        placeholder={liveMode === 'ask'
-                            ? t('replay.pixel.live.askPlaceholder')
-                            : t('replay.pixel.live.intervenePlaceholder')}
-                        options={liveTargetMentions.map((mention) => ({
-                            value: mention.value,
-                            label: mention.label,
-                        }))}
-                    />
-                    <Button
-                        className="pixel-live-send"
-                        type="primary"
-                        icon={<SendOutlined />}
-                        loading={liveBusy && (liveStatus?.status === 'asking' || liveStatus?.status === 'intervening')}
-                        disabled={!liveWaiting || liveBusy || livePrompt.trim() === '' || !promptTargetReady}
-                        onClick={submitLiveInteraction}
-                    >
-                        {t('replay.pixel.live.send')}
-                    </Button>
-                </div>
-            </Card>
+            </aside>
             <Drawer
                 title={selectedAgent ? t('replay.pixel.drawer.detailTitle', { name: selectedAgent.name }) : t('replay.pixel.drawer.detailTitleFallback')}
                 open={agentDetailOpen && Boolean(selectedAgent)}
