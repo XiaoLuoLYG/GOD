@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from agentsociety2.backend.routers import god_setup
 from agentsociety2.backend.routers.god_setup import (
+    AgentStudioGenerateRequest,
     DraftBasics,
     GenerateDraftRequest,
     ModelConfigPayload,
@@ -172,6 +173,34 @@ def test_setup_status_exposes_setup_mode(monkeypatch, tmp_path):
     status = anyio.run(god_setup.setup_status)
 
     assert status["setup_mode"] is True
+
+
+def test_agent_studio_generate_keeps_location_on_current_map():
+    response = anyio.run(
+        god_setup.generate_agent_studio_options,
+        AgentStudioGenerateRequest(
+            experiment_context={
+                "title": "Town Test",
+                "background": "A realistic town experiment.",
+            },
+            map_id="test_map",
+            map_locations=[
+                {"id": "lab", "name": "Lab"},
+                {"id": "yard", "name": "Yard"},
+            ],
+            language="zh",
+            source={"prompt": "一个每天去月球上班的变形金刚", "mbti": "INTP"},
+            locked_choices={"initial_location": "yard"},
+            custom_choices={"personality_core": "外冷内热的机械生命"},
+        ),
+    )
+
+    assert response.initial_location == "yard"
+    assert response.selected_choices["initial_location"] == "yard"
+    assert response.profile_patch["role"]
+    assert response.profile_patch["agent_studio"]["custom_choices"]["personality_core"] == "外冷内热的机械生命"
+    assert "world_conflict" not in response.profile_patch
+    assert "virtual_locations" not in response.profile_patch
 
 
 def test_setup_status_scans_map_packages_and_keeps_invalid_visible(monkeypatch, tmp_path):

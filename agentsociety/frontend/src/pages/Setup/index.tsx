@@ -42,7 +42,7 @@ import {
     localizeMapLocationName,
     type LocalizedFields,
 } from '../../utils/runtimeLocalization';
-import { AgentEditorModal } from '../AgentBuilder/AgentEditorModal';
+import { AgentEditorModal, type AgentEditorSaveMeta } from '../AgentBuilder/AgentEditorModal';
 import {
     jsonStringify,
     parseJsonObject,
@@ -638,7 +638,7 @@ export default function SetupPage() {
         setAgentModalOpen(true);
     };
 
-    const saveAgent = async (baseAgent: AgentRecord) => {
+    const saveAgent = async (baseAgent: AgentRecord, meta?: AgentEditorSaveMeta) => {
         if (!draft) return;
         const profile = baseAgent.kwargs?.profile && typeof baseAgent.kwargs.profile === 'object'
             ? baseAgent.kwargs.profile
@@ -672,7 +672,7 @@ export default function SetupPage() {
         env.kwargs.agent_id_name_pairs = next.init_config.agents.map((item) => [item.agent_id, agentName(item)]);
         env.kwargs.initial_locations = {
             ...(env.kwargs.initial_locations || {}),
-            [String(agent.agent_id)]: env.kwargs.initial_locations?.[String(agent.agent_id)] || locationOptions[0]?.value || 'park',
+            [String(agent.agent_id)]: meta?.initial_location || env.kwargs.initial_locations?.[String(agent.agent_id)] || locationOptions[0]?.value || 'park',
         };
         setDraft(next);
         setAgentModalOpen(false);
@@ -1329,15 +1329,23 @@ export default function SetupPage() {
                 </Card>
                 {content}
             </div>
-            <AgentEditorModal
-                open={agentModalOpen}
-                editingAgentId={editingAgentId}
-                form={agentForm}
-                width={820}
-                minAgentId={1}
-                onSave={saveAgent}
-                onCancel={() => setAgentModalOpen(false)}
-            />
+            {draft && (
+                <AgentEditorModal
+                    open={agentModalOpen}
+                    editingAgentId={editingAgentId}
+                    form={agentForm}
+                    width={980}
+                    minAgentId={1}
+                    experimentContext={draft.experiment_context}
+                    mapId={selectedMapId}
+                    mapLocations={mapLocations}
+                    existingAgents={draft.init_config.agents}
+                    initialLocation={editingAgentId === null ? undefined : getEnvModule(draft).kwargs.initial_locations?.[String(editingAgentId)]}
+                    defaultInitialLocation={locationOptions[0]?.value || 'park'}
+                    onSave={saveAgent}
+                    onCancel={() => setAgentModalOpen(false)}
+                />
+            )}
         </div>
     );
 }

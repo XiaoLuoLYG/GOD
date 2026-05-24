@@ -8,6 +8,7 @@ from agentsociety2.backend.routers.experiment_configs import (
     ApplyAgentsRequest,
     _preview_agents,
     apply_agents,
+    get_init_config,
 )
 
 
@@ -150,3 +151,33 @@ def test_apply_agents_rejects_existing_duplicate_id(tmp_path):
             ),
             str(tmp_path),
         )
+
+
+def test_get_init_config_returns_experiment_context_and_map_locations(monkeypatch, tmp_path):
+    exp_dir = tmp_path / "hypothesis_1" / "experiment_1" / "init"
+    exp_dir.mkdir(parents=True)
+    config = _base_config()
+    config["env_modules"][0]["kwargs"]["map_id"] = "test_map"
+    (exp_dir / "init_config.json").write_text(json.dumps(config), encoding="utf-8")
+    (exp_dir / "experiment_context.json").write_text(
+        json.dumps({"title": "Test World", "background": "A test scenario.", "map_id": "test_map"}),
+        encoding="utf-8",
+    )
+
+    class Package:
+        locations = [{"id": "lab", "name": "Lab"}]
+
+    monkeypatch.setattr(
+        "agentsociety2.backend.routers.experiment_configs.load_map_package",
+        lambda map_id: Package(),
+    )
+
+    response = anyio.run(get_init_config, "1", "1", str(tmp_path))
+
+    assert response.experiment_context == {
+        "title": "Test World",
+        "background": "A test scenario.",
+        "map_id": "test_map",
+    }
+    assert response.map_id == "test_map"
+    assert response.map_locations == [{"id": "lab", "name": "Lab"}]

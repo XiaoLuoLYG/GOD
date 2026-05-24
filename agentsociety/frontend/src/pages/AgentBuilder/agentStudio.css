@@ -1,0 +1,159 @@
+.agent-studio {
+    min-height: 540px;
+}
+
+.agent-studio-steps {
+    margin-bottom: 18px;
+}
+
+.agent-studio-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 280px;
+    gap: 18px;
+}
+
+.agent-studio-main,
+.agent-studio-side,
+.agent-studio-choice-group,
+.agent-studio-review-summary {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #fff;
+}
+
+.agent-studio-main {
+    padding: 16px;
+}
+
+.agent-studio-side {
+    padding: 14px;
+}
+
+.agent-studio-context-title {
+    margin-top: 8px;
+    margin-bottom: 6px !important;
+    font-weight: 600;
+}
+
+.agent-studio-field-row {
+    display: grid;
+    grid-template-columns: 120px minmax(180px, 1fr) minmax(160px, 1fr);
+    gap: 12px;
+}
+
+.agent-studio-field-row.compact {
+    grid-template-columns: minmax(120px, 160px) minmax(180px, 1fr) auto;
+    align-items: end;
+}
+
+.agent-studio-stepbar {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.agent-studio-choice-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.agent-studio-choice-group {
+    padding: 12px;
+}
+
+.agent-studio-choice-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.agent-studio-choice-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.agent-studio-choice {
+    min-height: 36px;
+    max-width: 100%;
+    padding: 7px 10px;
+    border: 1px solid #d9e1ee;
+    border-radius: 8px;
+    background: #f8fafc;
+    color: #111827;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.agent-studio-choice span {
+    display: block;
+    overflow-wrap: anywhere;
+    line-height: 1.25;
+}
+
+.agent-studio-choice small {
+    display: block;
+    margin-top: 4px;
+    color: #64748b;
+    line-height: 1.3;
+}
+
+.agent-studio-choice:hover {
+    border-color: #1677ff;
+    background: #eef6ff;
+}
+
+.agent-studio-choice.selected {
+    border-color: #1677ff;
+    background: #e6f4ff;
+    color: #0958d9;
+}
+
+.agent-studio-choice.custom {
+    border-style: dashed;
+    background: #fff;
+}
+
+.agent-studio-custom {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    min-width: min(260px, 100%);
+}
+
+.agent-studio-review {
+    display: grid;
+    gap: 12px;
+}
+
+.agent-studio-review-summary {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    padding: 14px;
+}
+
+@media (max-width: 860px) {
+    .agent-studio-grid,
+    .agent-studio-choice-grid,
+    .agent-studio-field-row,
+    .agent-studio-field-row.compact {
+        grid-template-columns: 1fr;
+    }
+
+    .agent-studio-review-summary {
+        display: block;
+    }
+
+    .agent-studio-review-summary .ant-space {
+        margin-top: 10px;
+    }
+}

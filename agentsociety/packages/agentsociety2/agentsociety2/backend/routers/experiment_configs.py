@@ -11,6 +11,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from agentsociety2.backend.services.map_packages import load_map_package
 from agentsociety2.society.models import InitConfig
 
 router = APIRouter(prefix="/api/v1/experiment-configs", tags=["experiment-configs"])
@@ -23,6 +24,9 @@ ApplyMode = Literal["append", "replace"]
 class InitConfigResponse(BaseModel):
     config: dict[str, Any]
     path: str
+    experiment_context: dict[str, Any] | None = None
+    map_id: str | None = None
+    map_locations: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ImportPreviewRequest(BaseModel):
@@ -76,6 +80,52 @@ def _load_init_config(config_path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise HTTPException(status_code=400, detail="init_config.json must contain a JSON object")
     return data
+
+
+def _load_experiment_context(config_path: Path, config: dict[str, Any]) -> dict[str, Any] | None:
+    context_path = config_path.parent / "experiment_context.json"
+    if context_path.exists():
+        try:
+            context = json.loads(context_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            context = None
+        if isinstance(context, dict):
+            return context
+
+    for agent in config.get("agents", []) or []:
+        if not isinstance(agent, dict):
+            continue
+        kwargs = agent.get("kwargs")
+        if not isinstance(kwargs, dict):
+            continue
+        context = kwargs.get("experiment_context")
+        if isinstance(context, dict):
+            return context
+        profile = kwargs.get("profile")
+        if isinstance(profile, dict) and profile.get("scenario"):
+            return {"background": str(profile["scenario"])}
+    return None
+
+
+def _map_id_from_config(config: dict[str, Any], context: dict[str, Any] | None) -> str | None:
+    for module in config.get("env_modules", []) or []:
+        if not isinstance(module, dict):
+            continue
+        kwargs = module.get("kwargs")
+        if isinstance(kwargs, dict) and kwargs.get("map_id"):
+            return str(kwargs["map_id"])
+    if isinstance(context, dict) and context.get("map_id"):
+        return str(context["map_id"])
+    return None
+
+
+def _map_locations_for_config(map_id: str | None) -> list[dict[str, Any]]:
+    if not map_id:
+        return []
+    try:
+        return load_map_package(map_id).locations
+    except Exception:
+        return []
 
 
 def _validate_init_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -350,7 +400,15 @@ async def get_init_config(
 ) -> InitConfigResponse:
     config_path = _init_config_path(workspace_path, hypothesis_id, experiment_id)
     config = _load_init_config(config_path)
-    return InitConfigResponse(config=config, path=str(config_path))
+    context = _load_experiment_context(config_path, config)
+    map_id = _map_id_from_config(config, context)
+    return InitConfigResponse(
+        config=config,
+        path=str(config_path),
+        experiment_context=context,
+        map_id=map_id,
+        map_locations=_map_locations_for_config(map_id),
+    )
 
 
 @router.put("/{hypothesis_id}/{experiment_id}/init", response_model=InitConfigResponse)

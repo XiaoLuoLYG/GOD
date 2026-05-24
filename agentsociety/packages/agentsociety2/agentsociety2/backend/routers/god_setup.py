@@ -6,6 +6,7 @@ import json
 import os
 import re
 import asyncio
+import hashlib
 import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -197,6 +198,39 @@ class StartRequestPayload(BaseModel):
 
 class StartDefaultRequest(BaseModel):
     experiment_key: str = DEFAULT_EXPERIMENT_KEY
+
+
+class AgentStudioGenerateRequest(BaseModel):
+    experiment_context: dict[str, Any] = Field(default_factory=dict)
+    map_id: str = DEFAULT_MAP_ID
+    map_locations: list[dict[str, Any]] = Field(default_factory=list)
+    existing_agents: list[dict[str, Any]] = Field(default_factory=list)
+    language: str = "zh"
+    source: dict[str, Any] = Field(default_factory=dict)
+    locked_choices: dict[str, str] = Field(default_factory=dict)
+    custom_choices: dict[str, str] = Field(default_factory=dict)
+
+
+class AgentStudioOption(BaseModel):
+    id: str
+    label: str
+    description: str | None = None
+
+
+class AgentStudioGroup(BaseModel):
+    id: str
+    title: str
+    step: str
+    allow_custom: bool = True
+    options: list[AgentStudioOption] = Field(default_factory=list)
+
+
+class AgentStudioGenerateResponse(BaseModel):
+    groups: list[AgentStudioGroup]
+    selected_choices: dict[str, str]
+    profile_patch: dict[str, Any]
+    initial_location: str
+    warnings: list[str] = Field(default_factory=list)
 
 
 def _god_root() -> Path:
@@ -432,6 +466,331 @@ _EN_NAMES = [
 
 def _language_is_zh(language: str) -> bool:
     return not str(language or "").lower().startswith("en")
+
+
+def _studio_slug(text: str, fallback: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9_]+", "_", text.strip().lower()).strip("_")
+    return slug[:48] or fallback
+
+
+def _studio_rotate(items: list[str], seed: str, group_id: str, count: int = 4) -> list[str]:
+    if not items:
+        return []
+    if len(items) <= count:
+        return items
+    anchors = items[:2]
+    rest = items[2:]
+    digest = hashlib.sha256(f"{seed}:{group_id}".encode("utf-8")).hexdigest()
+    start = int(digest[:8], 16) % len(rest)
+    rotated = rest[start:] + rest[:start]
+    return (anchors + rotated)[:count]
+
+
+def _studio_detect_theme(seed_text: str) -> str:
+    text = seed_text.lower()
+    if any(word in text for word in ("变形金刚", "transformer", "robot", "机器人", "机甲", "月球", "moon")):
+        return "mecha"
+    if any(word in text for word in ("吸血鬼", "vampire", "魔法", "wizard", "dragon", "奇幻", "fantasy")):
+        return "fantasy"
+    if any(word in text for word in ("学校", "校园", "student", "class", "university", "campus")):
+        return "campus"
+    return "grounded"
+
+
+def _studio_options_for_theme(theme: str, zh: bool) -> dict[str, list[str]]:
+    if zh:
+        base = {
+            "identity_role": ["社区观察员", "生活协调者", "规则维护者", "关系连接者", "安静执行者", "公共事务参与者"],
+            "identity_function": ["观察", "协调", "探索", "记录", "照顾", "挑战", "修复", "连接"],
+            "appearance_form": ["清爽人形", "高挑轮廓", "沉稳体态", "轻盈行动", "低调存在", "醒目标识"],
+            "appearance_eyes": ["圆眼", "杏眼", "笑眼", "细长眼", "深邃眼", "发光眼"],
+            "appearance_hair": ["短发", "中长发", "微乱发", "卷发", "长直发", "利落造型"],
+            "appearance_style": ["学院风", "通勤风", "街头风", "工作制服", "复古风", "科技风", "居家风"],
+            "personality_core": ["冷静观察者", "温柔照料者", "活力发起者", "理性分析者", "好奇实验者", "稳定守序者"],
+            "personality_social": ["独处蓄能", "熟人亲近", "主动破冰", "广泛连接", "礼貌疏离", "团队中心"],
+            "personality_decision": ["数据优先", "直觉判断", "共识协商", "快速试错", "规则导向", "价值驱动"],
+            "personality_mood": ["平静克制", "温暖柔和", "高能外放", "敏感细腻", "松弛幽默", "严肃专注"],
+            "routine_goal": ["学习成长", "建立关系", "完成任务", "探索社区", "帮助他人", "影响群体", "保持稳定"],
+            "routine_habit": ["早起计划型", "夜间灵感型", "稳定通勤型", "自由漫游型", "社交密集型", "安静驻留型"],
+            "relationship_style": ["慢热", "主动邀约", "互助", "良性竞争", "照顾型", "边界清晰", "导师型"],
+        }
+        overlays = {
+            "mecha": {
+                "identity_role": ["机械生命居民", "轨道通勤者", "公共交通守护者", "月面任务联络员", "伪装工程师", "城市维护者"],
+                "appearance_form": ["人形机甲", "列车伪装形态", "钛银装甲", "白色航天涂装", "折叠轮组", "月尘划痕"],
+                "appearance_eyes": ["蓝色光学镜", "双眼光学灯", "窄缝扫描器", "柔和发光眼", "警戒红光", "透明护目镜"],
+                "appearance_style": ["航天工装", "轨道交通制服", "工业维护风", "低调伪装风", "银黑科技风", "旧城列车涂装"],
+                "personality_core": ["可靠执行者", "沉默守护者", "程序化幽默者", "谨慎适应者", "使命驱动者", "社恐但可靠"],
+                "routine_goal": ["维护秩序", "完成远程任务", "理解人类通勤", "保护公共空间", "学习社会规则", "稳定融入社区"],
+            },
+            "fantasy": {
+                "identity_role": ["隐秘住民", "夜间记录者", "古老契约守护者", "社区药剂师", "雨天来访者", "图书馆访客"],
+                "appearance_form": ["优雅人形", "古典轮廓", "暗色披肩", "银色饰物", "柔和微光", "非日常气质"],
+                "personality_core": ["克制的浪漫者", "古怪守序者", "温柔旁观者", "慢热守护者", "好奇收藏者", "礼貌疏离者"],
+                "routine_goal": ["隐藏身份", "守护约定", "收集故事", "学习当代生活", "维系旧关系", "避免打扰他人"],
+            },
+            "campus": {
+                "identity_role": ["校园观察员", "社团组织者", "图书馆常客", "课程助教", "寝室协调者", "活动志愿者"],
+                "routine_goal": ["完成学习任务", "组织活动", "建立同伴关系", "观察校园秩序", "帮助新成员", "平衡压力"],
+            },
+        }
+    else:
+        base = {
+            "identity_role": ["community observer", "daily-life coordinator", "rules steward", "relationship bridge", "quiet operator", "public-space participant"],
+            "identity_function": ["observe", "coordinate", "explore", "record", "care", "challenge", "repair", "connect"],
+            "appearance_form": ["clean human silhouette", "tall profile", "steady posture", "light movement", "low-key presence", "signature marker"],
+            "appearance_eyes": ["round eyes", "almond eyes", "smiling eyes", "narrow eyes", "deep-set eyes", "glowing eyes"],
+            "appearance_hair": ["short hair", "mid-length hair", "messy hair", "curly hair", "long straight hair", "neat styling"],
+            "appearance_style": ["academic", "commuter", "streetwear", "work uniform", "retro", "techwear", "home casual"],
+            "personality_core": ["calm observer", "warm caretaker", "energetic initiator", "rational analyst", "curious experimenter", "stable rule-keeper"],
+            "personality_social": ["recharges alone", "close with familiar people", "breaks the ice", "broad connector", "polite distance", "team center"],
+            "personality_decision": ["data-first", "intuitive judgment", "consensus-seeking", "fast trial-and-error", "rule-guided", "values-driven"],
+            "personality_mood": ["calm and restrained", "warm and soft", "high-energy", "sensitive and subtle", "relaxed humor", "serious focus"],
+            "routine_goal": ["learn and grow", "build relationships", "finish tasks", "explore the community", "help others", "influence the group", "keep stability"],
+            "routine_habit": ["early planner", "night-idea maker", "steady commuter", "free roamer", "socially dense", "quietly stationed"],
+            "relationship_style": ["slow to warm", "actively invites", "mutual help", "friendly rivalry", "caretaking", "clear boundaries", "mentor-like"],
+        }
+        overlays = {
+            "mecha": {
+                "identity_role": ["mechanical life resident", "orbital commuter", "public transit guardian", "moon-task liaison", "disguised engineer", "city maintainer"],
+                "appearance_form": ["humanoid mech", "train-disguise form", "titanium armor", "white aerospace shell", "folding wheel assembly", "moon-dust scratches"],
+                "appearance_eyes": ["blue optic lens", "dual optic lamps", "narrow scanner slit", "soft glowing eyes", "alert red light", "clear visor"],
+                "appearance_style": ["aerospace workwear", "rail transit uniform", "industrial maintenance", "low-key disguise", "silver-black techwear", "old city train livery"],
+                "personality_core": ["reliable executor", "silent guardian", "procedural humorist", "careful adapter", "mission-driven", "socially anxious but dependable"],
+                "routine_goal": ["maintain order", "complete remote tasks", "understand human commuting", "protect public space", "learn social rules", "fit into the community"],
+            },
+            "fantasy": {
+                "identity_role": ["hidden resident", "night recorder", "old-pact keeper", "community herbalist", "rain-day visitor", "library guest"],
+                "appearance_form": ["elegant human form", "classic silhouette", "dark shawl", "silver accessory", "soft shimmer", "otherworldly presence"],
+                "personality_core": ["restrained romantic", "odd rule-keeper", "gentle bystander", "slow-warm guardian", "curious collector", "politely distant"],
+                "routine_goal": ["hide identity", "honor a promise", "collect stories", "learn modern life", "maintain old ties", "avoid disturbing others"],
+            },
+            "campus": {
+                "identity_role": ["campus observer", "club organizer", "library regular", "teaching assistant", "dorm coordinator", "event volunteer"],
+                "routine_goal": ["finish study work", "organize activities", "build peer relationships", "observe campus order", "help new members", "balance pressure"],
+            },
+        }
+    merged = {key: list(value) for key, value in base.items()}
+    for key, values in overlays.get(theme, {}).items():
+        merged[key] = values + [item for item in merged.get(key, []) if item not in values]
+    return merged
+
+
+def _studio_group_titles(zh: bool) -> dict[str, tuple[str, str, bool]]:
+    if zh:
+        return {
+            "identity_role": ("身份", "identity", True),
+            "identity_function": ("行动定位", "identity", True),
+            "appearance_form": ("整体形态", "appearance", True),
+            "appearance_eyes": ("眼睛", "appearance", True),
+            "appearance_hair": ("发型", "appearance", True),
+            "appearance_style": ("穿搭", "appearance", True),
+            "personality_core": ("基础性格", "personality", True),
+            "personality_social": ("社交方式", "personality", True),
+            "personality_decision": ("决策方式", "personality", True),
+            "personality_mood": ("情绪底色", "personality", True),
+            "routine_goal": ("日常目标", "daily", True),
+            "routine_habit": ("作息习惯", "daily", True),
+            "relationship_style": ("关系习惯", "daily", True),
+            "initial_location": ("初始地点", "daily", False),
+        }
+    return {
+        "identity_role": ("Role", "identity", True),
+        "identity_function": ("Function", "identity", True),
+        "appearance_form": ("Overall Form", "appearance", True),
+        "appearance_eyes": ("Eyes", "appearance", True),
+        "appearance_hair": ("Hair", "appearance", True),
+        "appearance_style": ("Outfit", "appearance", True),
+        "personality_core": ("Core Personality", "personality", True),
+        "personality_social": ("Social Style", "personality", True),
+        "personality_decision": ("Decision Style", "personality", True),
+        "personality_mood": ("Emotional Tone", "personality", True),
+        "routine_goal": ("Daily Goal", "daily", True),
+        "routine_habit": ("Routine Rhythm", "daily", True),
+        "relationship_style": ("Relationship Habit", "daily", True),
+        "initial_location": ("Initial Location", "daily", False),
+    }
+
+
+def _studio_location_options(request: AgentStudioGenerateRequest) -> list[AgentStudioOption]:
+    locations = request.map_locations or _map_locations_for_status(request.map_id)
+    options: list[AgentStudioOption] = []
+    for index, item in enumerate(locations):
+        if not isinstance(item, dict) or not item.get("id"):
+            continue
+        location_id = str(item["id"])
+        name = str(item.get("name") or location_id)
+        options.append(
+            AgentStudioOption(
+                id=location_id,
+                label=f"{name} ({location_id})",
+                description=", ".join(str(value) for value in item.get("interaction_ids", []) or []) or None,
+            )
+        )
+        if index >= 11:
+            break
+    if not options:
+        options.append(AgentStudioOption(id="park", label="Park (park)" if not _language_is_zh(request.language) else "公园 (park)"))
+    return options
+
+
+def _studio_existing_names(existing_agents: list[dict[str, Any]]) -> set[str]:
+    names: set[str] = set()
+    for agent in existing_agents:
+        if not isinstance(agent, dict):
+            continue
+        kwargs = agent.get("kwargs")
+        if not isinstance(kwargs, dict):
+            continue
+        profile = kwargs.get("profile") if isinstance(kwargs.get("profile"), dict) else {}
+        name = str(kwargs.get("name") or profile.get("name") or "").strip()
+        if name:
+            names.add(name)
+    return names
+
+
+def _studio_name(theme: str, seed: str, zh: bool, existing_names: set[str]) -> str:
+    if zh:
+        candidates = {
+            "mecha": ["月轨", "银岚", "轨星", "钛衡"],
+            "fantasy": ["雾白", "林烛", "夜澜", "银枝"],
+            "campus": ["许知行", "林若晨", "周安然", "沈知夏"],
+            "grounded": _ZH_NAMES,
+        }.get(theme, _ZH_NAMES)
+    else:
+        candidates = {
+            "mecha": ["Orbit Prime", "Luna Rail", "Silver Gauge", "Titan Vale"],
+            "fantasy": ["Mira Noct", "Elias Vale", "Ivy Wren", "Selene Ash"],
+            "campus": ["Maya Lin", "Owen Chen", "Nora Hale", "Iris Wang"],
+            "grounded": _EN_NAMES,
+        }.get(theme, _EN_NAMES)
+    for name in _studio_rotate(list(candidates), seed, "name", len(candidates)):
+        if name not in existing_names:
+            return name
+    return f"{candidates[0]} {len(existing_names) + 1}"
+
+
+def _selected_location_label(options: list[AgentStudioOption], selected_location: str) -> str:
+    for option in options:
+        if option.id == selected_location:
+            return option.label
+    return selected_location
+
+
+def _agent_studio_response(request: AgentStudioGenerateRequest) -> AgentStudioGenerateResponse:
+    zh = _language_is_zh(request.language)
+    background = str(request.experiment_context.get("background") or request.experiment_context.get("world_setting") or "")
+    source_prompt = str(request.source.get("prompt") or "").strip()
+    mbti = str(request.source.get("mbti") or "").strip().upper()
+    photo_name = str(request.source.get("photo_name") or "").strip()
+    round_seed = str(request.source.get("round") or "")
+    seed = "\n".join([background, source_prompt, mbti, photo_name, round_seed])
+    theme = _studio_detect_theme(seed)
+    option_sets = _studio_options_for_theme(theme, zh)
+    titles = _studio_group_titles(zh)
+    groups: list[AgentStudioGroup] = []
+    selected: dict[str, str] = {}
+
+    for group_id, (title, step, allow_custom) in titles.items():
+        if group_id == "initial_location":
+            options = _studio_location_options(request)
+            valid_ids = {option.id for option in options}
+            locked = request.locked_choices.get(group_id)
+            selected[group_id] = locked if locked in valid_ids else options[0].id
+            groups.append(AgentStudioGroup(id=group_id, title=title, step=step, allow_custom=False, options=options))
+            continue
+
+        labels = _studio_rotate(option_sets.get(group_id, []), seed, group_id, 5)
+        custom = str(request.custom_choices.get(group_id) or "").strip()
+        locked = str(request.locked_choices.get(group_id) or custom or "").strip()
+        if locked and locked not in labels:
+            labels = [locked] + labels
+        elif custom and custom not in labels:
+            labels = [custom] + labels
+        options = [
+            AgentStudioOption(id=_studio_slug(label, f"{group_id}_{index}"), label=label)
+            for index, label in enumerate(labels[:6])
+        ]
+        selected[group_id] = locked or (options[0].label if options else "")
+        groups.append(AgentStudioGroup(id=group_id, title=title, step=step, allow_custom=allow_custom, options=options))
+
+    existing_names = _studio_existing_names(request.existing_agents)
+    location_options = next((group.options for group in groups if group.id == "initial_location"), [])
+    initial_location = selected.get("initial_location") or (location_options[0].id if location_options else "park")
+    location_label = _selected_location_label(location_options, initial_location)
+    name = _studio_name(theme, seed, zh, existing_names)
+    role = selected.get("identity_role") or ("参与者" if zh else "participant")
+    function = selected.get("identity_function") or ("观察" if zh else "observe")
+    core = selected.get("personality_core") or ""
+    social = selected.get("personality_social") or ""
+    decision = selected.get("personality_decision") or ""
+    mood = selected.get("personality_mood") or ""
+    goal = selected.get("routine_goal") or ""
+    habit = selected.get("routine_habit") or ""
+    relation = selected.get("relationship_style") or ""
+
+    if zh:
+        persona = f"{core}，{social}，倾向于{decision}，情绪底色是{mood}。会把“{source_prompt or role}”作为当前实验中的自然角色来生活。"
+        daily = f"{habit}，常在{location_label}附近活动，围绕“{goal}”安排自己的日常。"
+        relationships = f"与他人的关系习惯是{relation}；会根据当前实验背景和已有居民反应调整互动方式。"
+        constraints = "只能使用当前地图已有地点行动；不创建地图外地点，所有离谱设定都作为当前实验世界内的正常角色表达。"
+    else:
+        persona = f"{core}; {social}; tends toward {decision}; emotional tone: {mood}. Treats '{source_prompt or role}' as a normal role inside the current experiment."
+        daily = f"{habit}; usually acts around {location_label} and organizes the day around '{goal}'."
+        relationships = f"Relationship habit: {relation}; adapts to the current scenario and other residents' reactions."
+        constraints = "Use only locations available on the current map; do not create off-map places. Unusual concepts are expressed as normal roles inside this experiment."
+
+    profile_patch = {
+        "name": name,
+        "role": role,
+        "persona": persona,
+        "daily_routine": daily,
+        "relationships": relationships,
+        "goal": goal,
+        "constraints": constraints,
+        "scenario": background[:1200],
+        "scenario_role": function,
+        "appearance": {
+            "form": selected.get("appearance_form"),
+            "eyes": selected.get("appearance_eyes"),
+            "hair": selected.get("appearance_hair"),
+            "style": selected.get("appearance_style"),
+            "photo_reference": photo_name or None,
+        },
+        "personality": {
+            "core": core,
+            "social": social,
+            "decision": decision,
+            "mood": mood,
+        },
+        "routine": {
+            "goal": goal,
+            "habit": habit,
+            "relationship_style": relation,
+            "initial_location": initial_location,
+            "initial_location_label": location_label,
+        },
+        "agent_studio": {
+            "source": request.source,
+            "selected_choices": selected,
+            "custom_choices": request.custom_choices,
+            "theme": theme,
+            "map_id": request.map_id,
+        },
+    }
+    if mbti:
+        profile_patch["mbti"] = mbti
+
+    warnings: list[str] = []
+    if photo_name:
+        warnings.append("Photo is stored as a reference in v1; image-based character art generation is not enabled in this endpoint.")
+    return AgentStudioGenerateResponse(
+        groups=groups,
+        selected_choices=selected,
+        profile_patch=profile_patch,
+        initial_location=initial_location,
+        warnings=warnings,
+    )
 
 
 def _scenario_templates(background: str, language: str) -> list[dict[str, Any]]:
@@ -1177,6 +1536,13 @@ async def generate_draft(request: GenerateDraftRequest) -> dict[str, Any]:
     draft = _normalize_draft(raw, request.basics)
     _write_latest_draft(request.basics, draft)
     return draft
+
+
+@router.post("/agent-studio/generate", response_model=AgentStudioGenerateResponse)
+async def generate_agent_studio_options(
+    request: AgentStudioGenerateRequest,
+) -> AgentStudioGenerateResponse:
+    return _agent_studio_response(request)
 
 
 @router.post("/publish")
