@@ -31,7 +31,7 @@ import {
 } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import RootLayout from '../../Layout';
+import LanguageToggle from '../../components/LanguageToggle';
 import { fetchCustom } from '../../components/fetch';
 import { AgentEditorModal, type AgentEditorSaveMeta, type AgentStudioLocation } from './AgentEditorModal';
 import {
@@ -40,6 +40,7 @@ import {
     type AgentFormValues,
     type AgentRecord,
 } from './agentEditor';
+import './agentStudio.css';
 
 const { Text, Paragraph } = Typography;
 
@@ -77,6 +78,7 @@ type AgentBuilderPanelProps = {
     initialExperimentId?: string;
     embedded?: boolean;
     autoLoad?: boolean;
+    autoSaveOnAgentSave?: boolean;
     onSaved?: () => void | Promise<void>;
 };
 
@@ -191,6 +193,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
     initialExperimentId,
     embedded = false,
     autoLoad = false,
+    autoSaveOnAgentSave = false,
     onSaved,
 }) => {
     const { t } = useTranslation();
@@ -291,14 +294,14 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [autoLoad]);
 
-    const saveConfig = async () => {
-        if (!config) return;
+    const persistConfig = async (targetConfig: InitConfigPayload | null = config) => {
+        if (!targetConfig) return false;
         setSaving(true);
         try {
             const response = await fetchCustom(`${endpointBase}/init?${query}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(config),
+                body: JSON.stringify(targetConfig),
             });
             if (!response.ok) {
                 throw new Error(await response.text());
@@ -310,11 +313,18 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
             setMapId(payload.map_id || mapId);
             setMapLocations(payload.map_locations || mapLocations);
             message.success(t('agentBuilder.messages.saved'));
-            await onSaved?.();
+            return true;
         } catch (error) {
             message.error(t('agentBuilder.messages.saveFailed', { error: error instanceof Error ? error.message : String(error) }));
+            return false;
         } finally {
             setSaving(false);
+        }
+    };
+
+    const saveConfig = async () => {
+        if (await persistConfig()) {
+            await onSaved?.();
         }
     };
 
@@ -382,7 +392,16 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
         const nextAgents = editingAgentId === null
             ? [...agents, agent]
             : agents.map((item) => item.agent_id === editingAgentId ? agent : item);
-        setConfig(syncEnvForAgents(config, nextAgents, agent, meta));
+        const nextConfig = syncEnvForAgents(config, nextAgents, agent, meta);
+        if (autoSaveOnAgentSave) {
+            if (!(await persistConfig(nextConfig))) {
+                return;
+            }
+            setAgentModalOpen(false);
+            await onSaved?.();
+            return;
+        }
+        setConfig(nextConfig);
         setAgentModalOpen(false);
     };
 
@@ -541,6 +560,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                     title={t('agentBuilder.title')}
                     extra={
                         <Space wrap>
+                            <LanguageToggle />
                             <Button icon={<FolderOpenOutlined />} onClick={loadConfig} loading={loading}>
                                 {t('agentBuilder.actions.load')}
                             </Button>
@@ -714,11 +734,9 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
     }
 
     return (
-        <RootLayout selectedKey="/agent-builder">
-            <div style={{ padding: 24, overflowX: 'hidden' }}>
-                {content}
-            </div>
-        </RootLayout>
+        <div className="agent-builder-page">
+            {content}
+        </div>
     );
 };
 

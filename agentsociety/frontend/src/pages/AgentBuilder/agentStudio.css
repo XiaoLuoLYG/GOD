@@ -1,3 +1,10 @@
+.agent-builder-page {
+    min-height: 100vh;
+    padding: 24px;
+    overflow-x: hidden;
+    background: #fff;
+}
+
 .agent-studio {
     min-height: 540px;
 }
