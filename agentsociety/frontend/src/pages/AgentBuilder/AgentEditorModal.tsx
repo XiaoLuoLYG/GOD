@@ -21,8 +21,10 @@ import {
     BgColorsOutlined,
     CheckCircleOutlined,
     ExperimentOutlined,
+    PictureOutlined,
     ReloadOutlined,
     RobotOutlined,
+    UploadOutlined,
     UserOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -42,6 +44,7 @@ export type AgentStudioLocation = {
     id: string;
     name: string;
     aliases?: string[];
+    localized?: Record<string, Record<string, unknown>>;
     interaction_ids?: string[];
 };
 
@@ -86,6 +89,17 @@ type StudioGenerateResponse = {
     profile_patch: Record<string, any>;
     initial_location: string;
     warnings?: string[];
+    character_asset?: CharacterAsset | null;
+};
+
+type CharacterAsset = {
+    sprite_name: string;
+    filename: string;
+    image_url: string;
+    frame_width: number;
+    frame_height: number;
+    source_photo_name?: string | null;
+    generated_from_photo?: boolean;
 };
 
 const stepKeys = ['seed', 'identity', 'appearance', 'personality', 'daily', 'review'] as const;
@@ -112,6 +126,17 @@ const valueForOption = (group: StudioGroup, option: StudioOption) => (
     group.id === 'initial_location' ? option.id : option.label
 );
 
+const withPersistentChoice = (group: StudioGroup, value: string) => {
+    const choice = value.trim();
+    if (!choice) return group;
+    const exists = group.options.some((option) => valueForOption(group, option) === choice);
+    if (exists) return group;
+    return {
+        ...group,
+        options: [{ id: `selected_${group.id}`, label: choice }, ...group.options],
+    };
+};
+
 const labelForChoice = (group: StudioGroup | undefined, value: string) => {
     if (!group) return value;
     return group.options.find((option) => valueForOption(group, option) === value)?.label || value;
@@ -124,6 +149,45 @@ const firstLocationId = (locations: AgentStudioLocation[], fallback?: string) =>
 const shortText = (value: unknown, max = 180) => {
     const text = String(value || '').trim();
     return text.length > max ? `${text.slice(0, max)}...` : text;
+};
+
+const knownContextText: Record<string, Record<'en' | 'zh', string>> = {
+    '上帝模式小镇 · 维尔普通工作日': {
+        en: 'GOD Town · The Ville Ordinary Workday',
+        zh: '上帝模式小镇 · 维尔普通工作日',
+    },
+    '晚春的一个工作日清晨 8:20。维尔小镇是一个 200 多人的小镇，10 位常住居民彼此熟识但不黏腻。天气晴朗微风，温度 18 摄氏度。镇上没有突发事件，是一段反映自然节奏的日常切片。': {
+        en: 'A late-spring weekday morning at 8:20. The Ville is a town of just over 200 people, where 10 standing residents know one another well without being clingy. The weather is sunny with a light breeze at 18°C. Nothing unusual is happening in town; this is a natural slice of everyday life.',
+        zh: '晚春的一个工作日清晨 8:20。维尔小镇是一个 200 多人的小镇，10 位常住居民彼此熟识但不黏腻。天气晴朗微风，温度 18 摄氏度。镇上没有突发事件，是一段反映自然节奏的日常切片。',
+    },
+    '北大校园日常观察': {
+        en: 'PKU Campus Daily Observation',
+        zh: '北大校园日常观察',
+    },
+    '2026-05-15，北京大学燕园。现在是一个普通周五上午，校园居民只知道自己的课程、科研、食堂、社团、宿舍和日常安排。后续公共事件只有在校内通知出现后才进入角色认知。': {
+        en: 'May 15, 2026, Peking University Yanyuan. It is an ordinary Friday morning. Campus residents only know about their classes, research, canteens, clubs, dorms, and daily routines. Later public events enter character awareness only after an official campus notice appears.',
+        zh: '2026-05-15，北京大学燕园。现在是一个普通周五上午，校园居民只知道自己的课程、科研、食堂、社团、宿舍和日常安排。后续公共事件只有在校内通知出现后才进入角色认知。',
+    },
+};
+
+const localeKey = (language: string): 'en' | 'zh' => (language.startsWith('en') ? 'en' : 'zh');
+
+const localizedContextValue = (
+    context: Record<string, any>,
+    field: 'title' | 'background' | 'world_setting',
+    language: string,
+) => {
+    const locale = localeKey(language);
+    const localized = context.localized?.[locale]?.[field];
+    const raw = String(localized || context[field] || '').trim();
+    return knownContextText[raw]?.[locale] || raw;
+};
+
+const absoluteAssetUrl = (url?: string) => {
+    if (!url) return '';
+    if (/^https?:\/\//i.test(url)) return url;
+    const base = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+    return `${base}${url.startsWith('/') ? url : `/${url}`}`;
 };
 
 export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
@@ -151,6 +215,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
     const [sourcePrompt, setSourcePrompt] = useState('');
     const [mbti, setMbti] = useState('');
     const [photoName, setPhotoName] = useState('');
+    const [characterAsset, setCharacterAsset] = useState<CharacterAsset | null>(null);
     const [groups, setGroups] = useState<StudioGroup[]>([]);
     const [selectedChoices, setSelectedChoices] = useState<Record<string, string>>({});
     const [customChoices, setCustomChoices] = useState<Record<string, string>>({});
@@ -160,6 +225,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
     const [customEditingGroup, setCustomEditingGroup] = useState<string | null>(null);
     const [customText, setCustomText] = useState('');
     const [generating, setGenerating] = useState(false);
+    const [characterGenerating, setCharacterGenerating] = useState(false);
     const [generationRound, setGenerationRound] = useState(0);
     const [warnings, setWarnings] = useState<string[]>([]);
     const [autoGeneratePending, setAutoGeneratePending] = useState(false);
@@ -174,8 +240,9 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         return map;
     }, [groups]);
 
-    const contextTitle = String(experimentContext.title || copy('currentExperiment'));
-    const contextBackground = String(experimentContext.background || experimentContext.world_setting || '');
+    const contextTitle = localizedContextValue(experimentContext, 'title', i18n.language) || copy('currentExperiment');
+    const contextBackground = localizedContextValue(experimentContext, 'background', i18n.language)
+        || localizedContextValue(experimentContext, 'world_setting', i18n.language);
     const selectedLocationLabel = labelForChoice(groupById.get('initial_location'), initialLocationValue);
 
     const applyProfilePatch = (
@@ -183,6 +250,8 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         nextSelected: Record<string, string>,
         nextCustom: Record<string, string>,
         nextGroups: StudioGroup[],
+        nextCharacterAsset: CharacterAsset | null = characterAsset,
+        nextPhotoName = photoName,
         nextName = name,
     ) => {
         const currentProfile = safeParseObject(profileJsonText, {});
@@ -197,12 +266,14 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                 source: {
                     prompt: sourcePrompt,
                     mbti,
-                    photo_name: photoName,
+                    photo_name: nextPhotoName,
+                    character_asset: nextCharacterAsset,
                 },
                 selected_choices: nextSelected,
                 custom_choices: nextCustom,
                 groups: nextGroups,
                 map_id: mapId,
+                character_asset: nextCharacterAsset,
             },
         };
         setProfileJsonText(jsonStringify(nextProfile));
@@ -212,6 +283,8 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         nextSelected: Record<string, string>,
         nextCustom: Record<string, string>,
         nextGroups = groups,
+        nextCharacterAsset: CharacterAsset | null = characterAsset,
+        nextPhotoName = photoName,
     ) => {
         const label = (id: string) => labelForChoice(nextGroups.find((group) => group.id === id), nextSelected[id] || '');
         const role = label('identity_role') || 'participant';
@@ -249,7 +322,9 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                 eyes: label('appearance_eyes'),
                 hair: label('appearance_hair'),
                 style: label('appearance_style'),
-                photo_reference: photoName || undefined,
+                photo_reference: nextPhotoName || undefined,
+                character_asset: nextCharacterAsset || undefined,
+                character_sprite: nextCharacterAsset?.sprite_name,
             },
             personality: { core, social, decision, mood },
             routine: {
@@ -260,11 +335,12 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                 initial_location_label: location,
             },
             agent_studio: {
-                source: { prompt: sourcePrompt, mbti, photo_name: photoName },
+                source: { prompt: sourcePrompt, mbti, photo_name: nextPhotoName, character_asset: nextCharacterAsset },
                 selected_choices: nextSelected,
                 custom_choices: nextCustom,
                 groups: nextGroups,
                 map_id: mapId,
+                character_asset: nextCharacterAsset,
             },
         };
     };
@@ -273,6 +349,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         nextRound = generationRound,
         lockedChoices = selectedChoices,
         nextCustom = customChoices,
+        rerollGroupId?: string,
     ) => {
         setGenerating(true);
         try {
@@ -289,7 +366,9 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                         prompt: sourcePrompt,
                         mbti,
                         photo_name: photoName,
+                        character_asset: characterAsset,
                         round: nextRound,
+                        reroll_group: rerollGroupId,
                     },
                     locked_choices: lockedChoices,
                     custom_choices: nextCustom,
@@ -299,26 +378,55 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                 throw new Error(await response.text());
             }
             const payload = await response.json() as StudioGenerateResponse;
-            const nextGroups = payload.groups || [];
-            const nextSelected = {
-                ...payload.selected_choices,
-                ...Object.fromEntries(
-                    Object.entries(lockedChoices).filter(([key, value]) => value && key !== 'initial_location')
-                ),
-            };
+            const generatedGroups = payload.groups || [];
+            const rerolledGroup = rerollGroupId ? generatedGroups.find((group) => group.id === rerollGroupId) : undefined;
+            const rerolledDefault = rerolledGroup?.options?.[0]
+                ? valueForOption(rerolledGroup, rerolledGroup.options[0])
+                : '';
+            const rerolledSelection = rerollGroupId
+                ? selectedChoices[rerollGroupId] || payload.selected_choices?.[rerollGroupId] || rerolledDefault
+                : '';
+            const nextRerolledGroup = rerolledGroup && rerolledSelection
+                ? withPersistentChoice(rerolledGroup, rerolledSelection)
+                : rerolledGroup;
+            const nextGroups = rerollGroupId
+                ? groups.map((group) => (group.id === rerollGroupId ? nextRerolledGroup || group : group))
+                : generatedGroups;
+            const nextSelected = rerollGroupId
+                ? {
+                    ...selectedChoices,
+                    [rerollGroupId]: rerolledSelection,
+                }
+                : {
+                    ...payload.selected_choices,
+                    ...Object.fromEntries(
+                        Object.entries(lockedChoices).filter(([key, value]) => value && key !== 'initial_location')
+                    ),
+                };
             const nextInitialLocation = payload.initial_location || nextSelected.initial_location || firstLocationId(mapLocations, defaultInitialLocation);
             nextSelected.initial_location = nextInitialLocation;
             setGroups(nextGroups);
             setSelectedChoices(nextSelected);
             setInitialLocationValue(nextInitialLocation);
             setWarnings(payload.warnings || []);
+            if (payload.character_asset) {
+                setCharacterAsset(payload.character_asset);
+            }
             const generatedName = String(payload.profile_patch?.name || '').trim();
             const shouldAdoptName = !editingAgentId || !name || /^Agent[_\s]\d+$|^Jiuwen Agent \d+$/i.test(name);
             const nextName = shouldAdoptName && generatedName ? generatedName : name;
             if (nextName !== name) {
                 setName(nextName);
             }
-            applyProfilePatch(payload.profile_patch || {}, nextSelected, nextCustom, nextGroups, nextName);
+            applyProfilePatch(
+                rerollGroupId ? patchFromSelections(nextSelected, nextCustom, nextGroups, payload.character_asset || characterAsset) : (payload.profile_patch || {}),
+                nextSelected,
+                nextCustom,
+                nextGroups,
+                payload.character_asset || characterAsset,
+                photoName,
+                nextName,
+            );
             message.success(copy('generated'));
         } catch (error) {
             message.error(copy('generateFailed', { error: error instanceof Error ? error.message : String(error) }));
@@ -333,6 +441,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         const profile = safeParseObject(values.profile_json || '{}', {});
         const kwargs = safeParseObject(values.kwargs_json || '{}', {});
         const studio = profile.agent_studio || {};
+        const nextCharacterAsset = studio.character_asset || studio.source?.character_asset || profile.appearance?.character_asset || null;
         const nextSelected = {
             ...(studio.selected_choices || {}),
             initial_location: initialLocation || studio.selected_choices?.initial_location || profile.routine?.initial_location || firstLocationId(mapLocations, defaultInitialLocation),
@@ -347,6 +456,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         setSourcePrompt(String(studio.source?.prompt || ''));
         setMbti(String(profile.mbti || studio.source?.mbti || ''));
         setPhotoName(String(studio.source?.photo_name || profile.appearance?.photo_reference || ''));
+        setCharacterAsset(nextCharacterAsset);
         setSelectedChoices(nextSelected);
         setCustomChoices(nextCustom);
         setGroups(nextGroups);
@@ -366,6 +476,35 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         // Wait for the modal-open initialization state to settle before auto-generating.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, autoGeneratePending]);
+
+    const uploadCharacterPhoto = async (file: File) => {
+        setPhotoName(file.name);
+        setCharacterGenerating(true);
+        try {
+            const data = new FormData();
+            data.append('file', file);
+            data.append('map_id', mapId);
+            data.append('agent_name', name || `Agent ${agentId}`);
+            data.append('prompt', sourcePrompt);
+            data.append('mbti', mbti);
+            const response = await fetchCustom('/api/v1/god/setup/agent-studio/character', {
+                method: 'POST',
+                body: data,
+            });
+            if (!response.ok) {
+                throw new Error(await response.text());
+            }
+            const nextAsset = await response.json() as CharacterAsset;
+            setCharacterAsset(nextAsset);
+            const nextPatch = patchFromSelections(selectedChoices, customChoices, groups, nextAsset, file.name);
+            applyProfilePatch(nextPatch, selectedChoices, customChoices, groups, nextAsset, file.name);
+            message.success(copy('characterGenerated'));
+        } catch (error) {
+            message.error(copy('characterFailed', { error: error instanceof Error ? error.message : String(error) }));
+        } finally {
+            setCharacterGenerating(false);
+        }
+    };
 
     const selectChoice = (group: StudioGroup, value: string) => {
         const nextSelected = { ...selectedChoices, [group.id]: value };
@@ -403,10 +542,13 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         applyProfilePatch(patchFromSelections(nextSelected, nextCustom, nextGroups), nextSelected, nextCustom, nextGroups);
     };
 
-    const rerollOptions = async () => {
+    const rerollOptions = async (groupId?: string) => {
         const nextRound = generationRound + 1;
         setGenerationRound(nextRound);
-        await requestGeneration(nextRound, selectedChoices, customChoices);
+        const lockedChoices = groupId
+            ? Object.fromEntries(Object.entries(selectedChoices).filter(([key]) => key !== groupId))
+            : selectedChoices;
+        await requestGeneration(nextRound, lockedChoices, customChoices, groupId);
     };
 
     const submitAgent = async () => {
@@ -431,6 +573,51 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         } catch (error) {
             message.error(error instanceof Error ? error.message : t('agentBuilder.editor.invalidForm'));
         }
+    };
+
+    const renderCharacterPreview = (compact = false) => {
+        const role = labelForChoice(groupById.get('identity_role'), selectedChoices.identity_role || '');
+        const core = labelForChoice(groupById.get('personality_core'), selectedChoices.personality_core || '');
+        const form = labelForChoice(groupById.get('appearance_form'), selectedChoices.appearance_form || '');
+        return (
+            <div className={`agent-studio-preview-card ${compact ? 'compact' : ''}`}>
+                <div className="agent-studio-preview-header">
+                    <Space size={6}>
+                        <PictureOutlined />
+                        <Text strong>{copy('previewTitle')}</Text>
+                    </Space>
+                    {characterGenerating && <Tag color="blue">{copy('generatingCharacter')}</Tag>}
+                </div>
+                <div className="agent-studio-preview-body">
+                    {characterAsset ? (
+                        <img
+                            className="agent-studio-sprite-preview"
+                            src={absoluteAssetUrl(characterAsset.image_url)}
+                            alt={copy('characterAlt')}
+                        />
+                    ) : (
+                        <div className="agent-studio-preview-placeholder" aria-label={copy('characterAlt')}>
+                            <span className="agent-studio-preview-head" />
+                            <span className="agent-studio-preview-body-shape" />
+                            <span className="agent-studio-preview-leg left" />
+                            <span className="agent-studio-preview-leg right" />
+                        </div>
+                    )}
+                    <div className="agent-studio-preview-copy">
+                        <Text strong>{name || copy('unnamed')}</Text>
+                        <Space wrap size={[6, 6]}>
+                            {role && <Tag color="blue">{role}</Tag>}
+                            {core && <Tag color="purple">{core}</Tag>}
+                            {form && <Tag>{form}</Tag>}
+                            {selectedLocationLabel && <Tag color="green">{selectedLocationLabel}</Tag>}
+                        </Space>
+                        <Text type="secondary">
+                            {characterAsset ? copy('spriteReady', { file: characterAsset.filename }) : copy('previewEmpty')}
+                        </Text>
+                    </div>
+                </div>
+            </div>
+        );
     };
 
     const renderSeedStep = () => (
@@ -474,13 +661,14 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                     <Form.Item label={copy('photoReference')}>
                         <Upload
                             beforeUpload={(file) => {
-                                setPhotoName(file.name);
+                                void uploadCharacterPhoto(file);
                                 return false;
                             }}
                             showUploadList={false}
                             maxCount={1}
+                            accept="image/*"
                         >
-                            <Button>{photoName || copy('choosePhoto')}</Button>
+                            <Button icon={<UploadOutlined />} loading={characterGenerating}>{photoName || copy('choosePhoto')}</Button>
                         </Upload>
                     </Form.Item>
                     <Form.Item label=" ">
@@ -498,6 +686,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                     <Tag color="blue">{mapId}</Tag>
                     <Tag>{copy('locationCount', { count: mapLocations.length })}</Tag>
                 </Space>
+                {renderCharacterPreview(true)}
                 {warnings.map((warning) => (
                     <Alert key={warning} type="info" showIcon message={warning} style={{ marginTop: 10 }} />
                 ))}
@@ -512,7 +701,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                 <div className="agent-studio-choice-header">
                     <Text strong>{group.title}</Text>
                     <Tooltip title={copy('rerollTooltip')}>
-                        <Button size="small" icon={<ReloadOutlined />} onClick={rerollOptions} loading={generating} />
+                        <Button size="small" icon={<ReloadOutlined />} onClick={() => rerollOptions(group.id)} loading={generating} />
                     </Tooltip>
                 </div>
                 <div className="agent-studio-choice-list">
@@ -565,7 +754,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         <>
             <div className="agent-studio-stepbar">
                 <Text type="secondary">{copy('pickHint')}</Text>
-                <Button icon={<ReloadOutlined />} onClick={rerollOptions} loading={generating}>{copy('reroll')}</Button>
+                <Button icon={<ReloadOutlined />} onClick={() => rerollOptions()} loading={generating}>{copy('reroll')}</Button>
             </div>
             <div className="agent-studio-choice-grid">
                 {visibleGroups.map(renderChoiceGroup)}
@@ -575,13 +764,21 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
 
     const renderReviewStep = () => (
         <div className="agent-studio-review">
-            <div className="agent-studio-review-summary">
-                <Text strong>{name || copy('unnamed')}</Text>
-                <Space wrap>
-                    <Tag color="blue">{labelForChoice(groupById.get('identity_role'), selectedChoices.identity_role || '')}</Tag>
-                    <Tag color="purple">{labelForChoice(groupById.get('personality_core'), selectedChoices.personality_core || '')}</Tag>
-                    <Tag color="green">{selectedLocationLabel}</Tag>
-                </Space>
+            <div className="agent-studio-review-grid">
+                {renderCharacterPreview()}
+                <div className="agent-studio-review-summary">
+                    <div>
+                        <Text strong>{name || copy('unnamed')}</Text>
+                        <Paragraph type="secondary" style={{ marginBottom: 0 }}>
+                            {shortText(safeParseObject(profileJsonText, {}).persona || copy('noPreviewPersona'), 180)}
+                        </Paragraph>
+                    </div>
+                    <Space wrap>
+                        <Tag color="blue">{labelForChoice(groupById.get('identity_role'), selectedChoices.identity_role || '')}</Tag>
+                        <Tag color="purple">{labelForChoice(groupById.get('personality_core'), selectedChoices.personality_core || '')}</Tag>
+                        <Tag color="green">{selectedLocationLabel}</Tag>
+                    </Space>
+                </div>
             </div>
             <Collapse
                 ghost

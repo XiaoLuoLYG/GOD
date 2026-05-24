@@ -15,6 +15,7 @@
 .agent-studio-main,
 .agent-studio-side,
 .agent-studio-choice-group,
+.agent-studio-preview-card,
 .agent-studio-review-summary {
     border: 1px solid #e5e7eb;
     border-radius: 8px;
@@ -133,6 +134,122 @@
     gap: 12px;
 }
 
+.agent-studio-preview-card {
+    padding: 12px;
+}
+
+.agent-studio-side .agent-studio-preview-card {
+    margin-top: 12px;
+}
+
+.agent-studio-preview-header,
+.agent-studio-preview-body,
+.agent-studio-review-grid {
+    display: flex;
+    gap: 12px;
+}
+
+.agent-studio-preview-header {
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.agent-studio-preview-body {
+    align-items: center;
+}
+
+.agent-studio-preview-copy {
+    min-width: 0;
+    display: grid;
+    gap: 6px;
+}
+
+.agent-studio-sprite-preview,
+.agent-studio-preview-placeholder {
+    width: 96px;
+    height: 128px;
+    flex: 0 0 auto;
+    border: 1px solid #d9e1ee;
+    border-radius: 8px;
+    background:
+        linear-gradient(45deg, #f8fafc 25%, transparent 25%),
+        linear-gradient(-45deg, #f8fafc 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #f8fafc 75%),
+        linear-gradient(-45deg, transparent 75%, #f8fafc 75%);
+    background-color: #fff;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+    background-size: 16px 16px;
+}
+
+.agent-studio-sprite-preview {
+    object-fit: contain;
+    image-rendering: pixelated;
+}
+
+.agent-studio-preview-placeholder {
+    position: relative;
+    overflow: hidden;
+}
+
+.agent-studio-preview-head,
+.agent-studio-preview-body-shape,
+.agent-studio-preview-leg {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #2f6fed;
+    border: 2px solid #1f2937;
+}
+
+.agent-studio-preview-head {
+    top: 28px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #9cc2ff;
+}
+
+.agent-studio-preview-body-shape {
+    top: 58px;
+    width: 34px;
+    height: 38px;
+    border-radius: 8px 8px 6px 6px;
+}
+
+.agent-studio-preview-leg {
+    top: 94px;
+    width: 10px;
+    height: 22px;
+    border-radius: 4px;
+}
+
+.agent-studio-preview-leg.left {
+    margin-left: -9px;
+}
+
+.agent-studio-preview-leg.right {
+    margin-left: 9px;
+}
+
+.agent-studio-preview-card.compact .agent-studio-preview-body {
+    align-items: flex-start;
+}
+
+.agent-studio-preview-card.compact .agent-studio-sprite-preview,
+.agent-studio-preview-card.compact .agent-studio-preview-placeholder {
+    width: 72px;
+    height: 96px;
+}
+
+.agent-studio-review-grid {
+    align-items: stretch;
+}
+
+.agent-studio-review-grid .agent-studio-preview-card {
+    flex: 0 0 360px;
+}
+
 .agent-studio-review-summary {
     display: flex;
     justify-content: space-between;
@@ -144,9 +261,15 @@
 @media (max-width: 860px) {
     .agent-studio-grid,
     .agent-studio-choice-grid,
+    .agent-studio-review-grid,
     .agent-studio-field-row,
     .agent-studio-field-row.compact {
         grid-template-columns: 1fr;
+        display: grid;
+    }
+
+    .agent-studio-review-grid .agent-studio-preview-card {
+        flex-basis: auto;
     }
 
     .agent-studio-review-summary {

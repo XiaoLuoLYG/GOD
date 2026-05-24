@@ -7,17 +7,21 @@ import os
 import re
 import asyncio
 import hashlib
+import io
 import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 import json_repair
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
+from PIL import Image, ImageDraw
 
 from agentsociety2.config import extract_json
 from agentsociety2.backend.services.map_packages import (
@@ -27,6 +31,7 @@ from agentsociety2.backend.services.map_packages import (
     load_map_package,
     map_package_summary,
     relative_manifest_path,
+    safe_resolve,
 )
 from agentsociety2.society.models import InitConfig, StepsConfig
 
@@ -225,12 +230,23 @@ class AgentStudioGroup(BaseModel):
     options: list[AgentStudioOption] = Field(default_factory=list)
 
 
+class AgentStudioCharacterAsset(BaseModel):
+    sprite_name: str
+    filename: str
+    image_url: str
+    frame_width: int = 32
+    frame_height: int = 32
+    source_photo_name: str | None = None
+    generated_from_photo: bool = True
+
+
 class AgentStudioGenerateResponse(BaseModel):
     groups: list[AgentStudioGroup]
     selected_choices: dict[str, str]
     profile_patch: dict[str, Any]
     initial_location: str
     warnings: list[str] = Field(default_factory=list)
+    character_asset: AgentStudioCharacterAsset | None = None
 
 
 def _god_root() -> Path:
@@ -468,6 +484,49 @@ def _language_is_zh(language: str) -> bool:
     return not str(language or "").lower().startswith("en")
 
 
+def _locale_key(language: str) -> str:
+    return "zh" if _language_is_zh(language) else "en"
+
+
+_KNOWN_CONTEXT_TEXT: dict[str, dict[str, str]] = {
+    "上帝模式小镇 · 维尔普通工作日": {
+        "en": "GOD Town · The Ville Ordinary Workday",
+        "zh": "上帝模式小镇 · 维尔普通工作日",
+    },
+    "晚春的一个工作日清晨 8:20。维尔小镇是一个 200 多人的小镇，10 位常住居民彼此熟识但不黏腻。天气晴朗微风，温度 18 摄氏度。镇上没有突发事件，是一段反映自然节奏的日常切片。": {
+        "en": "A late-spring weekday morning at 8:20. The Ville is a town of just over 200 people, where 10 standing residents know one another well without being clingy. The weather is sunny with a light breeze at 18°C. Nothing unusual is happening in town; this is a natural slice of everyday life.",
+        "zh": "晚春的一个工作日清晨 8:20。维尔小镇是一个 200 多人的小镇，10 位常住居民彼此熟识但不黏腻。天气晴朗微风，温度 18 摄氏度。镇上没有突发事件，是一段反映自然节奏的日常切片。",
+    },
+    "北大校园日常观察": {
+        "en": "PKU Campus Daily Observation",
+        "zh": "北大校园日常观察",
+    },
+    "2026-05-15，北京大学燕园。现在是一个普通周五上午，校园居民只知道自己的课程、科研、食堂、社团、宿舍和日常安排。后续公共事件只有在校内通知出现后才进入角色认知。": {
+        "en": "May 15, 2026, Peking University Yanyuan. It is an ordinary Friday morning. Campus residents only know about their classes, research, canteens, clubs, dorms, and daily routines. Later public events enter character awareness only after an official campus notice appears.",
+        "zh": "2026-05-15，北京大学燕园。现在是一个普通周五上午，校园居民只知道自己的课程、科研、食堂、社团、宿舍和日常安排。后续公共事件只有在校内通知出现后才进入角色认知。",
+    },
+}
+
+
+def _localized_record_value(record: dict[str, Any], field: str, language: str) -> str | None:
+    localized = record.get("localized")
+    if isinstance(localized, dict):
+        language_values = localized.get(_locale_key(language))
+        if isinstance(language_values, dict):
+            value = language_values.get(field)
+            if value is not None and str(value).strip():
+                return str(value)
+    value = record.get(field)
+    return str(value) if value is not None and str(value).strip() else None
+
+
+def _localized_context_value(context: dict[str, Any], field: str, language: str) -> str:
+    value = _localized_record_value(context, field, language)
+    if value in _KNOWN_CONTEXT_TEXT:
+        return _KNOWN_CONTEXT_TEXT[value][_locale_key(language)]
+    return value or ""
+
+
 def _studio_slug(text: str, fallback: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9_]+", "_", text.strip().lower()).strip("_")
     return slug[:48] or fallback
@@ -619,7 +678,7 @@ def _studio_location_options(request: AgentStudioGenerateRequest) -> list[AgentS
         if not isinstance(item, dict) or not item.get("id"):
             continue
         location_id = str(item["id"])
-        name = str(item.get("name") or location_id)
+        name = _localized_record_value(item, "name", request.language) or location_id
         options.append(
             AgentStudioOption(
                 id=location_id,
@@ -679,10 +738,13 @@ def _selected_location_label(options: list[AgentStudioOption], selected_location
 
 def _agent_studio_response(request: AgentStudioGenerateRequest) -> AgentStudioGenerateResponse:
     zh = _language_is_zh(request.language)
-    background = str(request.experiment_context.get("background") or request.experiment_context.get("world_setting") or "")
+    background = _localized_context_value(request.experiment_context, "background", request.language)
+    if not background:
+        background = _localized_context_value(request.experiment_context, "world_setting", request.language)
     source_prompt = str(request.source.get("prompt") or "").strip()
     mbti = str(request.source.get("mbti") or "").strip().upper()
     photo_name = str(request.source.get("photo_name") or "").strip()
+    character_asset = request.source.get("character_asset")
     round_seed = str(request.source.get("round") or "")
     seed = "\n".join([background, source_prompt, mbti, photo_name, round_seed])
     theme = _studio_detect_theme(seed)
@@ -756,6 +818,12 @@ def _agent_studio_response(request: AgentStudioGenerateRequest) -> AgentStudioGe
             "hair": selected.get("appearance_hair"),
             "style": selected.get("appearance_style"),
             "photo_reference": photo_name or None,
+            "character_asset": character_asset if isinstance(character_asset, dict) else None,
+            "character_sprite": (
+                character_asset.get("sprite_name")
+                if isinstance(character_asset, dict)
+                else None
+            ),
         },
         "personality": {
             "core": core,
@@ -776,21 +844,147 @@ def _agent_studio_response(request: AgentStudioGenerateRequest) -> AgentStudioGe
             "custom_choices": request.custom_choices,
             "theme": theme,
             "map_id": request.map_id,
+            "character_asset": character_asset if isinstance(character_asset, dict) else None,
         },
     }
     if mbti:
         profile_patch["mbti"] = mbti
 
-    warnings: list[str] = []
-    if photo_name:
-        warnings.append("Photo is stored as a reference in v1; image-based character art generation is not enabled in this endpoint.")
+    character_asset_model = None
+    if isinstance(character_asset, dict):
+        try:
+            character_asset_model = AgentStudioCharacterAsset.model_validate(character_asset)
+        except Exception:
+            character_asset_model = None
+
     return AgentStudioGenerateResponse(
         groups=groups,
         selected_choices=selected,
         profile_patch=profile_patch,
         initial_location=initial_location,
-        warnings=warnings,
+        warnings=[],
+        character_asset=character_asset_model,
     )
+
+
+def _agent_studio_character_root(package: MapPackage) -> Path:
+    raw = str(package.manifest.get("character_root") or "characters").strip() or "characters"
+    root = safe_resolve(package.manifest_path.parent, raw, package.package_path)
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _average_photo_color(photo_bytes: bytes) -> tuple[int, int, int]:
+    try:
+        with Image.open(io.BytesIO(photo_bytes)) as image:
+            thumb = image.convert("RGBA").resize((1, 1))
+            pixel = thumb.getpixel((0, 0))
+            return int(pixel[0]), int(pixel[1]), int(pixel[2])
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid image upload: {exc}") from exc
+
+
+def _mix_color(color: tuple[int, int, int], amount: float) -> tuple[int, int, int]:
+    return tuple(
+        max(0, min(255, int(channel + (255 - channel) * amount)))
+        for channel in color
+    )
+
+
+def _shade_color(color: tuple[int, int, int], amount: float) -> tuple[int, int, int]:
+    return tuple(max(0, min(255, int(channel * amount))) for channel in color)
+
+
+def _draw_agent_studio_frame(
+    draw: ImageDraw.ImageDraw,
+    *,
+    x: int,
+    y: int,
+    direction: str,
+    step: int,
+    base_color: tuple[int, int, int],
+    accent_color: tuple[int, int, int],
+    mecha: bool,
+) -> None:
+    center = x + 16
+    foot_shift = [-2, 0, 2][step]
+    shadow = (24, 24, 24, 54)
+    outline = (40, 48, 56, 255)
+    highlight = _mix_color(base_color, 0.42)
+    dark = _shade_color(base_color, 0.62)
+    eye = accent_color if mecha else (32, 50, 72)
+
+    draw.ellipse((x + 7, y + 25, x + 25, y + 30), fill=shadow)
+    if mecha:
+        draw.rectangle((center - 7, y + 13, center + 7, y + 24), fill=base_color + (255,), outline=outline)
+        draw.rectangle((center - 6, y + 6, center + 6, y + 14), fill=highlight + (255,), outline=outline)
+        draw.rectangle((center - 10, y + 16, center - 7, y + 23), fill=dark + (255,), outline=outline)
+        draw.rectangle((center + 7, y + 16, center + 10, y + 23), fill=dark + (255,), outline=outline)
+        draw.rectangle((center - 6 + foot_shift, y + 24, center - 2 + foot_shift, y + 28), fill=outline)
+        draw.rectangle((center + 2 - foot_shift, y + 24, center + 6 - foot_shift, y + 28), fill=outline)
+        if direction == "up":
+            draw.rectangle((center - 4, y + 9, center + 4, y + 10), fill=dark + (255,))
+        elif direction == "left":
+            draw.rectangle((center - 5, y + 9, center - 1, y + 10), fill=eye + (255,))
+        elif direction == "right":
+            draw.rectangle((center + 1, y + 9, center + 5, y + 10), fill=eye + (255,))
+        else:
+            draw.rectangle((center - 5, y + 9, center - 2, y + 10), fill=eye + (255,))
+            draw.rectangle((center + 2, y + 9, center + 5, y + 10), fill=eye + (255,))
+        draw.line((center - 5, y + 17, center + 5, y + 17), fill=highlight + (255,))
+        return
+
+    skin = _mix_color(base_color, 0.64)
+    outfit = _shade_color(base_color, 0.72)
+    hair = _shade_color(accent_color, 0.55)
+    draw.rectangle((center - 5, y + 14, center + 5, y + 24), fill=outfit + (255,), outline=outline)
+    draw.rectangle((center - 8, y + 16, center - 5, y + 23), fill=dark + (255,), outline=outline)
+    draw.rectangle((center + 5, y + 16, center + 8, y + 23), fill=dark + (255,), outline=outline)
+    draw.rectangle((center - 5 + foot_shift, y + 24, center - 2 + foot_shift, y + 28), fill=outline)
+    draw.rectangle((center + 2 - foot_shift, y + 24, center + 5 - foot_shift, y + 28), fill=outline)
+    draw.ellipse((center - 6, y + 5, center + 6, y + 16), fill=skin + (255,), outline=outline)
+    draw.pieslice((center - 7, y + 4, center + 7, y + 16), 180, 360, fill=hair + (255,))
+    if direction == "up":
+        draw.arc((center - 4, y + 8, center + 4, y + 15), 200, 340, fill=hair + (255,), width=2)
+    elif direction == "left":
+        draw.ellipse((center - 4, y + 10, center - 2, y + 12), fill=eye + (255,))
+    elif direction == "right":
+        draw.ellipse((center + 2, y + 10, center + 4, y + 12), fill=eye + (255,))
+    else:
+        draw.ellipse((center - 4, y + 10, center - 2, y + 12), fill=eye + (255,))
+        draw.ellipse((center + 2, y + 10, center + 4, y + 12), fill=eye + (255,))
+
+
+def _render_agent_studio_spritesheet(
+    *,
+    photo_bytes: bytes,
+    prompt: str,
+) -> bytes:
+    base = _average_photo_color(photo_bytes)
+    accent_seed = hashlib.sha256(photo_bytes[:2048] + prompt.encode("utf-8")).digest()
+    accent = (accent_seed[0], accent_seed[1], accent_seed[2])
+    mecha = _studio_detect_theme(prompt) == "mecha"
+    sheet = Image.new("RGBA", (96, 128), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(sheet)
+    for row, direction in enumerate(("down", "left", "right", "up")):
+        for column in range(3):
+            _draw_agent_studio_frame(
+                draw,
+                x=column * 32,
+                y=row * 32,
+                direction=direction,
+                step=column,
+                base_color=base,
+                accent_color=accent,
+                mecha=mecha,
+            )
+    out = io.BytesIO()
+    sheet.save(out, format="PNG")
+    return out.getvalue()
+
+
+def _character_asset_url(map_id: str, filename: str) -> str:
+    return f"/api/v1/god/setup/agent-studio/characters/{quote(map_id)}/{quote(filename)}"
 
 
 def _scenario_templates(background: str, language: str) -> list[dict[str, Any]]:
@@ -958,9 +1152,17 @@ def _is_generic_agent_name(value: str, agent_id: int) -> bool:
 
 def _default_context(title: str, background: str, package: MapPackage) -> dict[str, Any]:
     map_name = package.display_name
+    localized: dict[str, dict[str, str]] = {}
+    if title in _KNOWN_CONTEXT_TEXT:
+        localized.setdefault("en", {})["title"] = _KNOWN_CONTEXT_TEXT[title]["en"]
+        localized.setdefault("zh", {})["title"] = _KNOWN_CONTEXT_TEXT[title]["zh"]
+    if background in _KNOWN_CONTEXT_TEXT:
+        localized.setdefault("en", {})["background"] = _KNOWN_CONTEXT_TEXT[background]["en"]
+        localized.setdefault("zh", {})["background"] = _KNOWN_CONTEXT_TEXT[background]["zh"]
     return {
         "title": title,
         "background": background,
+        "localized": localized,
         "simulation_goal": "Run a grounded pixel-town social simulation based on the operator-provided scenario.",
         "world_setting": f"The experiment uses the {map_name} map package and maps scenario roles onto available town locations.",
         "ethical_boundaries": [
@@ -1543,6 +1745,53 @@ async def generate_agent_studio_options(
     request: AgentStudioGenerateRequest,
 ) -> AgentStudioGenerateResponse:
     return _agent_studio_response(request)
+
+
+@router.post("/agent-studio/character", response_model=AgentStudioCharacterAsset)
+async def generate_agent_studio_character(
+    file: UploadFile = File(...),
+    map_id: str = Form(DEFAULT_MAP_ID),
+    agent_name: str = Form(""),
+    prompt: str = Form(""),
+    mbti: str = Form(""),
+) -> AgentStudioCharacterAsset:
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Image upload is empty")
+    if len(content) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Image upload is too large; keep it under 8 MB")
+
+    package = _load_map_package(map_id)
+    root = _agent_studio_character_root(package)
+    slug_source = agent_name or Path(file.filename or "agent").stem or "agent"
+    slug = _studio_slug(slug_source, "agent")
+    filename = f"AgentStudio_{slug}_{uuid.uuid4().hex[:8]}.png"
+    sprite_path = root / filename
+    sprite_bytes = _render_agent_studio_spritesheet(
+        photo_bytes=content,
+        prompt="\n".join([prompt, mbti, agent_name]),
+    )
+    sprite_path.write_bytes(sprite_bytes)
+    return AgentStudioCharacterAsset(
+        sprite_name=sprite_path.stem,
+        filename=filename,
+        image_url=_character_asset_url(package.map_id, filename),
+        source_photo_name=Path(file.filename or "").name or None,
+    )
+
+
+@router.get("/agent-studio/characters/{map_id}/{character_name}")
+async def get_agent_studio_character_asset(
+    map_id: str,
+    character_name: str,
+) -> FileResponse:
+    package = _load_map_package(map_id)
+    root = _agent_studio_character_root(package)
+    safe_name = Path(character_name).name
+    for candidate in (root / safe_name, root / f"{safe_name}.png"):
+        if candidate.exists() and candidate.is_file():
+            return FileResponse(candidate)
+    raise HTTPException(status_code=404, detail=f"Character asset not found: {character_name}")
 
 
 @router.post("/publish")

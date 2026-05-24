@@ -1114,7 +1114,14 @@ function getAutoTile(agentId: number, step: number, walkableMap: WalkableMap): T
     return tile;
 }
 
-function spriteForAgent(index: number, walkableMap: WalkableMap): string {
+function spriteForAgent(index: number, walkableMap: WalkableMap, profile?: AgentProfile): string {
+    const appearance = profile?.profile?.appearance as Record<string, unknown> | undefined;
+    const requestedSprite = typeof appearance?.character_sprite === 'string'
+        ? appearance.character_sprite
+        : undefined;
+    if (requestedSprite && walkableMap.characterSprites.some((sprite) => sprite.name === requestedSprite)) {
+        return requestedSprite;
+    }
     if (walkableMap.characterSprites.length > 0) {
         return walkableMap.characterSprites[index % walkableMap.characterSprites.length].name;
     }
@@ -1154,7 +1161,7 @@ function buildPixelFrame(
         return {
             id: profile.id,
             name: getAgentName(profile),
-            spriteKey: spriteForAgent(index, walkableMap),
+            spriteKey: spriteForAgent(index, walkableMap, profile),
             tile,
             movementSegment,
             visualOffset: { x: 0, y: 0 },

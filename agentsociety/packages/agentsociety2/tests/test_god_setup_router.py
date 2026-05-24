@@ -1,10 +1,12 @@
 import asyncio
+import io
 import json
 from pathlib import Path
 
 import anyio
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
+from PIL import Image
 
 from agentsociety2.backend.routers import god_setup
 from agentsociety2.backend.routers.god_setup import (
@@ -36,6 +38,7 @@ def _configure_tmp_god(monkeypatch, tmp_path: Path) -> None:
 def _write_test_map_package(tmp_path: Path, map_id: str, *, valid: bool = True) -> Path:
     package = tmp_path / "agentsociety" / "custom" / "maps" / map_id
     (package / "visuals").mkdir(parents=True)
+    (package / "characters").mkdir(parents=True)
     if valid:
         (package / "visuals" / "map.json").write_text(
             json.dumps(
@@ -63,6 +66,7 @@ def _write_test_map_package(tmp_path: Path, map_id: str, *, valid: bool = True) 
                 f"display_name: {map_id.title()}",
                 "tiled_map_path: visuals/map.json",
                 "tile_size: 32",
+                "character_root: characters",
                 "default_location_order:",
                 "- lab",
                 "- yard",
@@ -201,6 +205,59 @@ def test_agent_studio_generate_keeps_location_on_current_map():
     assert response.profile_patch["agent_studio"]["custom_choices"]["personality_core"] == "外冷内热的机械生命"
     assert "world_conflict" not in response.profile_patch
     assert "virtual_locations" not in response.profile_patch
+
+
+def test_agent_studio_generate_localizes_known_context_and_locations():
+    response = anyio.run(
+        god_setup.generate_agent_studio_options,
+        AgentStudioGenerateRequest(
+            experiment_context={
+                "title": "上帝模式小镇 · 维尔普通工作日",
+                "background": "晚春的一个工作日清晨 8:20。维尔小镇是一个 200 多人的小镇，10 位常住居民彼此熟识但不黏腻。天气晴朗微风，温度 18 摄氏度。镇上没有突发事件，是一段反映自然节奏的日常切片。",
+            },
+            map_id="the_ville",
+            map_locations=[
+                {
+                    "id": "park",
+                    "name": "约翰逊公园",
+                    "localized": {"en": {"name": "Johnson Park"}, "zh": {"name": "约翰逊公园"}},
+                },
+            ],
+            language="en",
+        ),
+    )
+
+    location_group = next(group for group in response.groups if group.id == "initial_location")
+    assert location_group.options[0].label == "Johnson Park (park)"
+    assert "late-spring weekday morning" in response.profile_patch["scenario"]
+    assert "晚春" not in response.profile_patch["persona"]
+
+
+def test_agent_studio_character_generation_writes_map_sprite(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    package = _write_test_map_package(tmp_path, "the_ville")
+    source = Image.new("RGB", (24, 24), (92, 140, 220))
+    buffer = io.BytesIO()
+    source.save(buffer, format="PNG")
+    buffer.seek(0)
+
+    async def call_endpoint():
+        return await god_setup.generate_agent_studio_character(
+            file=UploadFile(buffer, filename="reference.png"),
+            map_id="the_ville",
+            agent_name="Moon Transformer",
+            prompt="A Transformer who commutes to the moon",
+            mbti="INTP",
+        )
+
+    asset = anyio.run(call_endpoint)
+    output_path = package / "characters" / asset.filename
+
+    assert asset.sprite_name == output_path.stem
+    assert asset.image_url.endswith(asset.filename)
+    assert output_path.exists()
+    with Image.open(output_path) as generated:
+        assert generated.size == (96, 128)
 
 
 def test_setup_status_scans_map_packages_and_keeps_invalid_visible(monkeypatch, tmp_path):
