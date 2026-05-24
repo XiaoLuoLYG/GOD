@@ -31,15 +31,16 @@ import {
 } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import RootLayout from '../../Layout';
+import LanguageToggle from '../../components/LanguageToggle';
 import { fetchCustom } from '../../components/fetch';
-import { AgentEditorModal } from './AgentEditorModal';
+import { AgentEditorModal, type AgentEditorSaveMeta, type AgentStudioLocation } from './AgentEditorModal';
 import {
     jsonStringify,
     type AgentClassInfo,
     type AgentFormValues,
     type AgentRecord,
 } from './agentEditor';
+import './agentStudio.css';
 
 const { Text, Paragraph } = Typography;
 
@@ -47,6 +48,14 @@ type InitConfigPayload = {
     env_modules: Array<{ module_type: string; kwargs: Record<string, any> }>;
     agents: AgentRecord[];
     codegen_router?: { final_summary_enabled?: boolean };
+};
+
+type InitConfigResponse = {
+    config: InitConfigPayload;
+    path: string;
+    experiment_context?: Record<string, any> | null;
+    map_id?: string | null;
+    map_locations?: AgentStudioLocation[];
 };
 
 type ImportPreviewRow = {
@@ -69,6 +78,7 @@ type AgentBuilderPanelProps = {
     initialExperimentId?: string;
     embedded?: boolean;
     autoLoad?: boolean;
+    autoSaveOnAgentSave?: boolean;
     onSaved?: () => void | Promise<void>;
 };
 
@@ -103,6 +113,8 @@ const getAgentName = (agent: AgentRecord) => {
     return String(kwargs.name || (profile && profile.name) || `Agent_${agent.agent_id}`);
 };
 
+const getEnvModule = (config: InitConfigPayload | null) => config?.env_modules?.[0];
+
 const shortJson = (value: any, maxLength = 120) => {
     const text = JSON.stringify(value ?? {});
     return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
@@ -136,6 +148,7 @@ const buildDefaultAgentValues = (
     currentAgents: AgentRecord[],
     workspacePath: string,
     defaultProfile: DefaultProfile,
+    experimentContext?: Record<string, any> | null,
 ): AgentFormValues => {
     const agentType = findDefaultAgentType(classes);
     const existing = currentAgents.find((agent) => agent.agent_type === agentType);
@@ -148,11 +161,13 @@ const buildDefaultAgentValues = (
         ...defaultProfile,
         ...existingProfile,
         name,
+        scenario: existingProfile.scenario || String(experimentContext?.background || ''),
     };
     const kwargs = agentType === 'JiuwenClawAgent'
         ? {
             ...DEFAULT_JIUWEN_KWARGS,
             trusted_dirs: workspacePath ? [workspacePath.replace(/\/quick_experiments$/, '')] : DEFAULT_JIUWEN_KWARGS.trusted_dirs,
+            experiment_context: experimentContext || existingExtra.experiment_context,
             ...existingExtra,
         }
         : { ...existingExtra };
@@ -178,6 +193,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
     initialExperimentId,
     embedded = false,
     autoLoad = false,
+    autoSaveOnAgentSave = false,
     onSaved,
 }) => {
     const { t } = useTranslation();
@@ -193,6 +209,9 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
     const [experimentId, setExperimentId] = useState(initialExperimentId || searchParams.get('experiment_id') || '1');
     const [configPath, setConfigPath] = useState('');
     const [config, setConfig] = useState<InitConfigPayload | null>(null);
+    const [experimentContext, setExperimentContext] = useState<Record<string, any> | null>(null);
+    const [mapId, setMapId] = useState('the_ville');
+    const [mapLocations, setMapLocations] = useState<AgentStudioLocation[]>([]);
     const [agentClasses, setAgentClasses] = useState<AgentClassInfo[]>([]);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -253,9 +272,12 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
             if (!response.ok) {
                 throw new Error(await response.text());
             }
-            const payload = await response.json();
+            const payload = await response.json() as InitConfigResponse;
             setConfig(payload.config);
             setConfigPath(payload.path);
+            setExperimentContext(payload.experiment_context || null);
+            setMapId(payload.map_id || payload.experiment_context?.map_id || payload.config.env_modules?.[0]?.kwargs?.map_id || 'the_ville');
+            setMapLocations(payload.map_locations || []);
             message.success(t('agentBuilder.messages.loaded'));
         } catch (error) {
             message.error(t('agentBuilder.messages.loadFailed', { error: error instanceof Error ? error.message : String(error) }));
@@ -272,34 +294,44 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [autoLoad]);
 
-    const saveConfig = async () => {
-        if (!config) return;
+    const persistConfig = async (targetConfig: InitConfigPayload | null = config) => {
+        if (!targetConfig) return false;
         setSaving(true);
         try {
             const response = await fetchCustom(`${endpointBase}/init?${query}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(config),
+                body: JSON.stringify(targetConfig),
             });
             if (!response.ok) {
                 throw new Error(await response.text());
             }
-            const payload = await response.json();
+            const payload = await response.json() as InitConfigResponse;
             setConfig(payload.config);
             setConfigPath(payload.path);
+            setExperimentContext(payload.experiment_context || experimentContext);
+            setMapId(payload.map_id || mapId);
+            setMapLocations(payload.map_locations || mapLocations);
             message.success(t('agentBuilder.messages.saved'));
-            await onSaved?.();
+            return true;
         } catch (error) {
             message.error(t('agentBuilder.messages.saveFailed', { error: error instanceof Error ? error.message : String(error) }));
+            return false;
         } finally {
             setSaving(false);
+        }
+    };
+
+    const saveConfig = async () => {
+        if (await persistConfig()) {
+            await onSaved?.();
         }
     };
 
     const openCreateAgent = () => {
         const nextId = agents.length ? Math.max(...agents.map((agent) => agent.agent_id)) + 1 : 1;
         setEditingAgentId(null);
-        form.setFieldsValue(buildDefaultAgentValues(nextId, agentClasses, agents, workspacePath, defaultProfile));
+        form.setFieldsValue(buildDefaultAgentValues(nextId, agentClasses, agents, workspacePath, defaultProfile, experimentContext));
         setAgentModalOpen(true);
     };
 
@@ -317,18 +349,66 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
         setAgentModalOpen(true);
     };
 
-    const upsertAgent = async (agent: AgentRecord) => {
+    const syncEnvForAgents = (
+        baseConfig: InitConfigPayload,
+        nextAgents: AgentRecord[],
+        touchedAgent?: AgentRecord,
+        meta?: AgentEditorSaveMeta,
+    ): InitConfigPayload => {
+        const envModules = baseConfig.env_modules.map((module, index) => {
+            if (index !== 0) return module;
+            const currentLocations = module.kwargs.initial_locations && typeof module.kwargs.initial_locations === 'object'
+                ? module.kwargs.initial_locations
+                : {};
+            const nextLocations = { ...currentLocations };
+            if (touchedAgent) {
+                nextLocations[String(touchedAgent.agent_id)] = (
+                    meta?.initial_location
+                    || nextLocations[String(touchedAgent.agent_id)]
+                    || mapLocations[0]?.id
+                    || 'park'
+                );
+            }
+            Object.keys(nextLocations).forEach((agentId) => {
+                if (!nextAgents.some((item) => String(item.agent_id) === agentId)) {
+                    delete nextLocations[agentId];
+                }
+            });
+            return {
+                ...module,
+                kwargs: {
+                    ...module.kwargs,
+                    map_id: module.kwargs.map_id || mapId,
+                    agent_id_name_pairs: nextAgents.map((item) => [item.agent_id, getAgentName(item)]),
+                    initial_locations: nextLocations,
+                },
+            };
+        });
+        return { ...baseConfig, agents: nextAgents, env_modules: envModules };
+    };
+
+    const upsertAgent = async (agent: AgentRecord, meta?: AgentEditorSaveMeta) => {
         if (!config) return;
         const nextAgents = editingAgentId === null
             ? [...agents, agent]
             : agents.map((item) => item.agent_id === editingAgentId ? agent : item);
-        setConfig({ ...config, agents: nextAgents });
+        const nextConfig = syncEnvForAgents(config, nextAgents, agent, meta);
+        if (autoSaveOnAgentSave) {
+            if (!(await persistConfig(nextConfig))) {
+                return;
+            }
+            setAgentModalOpen(false);
+            await onSaved?.();
+            return;
+        }
+        setConfig(nextConfig);
         setAgentModalOpen(false);
     };
 
     const deleteAgent = (agentId: number) => {
         if (!config) return;
-        setConfig({ ...config, agents: agents.filter((agent) => agent.agent_id !== agentId) });
+        const nextAgents = agents.filter((agent) => agent.agent_id !== agentId);
+        setConfig(syncEnvForAgents(config, nextAgents));
     };
 
     const previewImport = async () => {
@@ -480,6 +560,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                     title={t('agentBuilder.title')}
                     extra={
                         <Space wrap>
+                            <LanguageToggle />
                             <Button icon={<FolderOpenOutlined />} onClick={loadConfig} loading={loading}>
                                 {t('agentBuilder.actions.load')}
                             </Button>
@@ -562,6 +643,12 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                 editingAgentId={editingAgentId}
                 form={form}
                 agentClasses={agentClasses}
+                experimentContext={experimentContext || agents[0]?.kwargs?.experiment_context || agents[0]?.kwargs?.profile?.experiment_context || {}}
+                mapId={mapId}
+                mapLocations={mapLocations}
+                existingAgents={agents}
+                initialLocation={editingAgentId === null ? undefined : getEnvModule(config)?.kwargs?.initial_locations?.[String(editingAgentId)]}
+                defaultInitialLocation={mapLocations[0]?.id || 'park'}
                 onSave={upsertAgent}
                 onCancel={() => setAgentModalOpen(false)}
             />
@@ -647,11 +734,9 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
     }
 
     return (
-        <RootLayout selectedKey="/agent-builder">
-            <div style={{ padding: 24, overflowX: 'hidden' }}>
-                {content}
-            </div>
-        </RootLayout>
+        <div className="agent-builder-page">
+            {content}
+        </div>
     );
 };
 

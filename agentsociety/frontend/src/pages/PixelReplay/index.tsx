@@ -1114,7 +1114,14 @@ function getAutoTile(agentId: number, step: number, walkableMap: WalkableMap): T
     return tile;
 }
 
-function spriteForAgent(index: number, walkableMap: WalkableMap): string {
+function spriteForAgent(index: number, walkableMap: WalkableMap, profile?: AgentProfile): string {
+    const appearance = profile?.profile?.appearance as Record<string, unknown> | undefined;
+    const requestedSprite = typeof appearance?.character_sprite === 'string'
+        ? appearance.character_sprite
+        : undefined;
+    if (requestedSprite && walkableMap.characterSprites.some((sprite) => sprite.name === requestedSprite)) {
+        return requestedSprite;
+    }
     if (walkableMap.characterSprites.length > 0) {
         return walkableMap.characterSprites[index % walkableMap.characterSprites.length].name;
     }
@@ -1154,7 +1161,7 @@ function buildPixelFrame(
         return {
             id: profile.id,
             name: getAgentName(profile),
-            spriteKey: spriteForAgent(index, walkableMap),
+            spriteKey: spriteForAgent(index, walkableMap, profile),
             tile,
             movementSegment,
             visualOffset: { x: 0, y: 0 },
@@ -3713,23 +3720,36 @@ export default function PixelReplay() {
                 <AgentBuilderPanel
                     embedded
                     autoLoad
+                    autoSaveOnAgentSave
                     initialWorkspacePath={workspacePath}
                     initialHypothesisId={effectiveHypothesisId}
                     initialExperimentId={effectiveExperimentId}
                     onSaved={async () => {
-                        if (liveBaseUrl && liveStatus?.status === 'waiting') {
-                            const result = await postJson<{
-                                added_agent_ids: number[];
-                                status: LiveStatus;
-                            }>(withLiveWorkspace('/sync-agents'));
-                            setLiveStatus(result.status);
-                            if (result.added_agent_ids.length > 0) {
-                                messageApi.success(t('replay.pixel.drawer.hotLoadSuccess', { count: result.added_agent_ids.length }));
+                        try {
+                            if (liveBaseUrl && liveStatus?.status === 'waiting') {
+                                try {
+                                    const result = await postJson<{
+                                        added_agent_ids: number[];
+                                        status: LiveStatus;
+                                    }>(withLiveWorkspace('/sync-agents'));
+                                    setLiveStatus(result.status);
+                                    if (result.added_agent_ids.length > 0) {
+                                        messageApi.success(t('replay.pixel.drawer.hotLoadSuccess', { count: result.added_agent_ids.length }));
+                                    }
+                                } catch (error) {
+                                    messageApi.warning(t('replay.pixel.drawer.hotLoadWarning'));
+                                    console.error(error);
+                                }
+                            } else if (liveStatus && liveStatus.status !== 'waiting') {
+                                messageApi.warning(t('replay.pixel.drawer.hotLoadWarning'));
                             }
-                        } else if (liveStatus && liveStatus.status !== 'waiting') {
+                            await refreshReplayData(true);
+                        } catch (error) {
                             messageApi.warning(t('replay.pixel.drawer.hotLoadWarning'));
+                            console.error(error);
+                        } finally {
+                            setAgentBuilderOpen(false);
                         }
-                        await refreshReplayData(true);
                     }}
                 />
             </Drawer>
