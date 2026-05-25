@@ -6,7 +6,7 @@ from pathlib import Path
 import anyio
 import pytest
 from fastapi import HTTPException, UploadFile
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from agentsociety2.backend.routers import god_setup
 from agentsociety2.backend.routers.god_setup import (
@@ -31,6 +31,10 @@ def _configure_tmp_god(monkeypatch, tmp_path: Path) -> None:
         "GOD_EXPERIMENT_RUN",
         "GOD_MAP_ID",
         "GOD_SETUP_MODE",
+        "IMAGE_GEN_API_KEY",
+        "IMAGE_GEN_API_BASE",
+        "IMAGE_GEN_MODEL_NAME",
+        "IMAGE_GEN_PROVIDER",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -97,6 +101,43 @@ def _write_test_map_package(tmp_path: Path, map_id: str, *, valid: bool = True) 
         encoding="utf-8",
     )
     return package
+
+
+def _large_sprite_sheet_bytes() -> bytes:
+    image = Image.new("RGBA", (768, 1024), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    colors = [
+        (36, 31, 28, 255),
+        (112, 34, 48, 255),
+        (237, 205, 168, 255),
+        (68, 84, 88, 255),
+    ]
+    for row in range(4):
+        for col in range(3):
+            left = col * 256 + 76
+            top = row * 256 + 38
+            draw.ellipse((left + 52, top + 10, left + 128, top + 88), fill=colors[2])
+            draw.rectangle((left + 40, top + 74, left + 140, top + 190), fill=colors[(row + col) % len(colors)])
+            draw.polygon(
+                [
+                    (left + 30, top + 35),
+                    (left + 92, top - 4),
+                    (left + 156, top + 32),
+                    (left + 132, top + 72),
+                    (left + 50, top + 78),
+                ],
+                fill=colors[0],
+            )
+    out = io.BytesIO()
+    image.save(out, format="PNG")
+    return out.getvalue()
+
+
+def _empty_sprite_sheet_bytes() -> bytes:
+    image = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+    out = io.BytesIO()
+    image.save(out, format="PNG")
+    return out.getvalue()
 
 
 def _raw_draft() -> dict:
@@ -233,7 +274,37 @@ def test_agent_studio_generate_localizes_known_context_and_locations():
     assert "晚春" not in response.profile_patch["persona"]
 
 
-def test_agent_studio_character_generation_writes_map_sprite(monkeypatch, tmp_path):
+def test_agent_studio_generate_strips_preview_data_url_from_profile_patch():
+    response = god_setup._agent_studio_response(
+        AgentStudioGenerateRequest(
+            experiment_context={"background": "Campus day"},
+            map_id="pku",
+            map_locations=[{"id": "library", "name": "Library"}],
+            language="zh",
+            source={
+                "prompt": "reference student",
+                "photo_name": "reference.png",
+                "character_asset": {
+                    "sprite_name": "Generated_Agent_24_Test",
+                    "filename": "Generated_Agent_24_Test.png",
+                    "image_url": "/characters/Generated_Agent_24_Test.png",
+                    "frame_width": 32,
+                    "frame_height": 32,
+                    "preview_data_url": "data:image/png;base64,abc123",
+                    "source": {"provider": "openai", "model": "gpt-image-1.5"},
+                },
+            },
+        )
+    )
+
+    serialized = json.dumps(response.profile_patch, ensure_ascii=False)
+    assert "preview_data_url" not in serialized
+    assert "data:image" not in serialized
+    assert response.profile_patch["appearance"]["character_sprite"] == "Generated_Agent_24_Test"
+    assert response.profile_patch["agent_studio"]["character_asset"]["filename"] == "Generated_Agent_24_Test.png"
+
+
+def test_agent_studio_character_requires_image_config(monkeypatch, tmp_path):
     _configure_tmp_god(monkeypatch, tmp_path)
     package = _write_test_map_package(tmp_path, "the_ville")
     source = Image.new("RGB", (24, 24), (92, 140, 220))
@@ -245,19 +316,118 @@ def test_agent_studio_character_generation_writes_map_sprite(monkeypatch, tmp_pa
         return await god_setup.generate_agent_studio_character(
             file=UploadFile(buffer, filename="reference.png"),
             map_id="the_ville",
+            agent_id=23,
             agent_name="Moon Transformer",
             prompt="A Transformer who commutes to the moon",
             mbti="INTP",
+            appearance_json="{}",
+            image_api_base="https://api.openai.com/v1",
+            image_model="gpt-image-1.5",
+            image_provider="openai",
+        )
+
+    with pytest.raises(HTTPException) as exc_info:
+        anyio.run(call_endpoint)
+
+    assert exc_info.value.status_code == 400
+    assert "IMAGE_GEN_API_KEY" in str(exc_info.value.detail)
+    assert not list((package / "characters").glob("Generated_Agent_23*.png"))
+
+
+def test_agent_studio_character_generation_writes_map_sprite(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    package = _write_test_map_package(tmp_path, "the_ville")
+    source = Image.new("RGB", (24, 24), (92, 140, 220))
+    buffer = io.BytesIO()
+    source.save(buffer, format="PNG")
+    buffer.seek(0)
+
+    async def fake_request(*args, **kwargs):
+        return _large_sprite_sheet_bytes()
+
+    monkeypatch.setattr(god_setup, "_request_openai_sprite_image", fake_request)
+
+    async def call_endpoint():
+        return await god_setup.generate_agent_studio_character(
+            file=UploadFile(buffer, filename="reference.png"),
+            map_id="the_ville",
+            agent_id=23,
+            agent_name="Moon Transformer",
+            prompt="A Transformer who commutes to the moon",
+            mbti="INTP",
+            appearance_json='{"hair": "dark", "style": "red jacket"}',
+            image_api_key="test-image-key",
+            image_api_base="https://api.openai.com/v1",
+            image_model="gpt-image-1.5",
+            image_provider="openai",
         )
 
     asset = anyio.run(call_endpoint)
     output_path = package / "characters" / asset.filename
 
+    assert asset.sprite_name.startswith("Generated_Agent_23")
     assert asset.sprite_name == output_path.stem
     assert asset.image_url.endswith(asset.filename)
+    assert asset.preview_data_url and asset.preview_data_url.startswith("data:image/png;base64,")
+    assert asset.source["model"] == "gpt-image-1.5"
+    assert "key" not in json.dumps(asset.source).lower()
     assert output_path.exists()
     with Image.open(output_path) as generated:
         assert generated.size == (96, 128)
+        assert generated.mode == "RGBA"
+    assert "IMAGE_GEN_API_KEY=test-image-key" in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+def test_agent_studio_character_invalid_ai_sheet_retries_without_partial_files(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    package = _write_test_map_package(tmp_path, "the_ville")
+    source = Image.new("RGB", (24, 24), (92, 140, 220))
+    buffer = io.BytesIO()
+    source.save(buffer, format="PNG")
+    buffer.seek(0)
+    attempts = 0
+
+    async def fake_request(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        return _empty_sprite_sheet_bytes()
+
+    monkeypatch.setattr(god_setup, "_request_openai_sprite_image", fake_request)
+
+    async def call_endpoint():
+        return await god_setup.generate_agent_studio_character(
+            file=UploadFile(buffer, filename="reference.png"),
+            map_id="the_ville",
+            agent_id=23,
+            agent_name="Moon Transformer",
+            appearance_json="{}",
+            image_api_key="test-image-key",
+            image_api_base="https://api.openai.com/v1",
+            image_model="gpt-image-1.5",
+            image_provider="openai",
+        )
+
+    with pytest.raises(HTTPException) as exc_info:
+        anyio.run(call_endpoint)
+
+    assert attempts == god_setup.AGENT_SPRITE_GENERATION_ATTEMPTS
+    assert exc_info.value.status_code == 502
+    assert "valid 96x128" in str(exc_info.value.detail)
+    assert not list((package / "characters").glob("Generated_Agent_23*.png"))
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8") if (tmp_path / ".env").exists() else ""
+    assert "IMAGE_GEN_API_KEY" not in env_text
+
+
+def test_image_model_error_redacts_masked_api_key():
+    masked_key = "sk-" + "...***************************."
+    local_key = "sk-" + "test-local-secret"
+    sanitized = god_setup._sanitize_model_error(
+        f"Incorrect API key provided: {masked_key}",
+        local_key,
+    )
+
+    assert "sk-..." not in sanitized
+    assert "redacted" in sanitized
 
 
 def test_setup_status_scans_map_packages_and_keeps_invalid_visible(monkeypatch, tmp_path):

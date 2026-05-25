@@ -106,6 +106,18 @@ const DEFAULT_JIUWEN_KWARGS = {
     channel_id: 'agentsociety',
 };
 const STORAGE_KEY = 'agentsociety.agentBuilder.workspacePath';
+const SHARED_JIUWEN_KWARG_KEYS = [
+    'jiuwenclaw_ws_url',
+    'channel_id',
+    'mode',
+    'trusted_dirs',
+    'enable_memory',
+    'enable_skill_runtime',
+    'common_skill_ids',
+    'skill_ids',
+    'experiment_context',
+    'request_timeout',
+] as const;
 
 const getAgentName = (agent: AgentRecord) => {
     const kwargs = agent.kwargs || {};
@@ -114,6 +126,124 @@ const getAgentName = (agent: AgentRecord) => {
 };
 
 const getEnvModule = (config: InitConfigPayload | null) => config?.env_modules?.[0];
+
+const stringValue = (value: unknown) => String(value || '').trim();
+
+const storableCharacterAsset = (value: unknown): Record<string, any> | undefined => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    const asset = value as Record<string, any>;
+    const cleaned = Object.fromEntries(
+        [
+            'sprite_name',
+            'filename',
+            'image_url',
+            'frame_width',
+            'frame_height',
+            'source_photo_name',
+            'generated_from_photo',
+            'source',
+        ]
+            .map((key) => [key, asset[key]])
+            .filter(([, item]) => item !== undefined && item !== null && item !== '')
+    );
+    return cleaned.sprite_name && cleaned.filename ? cleaned : undefined;
+};
+
+const normalizeStudioProfile = (
+    profile: Record<string, any>,
+    mapId: string,
+    initialLocation?: string,
+) => {
+    const currentStudio = profile.agent_studio && typeof profile.agent_studio === 'object' && !Array.isArray(profile.agent_studio)
+        ? profile.agent_studio
+        : {};
+    const appearance = profile.appearance && typeof profile.appearance === 'object' && !Array.isArray(profile.appearance)
+        ? profile.appearance
+        : {};
+    const personality = profile.personality && typeof profile.personality === 'object' && !Array.isArray(profile.personality)
+        ? profile.personality
+        : {};
+    const routine = profile.routine && typeof profile.routine === 'object' && !Array.isArray(profile.routine)
+        ? profile.routine
+        : {};
+    const selectedChoices = {
+        ...(currentStudio.selected_choices || {}),
+    } as Record<string, string>;
+    const customChoices = {
+        ...(currentStudio.custom_choices || {}),
+    } as Record<string, string>;
+    const legacyChoices: Record<string, unknown> = {
+        identity_role: profile.role,
+        identity_function: profile.scenario_role || profile.role,
+        appearance_form: appearance.form,
+        appearance_eyes: appearance.eyes,
+        appearance_hair: appearance.hair,
+        appearance_style: appearance.style,
+        personality_core: personality.core || profile.persona,
+        personality_social: personality.social,
+        personality_decision: personality.decision,
+        personality_mood: personality.mood,
+        routine_goal: routine.goal || profile.goal,
+        routine_habit: routine.habit || profile.daily_routine,
+        relationship_style: routine.relationship_style || profile.relationships,
+    };
+    Object.entries(legacyChoices).forEach(([key, raw]) => {
+        const value = stringValue(raw);
+        if (!value) return;
+        if (!selectedChoices[key]) selectedChoices[key] = value;
+        if (!customChoices[key] && !(currentStudio.selected_choices || {})[key]) customChoices[key] = value;
+    });
+    selectedChoices.initial_location = stringValue(
+        initialLocation || selectedChoices.initial_location || routine.initial_location
+    );
+    const { groups: _groups, ...studioRest } = currentStudio;
+    const characterAsset = storableCharacterAsset(
+        currentStudio.character_asset || currentStudio.source?.character_asset || appearance.character_asset
+    );
+    return {
+        ...profile,
+        agent_studio: {
+            version: 1,
+            ...studioRest,
+            source: {
+                ...(currentStudio.source || {}),
+                prompt: stringValue(currentStudio.source?.prompt),
+                mbti: stringValue(profile.mbti || currentStudio.source?.mbti) || undefined,
+                photo_name: stringValue(currentStudio.source?.photo_name || appearance.photo_reference) || undefined,
+                character_asset: characterAsset,
+            },
+            selected_choices: selectedChoices,
+            custom_choices: customChoices,
+            map_id: mapId,
+            character_asset: characterAsset,
+        },
+    };
+};
+
+const normalizeAgentsForStudio = (config: InitConfigPayload, mapId: string): InitConfigPayload => {
+    const initialLocations = getEnvModule(config)?.kwargs?.initial_locations || {};
+    return {
+        ...config,
+        agents: (config.agents || []).map((agent) => {
+            const profile = agent.kwargs?.profile;
+            if (!profile || typeof profile !== 'object' || Array.isArray(profile)) {
+                return agent;
+            }
+            const nextProfile = normalizeStudioProfile(
+                profile,
+                mapId,
+                stringValue(initialLocations[String(agent.agent_id)]),
+            );
+            return {
+                ...agent,
+                kwargs: {
+                    ...agent.kwargs,
+                    profile: nextProfile,
+                },
+            };
+        }),
+    };
+};
 
 const shortJson = (value: any, maxLength = 120) => {
     const text = JSON.stringify(value ?? {});
@@ -142,6 +272,17 @@ const findDefaultAgentType = (classes: AgentClassInfo[]) => {
     return classes[0]?.type || 'JiuwenClawAgent';
 };
 
+const pickSharedJiuwenKwargs = (kwargs: Record<string, any> | undefined) => {
+    const shared: Record<string, any> = {};
+    if (!kwargs) return shared;
+    SHARED_JIUWEN_KWARG_KEYS.forEach((key) => {
+        if (key in kwargs) {
+            shared[key] = kwargs[key];
+        }
+    });
+    return shared;
+};
+
 const buildDefaultAgentValues = (
     nextId: number,
     classes: AgentClassInfo[],
@@ -152,25 +293,23 @@ const buildDefaultAgentValues = (
 ): AgentFormValues => {
     const agentType = findDefaultAgentType(classes);
     const existing = currentAgents.find((agent) => agent.agent_type === agentType);
-    const existingProfile = existing?.kwargs?.profile && typeof existing.kwargs.profile === 'object'
-        ? existing.kwargs.profile
-        : {};
-    const { id: _id, name: _name, profile: _profile, ...existingExtra } = existing?.kwargs || {};
+    const sharedExisting = pickSharedJiuwenKwargs(existing?.kwargs);
     const name = agentType === 'JiuwenClawAgent' ? `Jiuwen Agent ${nextId}` : `Agent_${nextId}`;
     const profile = {
         ...defaultProfile,
-        ...existingProfile,
         name,
-        scenario: existingProfile.scenario || String(experimentContext?.background || ''),
+        scenario: String(experimentContext?.background || ''),
     };
-    const kwargs = agentType === 'JiuwenClawAgent'
+    const kwargs: Record<string, any> = agentType === 'JiuwenClawAgent'
         ? {
             ...DEFAULT_JIUWEN_KWARGS,
-            trusted_dirs: workspacePath ? [workspacePath.replace(/\/quick_experiments$/, '')] : DEFAULT_JIUWEN_KWARGS.trusted_dirs,
-            experiment_context: experimentContext || existingExtra.experiment_context,
-            ...existingExtra,
+            ...sharedExisting,
+            trusted_dirs: Array.isArray(sharedExisting.trusted_dirs)
+                ? sharedExisting.trusted_dirs
+                : (workspacePath ? [workspacePath.replace(/\/quick_experiments$/, '')] : DEFAULT_JIUWEN_KWARGS.trusted_dirs),
+            experiment_context: experimentContext || sharedExisting.experiment_context,
         }
-        : { ...existingExtra };
+        : {};
 
     if (typeof kwargs.session_id === 'string') {
         kwargs.session_id = kwargs.session_id.match(/_agent_\d+$/)
@@ -217,6 +356,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
     const [saving, setSaving] = useState(false);
     const [agentModalOpen, setAgentModalOpen] = useState(false);
     const [editingAgentId, setEditingAgentId] = useState<number | null>(null);
+    const [agentInitialValues, setAgentInitialValues] = useState<AgentFormValues | null>(null);
     const [importModalOpen, setImportModalOpen] = useState(false);
     const [importFormat, setImportFormat] = useState<'auto' | 'csv' | 'json'>('auto');
     const [importContent, setImportContent] = useState('');
@@ -273,10 +413,12 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                 throw new Error(await response.text());
             }
             const payload = await response.json() as InitConfigResponse;
-            setConfig(payload.config);
+            const resolvedMapId = payload.map_id || payload.experiment_context?.map_id || payload.config.env_modules?.[0]?.kwargs?.map_id || 'the_ville';
+            const normalizedConfig = normalizeAgentsForStudio(payload.config, resolvedMapId);
+            setConfig(normalizedConfig);
             setConfigPath(payload.path);
             setExperimentContext(payload.experiment_context || null);
-            setMapId(payload.map_id || payload.experiment_context?.map_id || payload.config.env_modules?.[0]?.kwargs?.map_id || 'the_ville');
+            setMapId(resolvedMapId);
             setMapLocations(payload.map_locations || []);
             message.success(t('agentBuilder.messages.loaded'));
         } catch (error) {
@@ -307,10 +449,11 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                 throw new Error(await response.text());
             }
             const payload = await response.json() as InitConfigResponse;
-            setConfig(payload.config);
+            const resolvedMapId = payload.map_id || mapId;
+            setConfig(normalizeAgentsForStudio(payload.config, resolvedMapId));
             setConfigPath(payload.path);
             setExperimentContext(payload.experiment_context || experimentContext);
-            setMapId(payload.map_id || mapId);
+            setMapId(resolvedMapId);
             setMapLocations(payload.map_locations || mapLocations);
             message.success(t('agentBuilder.messages.saved'));
             return true;
@@ -330,22 +473,26 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
 
     const openCreateAgent = () => {
         const nextId = agents.length ? Math.max(...agents.map((agent) => agent.agent_id)) + 1 : 1;
+        const values = buildDefaultAgentValues(nextId, agentClasses, agents, workspacePath, defaultProfile, experimentContext);
         setEditingAgentId(null);
-        form.setFieldsValue(buildDefaultAgentValues(nextId, agentClasses, agents, workspacePath, defaultProfile, experimentContext));
+        setAgentInitialValues(values);
+        form.setFieldsValue(values);
         setAgentModalOpen(true);
     };
 
     const openEditAgent = (agent: AgentRecord) => {
         const profile = agent.kwargs?.profile || {};
         const { id, name, profile: _profile, ...extraKwargs } = agent.kwargs || {};
-        setEditingAgentId(agent.agent_id);
-        form.setFieldsValue({
+        const values = {
             agent_id: agent.agent_id,
             agent_type: agent.agent_type,
             name: String(name || profile.name || `Agent_${agent.agent_id}`),
             profile_json: jsonStringify(profile),
             kwargs_json: jsonStringify(extraKwargs),
-        });
+        };
+        setEditingAgentId(agent.agent_id);
+        setAgentInitialValues(values);
+        form.setFieldsValue(values);
         setAgentModalOpen(true);
     };
 
@@ -392,6 +539,10 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
         const nextAgents = editingAgentId === null
             ? [...agents, agent]
             : agents.map((item) => item.agent_id === editingAgentId ? agent : item);
+        if (getDuplicateIds(nextAgents).size > 0 || nextAgents.some((item) => !item.kwargs || item.kwargs.id !== item.agent_id)) {
+            message.error(t('agentBuilder.messages.invalidAgents'));
+            return;
+        }
         const nextConfig = syncEnvForAgents(config, nextAgents, agent, meta);
         if (autoSaveOnAgentSave) {
             if (!(await persistConfig(nextConfig))) {
@@ -456,7 +607,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                 throw new Error(await response.text());
             }
             const payload = await response.json();
-            setConfig(payload.config);
+            setConfig(normalizeAgentsForStudio(payload.config, mapId));
             setConfigPath(payload.path);
             setImportModalOpen(false);
             setImportPreview(null);
@@ -642,6 +793,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                 open={agentModalOpen}
                 editingAgentId={editingAgentId}
                 form={form}
+                initialValues={agentInitialValues}
                 agentClasses={agentClasses}
                 experimentContext={experimentContext || agents[0]?.kwargs?.experiment_context || agents[0]?.kwargs?.profile?.experiment_context || {}}
                 mapId={mapId}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -21,7 +22,7 @@ import yaml
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
-from PIL import Image, ImageDraw
+from PIL import Image, UnidentifiedImageError
 
 from agentsociety2.config import extract_json
 from agentsociety2.backend.services.map_packages import (
@@ -80,6 +81,21 @@ MODEL_KEYS = (
 )
 
 SENSITIVE_KEYS = {"GOD_LLM_API_KEY", "GOD_EMBEDDING_API_KEY"}
+IMAGE_MODEL_KEYS = (
+    "IMAGE_GEN_API_KEY",
+    "IMAGE_GEN_API_BASE",
+    "IMAGE_GEN_MODEL_NAME",
+    "IMAGE_GEN_PROVIDER",
+)
+IMAGE_ENV_DEFAULTS = {
+    "IMAGE_GEN_API_BASE": "https://api.openai.com/v1",
+    "IMAGE_GEN_MODEL_NAME": "gpt-image-1.5",
+    "IMAGE_GEN_PROVIDER": "openai",
+}
+IMAGE_SENSITIVE_KEYS = {"IMAGE_GEN_API_KEY"}
+AGENT_SPRITE_SIZE = (96, 128)
+AGENT_SPRITE_FRAME_SIZE = (32, 32)
+AGENT_SPRITE_GENERATION_ATTEMPTS = 3
 
 
 def _default_public_group_name(title: str) -> str:
@@ -238,6 +254,8 @@ class AgentStudioCharacterAsset(BaseModel):
     frame_height: int = 32
     source_photo_name: str | None = None
     generated_from_photo: bool = True
+    preview_data_url: str | None = None
+    source: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentStudioGenerateResponse(BaseModel):
@@ -336,6 +354,14 @@ def _write_model_env_values(values: dict[str, str]) -> None:
     _write_env_values(filtered)
 
 
+def _write_image_env_values(values: dict[str, str]) -> None:
+    allowed = set(IMAGE_MODEL_KEYS)
+    filtered = {key: value for key, value in values.items() if key in allowed}
+    if not filtered:
+        return
+    _write_env_values(filtered)
+
+
 def _merged_env() -> dict[str, str]:
     env = dict(ENV_DEFAULTS)
     for key in MODEL_KEYS:
@@ -345,10 +371,21 @@ def _merged_env() -> dict[str, str]:
     return env
 
 
+def _merged_image_env() -> dict[str, str]:
+    env = dict(IMAGE_ENV_DEFAULTS)
+    for key in IMAGE_MODEL_KEYS:
+        if os.getenv(key):
+            env[key] = os.environ[key]
+    for key, value in _read_env().items():
+        if key in IMAGE_MODEL_KEYS:
+            env[key] = value
+    return env
+
+
 def _redact_value(key: str, value: str | None) -> dict[str, Any]:
     if not value:
         return {"configured": False, "value": ""}
-    if key in SENSITIVE_KEYS:
+    if key in SENSITIVE_KEYS or key in IMAGE_SENSITIVE_KEYS:
         tail = value[-4:] if len(value) >= 4 else "****"
         return {"configured": True, "value": f"••••{tail}"}
     return {"configured": True, "value": value}
@@ -736,6 +773,25 @@ def _selected_location_label(options: list[AgentStudioOption], selected_location
     return selected_location
 
 
+def _persistable_character_asset(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    allowed = (
+        "sprite_name",
+        "filename",
+        "image_url",
+        "frame_width",
+        "frame_height",
+        "source_photo_name",
+        "generated_from_photo",
+        "source",
+    )
+    asset = {key: value.get(key) for key in allowed if value.get(key) not in (None, "")}
+    if not asset.get("sprite_name") or not asset.get("filename"):
+        return None
+    return asset
+
+
 def _agent_studio_response(request: AgentStudioGenerateRequest) -> AgentStudioGenerateResponse:
     zh = _language_is_zh(request.language)
     background = _localized_context_value(request.experiment_context, "background", request.language)
@@ -744,7 +800,10 @@ def _agent_studio_response(request: AgentStudioGenerateRequest) -> AgentStudioGe
     source_prompt = str(request.source.get("prompt") or "").strip()
     mbti = str(request.source.get("mbti") or "").strip().upper()
     photo_name = str(request.source.get("photo_name") or "").strip()
-    character_asset = request.source.get("character_asset")
+    character_asset = _persistable_character_asset(request.source.get("character_asset"))
+    profile_source = {key: value for key, value in request.source.items() if key != "character_asset"}
+    if character_asset:
+        profile_source["character_asset"] = character_asset
     round_seed = str(request.source.get("round") or "")
     seed = "\n".join([background, source_prompt, mbti, photo_name, round_seed])
     theme = _studio_detect_theme(seed)
@@ -818,12 +877,8 @@ def _agent_studio_response(request: AgentStudioGenerateRequest) -> AgentStudioGe
             "hair": selected.get("appearance_hair"),
             "style": selected.get("appearance_style"),
             "photo_reference": photo_name or None,
-            "character_asset": character_asset if isinstance(character_asset, dict) else None,
-            "character_sprite": (
-                character_asset.get("sprite_name")
-                if isinstance(character_asset, dict)
-                else None
-            ),
+            "character_asset": character_asset,
+            "character_sprite": character_asset.get("sprite_name") if character_asset else None,
         },
         "personality": {
             "core": core,
@@ -839,19 +894,19 @@ def _agent_studio_response(request: AgentStudioGenerateRequest) -> AgentStudioGe
             "initial_location_label": location_label,
         },
         "agent_studio": {
-            "source": request.source,
+            "source": profile_source,
             "selected_choices": selected,
             "custom_choices": request.custom_choices,
             "theme": theme,
             "map_id": request.map_id,
-            "character_asset": character_asset if isinstance(character_asset, dict) else None,
+            "character_asset": character_asset,
         },
     }
     if mbti:
         profile_patch["mbti"] = mbti
 
     character_asset_model = None
-    if isinstance(character_asset, dict):
+    if character_asset:
         try:
             character_asset_model = AgentStudioCharacterAsset.model_validate(character_asset)
         except Exception:
@@ -874,117 +929,249 @@ def _agent_studio_character_root(package: MapPackage) -> Path:
     return root
 
 
-def _average_photo_color(photo_bytes: bytes) -> tuple[int, int, int]:
-    try:
-        with Image.open(io.BytesIO(photo_bytes)) as image:
-            thumb = image.convert("RGBA").resize((1, 1))
-            pixel = thumb.getpixel((0, 0))
-            return int(pixel[0]), int(pixel[1]), int(pixel[2])
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid image upload: {exc}") from exc
+def _character_asset_url(map_id: str, filename: str) -> str:
+    return f"/api/v1/god/setup/agent-studio/characters/{quote(map_id)}/{quote(filename)}"
 
 
-def _mix_color(color: tuple[int, int, int], amount: float) -> tuple[int, int, int]:
-    return tuple(
-        max(0, min(255, int(channel + (255 - channel) * amount)))
-        for channel in color
+def _sanitize_model_error(text: str, api_key: str) -> str:
+    sanitized = text
+    redaction = "[redacted-api-key]"
+    if api_key:
+        sanitized = sanitized.replace(api_key, redaction)
+        if len(api_key) > 12:
+            sanitized = sanitized.replace(api_key[:8], redaction)
+    sanitized = re.sub(r"sk-[A-Za-z0-9_\-*.]{8,}", redaction, sanitized)
+    return sanitized[:800]
+
+
+def _image_config_value(config: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = config.get(key)
+        if value is not None and isinstance(value, str) and value.strip():
+            return str(value).strip()
+    return ""
+
+
+def _form_text(value: Any, default: str = "") -> str:
+    return value if isinstance(value, str) else default
+
+
+def _resolve_image_config(image_config: dict[str, Any]) -> dict[str, str]:
+    submitted = {
+        "IMAGE_GEN_API_KEY": _image_config_value(image_config, "IMAGE_GEN_API_KEY", "image_api_key", "api_key"),
+        "IMAGE_GEN_API_BASE": _image_config_value(image_config, "IMAGE_GEN_API_BASE", "image_api_base", "api_base"),
+        "IMAGE_GEN_MODEL_NAME": _image_config_value(image_config, "IMAGE_GEN_MODEL_NAME", "image_model", "model"),
+        "IMAGE_GEN_PROVIDER": _image_config_value(image_config, "IMAGE_GEN_PROVIDER", "image_provider", "provider"),
+    }
+    submitted = {key: value for key, value in submitted.items() if value}
+    resolved = _merged_image_env()
+    resolved.update(submitted)
+    if not resolved.get("IMAGE_GEN_API_KEY", "").strip():
+        raise HTTPException(status_code=400, detail="IMAGE_GEN_API_KEY is required to generate an agent sprite")
+    provider = resolved.get("IMAGE_GEN_PROVIDER", "openai").strip().lower()
+    if provider != "openai":
+        raise HTTPException(status_code=400, detail=f"Unsupported IMAGE_GEN_PROVIDER for Agent Studio sprites: {provider}")
+    return resolved
+
+
+def _agent_sprite_prompt(*, agent_name: str, prompt: str, mbti: str, appearance: dict[str, Any]) -> str:
+    appearance_text = json.dumps(appearance, ensure_ascii=False, sort_keys=True)[:1200]
+    name = agent_name.strip() or "the reference character"
+    return (
+        "Use the uploaded reference image as the character identity reference. "
+        "Generate a transparent-background pixel-art RPG character spritesheet for GOD PixelReplay. "
+        "The output must be one clean 3-column by 4-row sprite sheet, no labels, no text, no gridlines, no extra objects. "
+        "Rows must be: facing down, facing left, facing right, facing up. "
+        "Each row must contain three full-body walking frames of the same character, centered in each cell. "
+        "Keep the reference character's main visual traits, especially hair shape/color, clothing colors, silhouette, and expression mood. "
+        "Use a readable small pixel-art style compatible with 32x32 frames and a campus map. "
+        f"Agent name/context: {name}. Seed prompt: {prompt[:800]}. MBTI: {mbti[:12]}. Appearance choices: {appearance_text}."
     )
 
 
-def _shade_color(color: tuple[int, int, int], amount: float) -> tuple[int, int, int]:
-    return tuple(max(0, min(255, int(channel * amount))) for channel in color)
+async def _download_image_url(url: str, *, api_key: str) -> bytes:
+    timeout = aiohttp.ClientTimeout(total=float(os.getenv("GOD_IMAGE_DOWNLOAD_TIMEOUT", "90")))
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(url) as response:
+            data = await response.read()
+            if response.status >= 400:
+                text = data.decode("utf-8", errors="replace")
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Image download failed: {_sanitize_model_error(text, api_key)}",
+                )
+            return data
 
 
-def _draw_agent_studio_frame(
-    draw: ImageDraw.ImageDraw,
+async def _request_openai_sprite_image(
     *,
-    x: int,
-    y: int,
-    direction: str,
-    step: int,
-    base_color: tuple[int, int, int],
-    accent_color: tuple[int, int, int],
-    mecha: bool,
-) -> None:
-    center = x + 16
-    foot_shift = [-2, 0, 2][step]
-    shadow = (24, 24, 24, 54)
-    outline = (40, 48, 56, 255)
-    highlight = _mix_color(base_color, 0.42)
-    dark = _shade_color(base_color, 0.62)
-    eye = accent_color if mecha else (32, 50, 72)
-
-    draw.ellipse((x + 7, y + 25, x + 25, y + 30), fill=shadow)
-    if mecha:
-        draw.rectangle((center - 7, y + 13, center + 7, y + 24), fill=base_color + (255,), outline=outline)
-        draw.rectangle((center - 6, y + 6, center + 6, y + 14), fill=highlight + (255,), outline=outline)
-        draw.rectangle((center - 10, y + 16, center - 7, y + 23), fill=dark + (255,), outline=outline)
-        draw.rectangle((center + 7, y + 16, center + 10, y + 23), fill=dark + (255,), outline=outline)
-        draw.rectangle((center - 6 + foot_shift, y + 24, center - 2 + foot_shift, y + 28), fill=outline)
-        draw.rectangle((center + 2 - foot_shift, y + 24, center + 6 - foot_shift, y + 28), fill=outline)
-        if direction == "up":
-            draw.rectangle((center - 4, y + 9, center + 4, y + 10), fill=dark + (255,))
-        elif direction == "left":
-            draw.rectangle((center - 5, y + 9, center - 1, y + 10), fill=eye + (255,))
-        elif direction == "right":
-            draw.rectangle((center + 1, y + 9, center + 5, y + 10), fill=eye + (255,))
-        else:
-            draw.rectangle((center - 5, y + 9, center - 2, y + 10), fill=eye + (255,))
-            draw.rectangle((center + 2, y + 9, center + 5, y + 10), fill=eye + (255,))
-        draw.line((center - 5, y + 17, center + 5, y + 17), fill=highlight + (255,))
-        return
-
-    skin = _mix_color(base_color, 0.64)
-    outfit = _shade_color(base_color, 0.72)
-    hair = _shade_color(accent_color, 0.55)
-    draw.rectangle((center - 5, y + 14, center + 5, y + 24), fill=outfit + (255,), outline=outline)
-    draw.rectangle((center - 8, y + 16, center - 5, y + 23), fill=dark + (255,), outline=outline)
-    draw.rectangle((center + 5, y + 16, center + 8, y + 23), fill=dark + (255,), outline=outline)
-    draw.rectangle((center - 5 + foot_shift, y + 24, center - 2 + foot_shift, y + 28), fill=outline)
-    draw.rectangle((center + 2 - foot_shift, y + 24, center + 5 - foot_shift, y + 28), fill=outline)
-    draw.ellipse((center - 6, y + 5, center + 6, y + 16), fill=skin + (255,), outline=outline)
-    draw.pieslice((center - 7, y + 4, center + 7, y + 16), 180, 360, fill=hair + (255,))
-    if direction == "up":
-        draw.arc((center - 4, y + 8, center + 4, y + 15), 200, 340, fill=hair + (255,), width=2)
-    elif direction == "left":
-        draw.ellipse((center - 4, y + 10, center - 2, y + 12), fill=eye + (255,))
-    elif direction == "right":
-        draw.ellipse((center + 2, y + 10, center + 4, y + 12), fill=eye + (255,))
-    else:
-        draw.ellipse((center - 4, y + 10, center - 2, y + 12), fill=eye + (255,))
-        draw.ellipse((center + 2, y + 10, center + 4, y + 12), fill=eye + (255,))
-
-
-def _render_agent_studio_spritesheet(
-    *,
-    photo_bytes: bytes,
+    api_key: str,
+    api_base: str,
+    model: str,
     prompt: str,
+    reference_bytes: bytes,
+    reference_filename: str,
+    content_type: str,
 ) -> bytes:
-    base = _average_photo_color(photo_bytes)
-    accent_seed = hashlib.sha256(photo_bytes[:2048] + prompt.encode("utf-8")).digest()
-    accent = (accent_seed[0], accent_seed[1], accent_seed[2])
-    mecha = _studio_detect_theme(prompt) == "mecha"
-    sheet = Image.new("RGBA", (96, 128), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(sheet)
-    for row, direction in enumerate(("down", "left", "right", "up")):
-        for column in range(3):
-            _draw_agent_studio_frame(
-                draw,
-                x=column * 32,
-                y=row * 32,
-                direction=direction,
-                step=column,
-                base_color=base,
-                accent_color=accent,
-                mecha=mecha,
-            )
-    out = io.BytesIO()
-    sheet.save(out, format="PNG")
-    return out.getvalue()
+    base = api_base.rstrip("/") or IMAGE_ENV_DEFAULTS["IMAGE_GEN_API_BASE"]
+    url = base if base.endswith("/images/edits") else f"{base}/images/edits"
+    form = aiohttp.FormData()
+    form.add_field("model", model)
+    form.add_field("prompt", prompt)
+    form.add_field("size", "1024x1024")
+    form.add_field("n", "1")
+    form.add_field("background", "transparent")
+    form.add_field("output_format", "png")
+    form.add_field(
+        "image",
+        reference_bytes,
+        filename=Path(reference_filename or "reference.png").name,
+        content_type=content_type or "image/png",
+    )
+    timeout = aiohttp.ClientTimeout(total=float(os.getenv("GOD_AGENT_SPRITE_TIMEOUT", "240")))
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                url,
+                headers={"authorization": f"Bearer {api_key}"},
+                data=form,
+            ) as response:
+                text = await response.text()
+                if response.status >= 400:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"Image model request failed: {_sanitize_model_error(text, api_key)}",
+                    )
+                payload = json.loads(text)
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="Image model request timed out") from exc
+    except aiohttp.ClientError as exc:
+        raise HTTPException(status_code=502, detail=f"Image model request failed: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=502, detail=f"Image model returned invalid JSON: {exc}") from exc
+
+    item = (payload.get("data") or [{}])[0]
+    if isinstance(item, dict) and item.get("b64_json"):
+        try:
+            return base64.b64decode(str(item["b64_json"]))
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Image model returned invalid base64 data: {exc}") from exc
+    if isinstance(item, dict) and item.get("url"):
+        return await _download_image_url(str(item["url"]), api_key=api_key)
+    raise HTTPException(status_code=502, detail="Image model response did not include image data")
 
 
-def _character_asset_url(map_id: str, filename: str) -> str:
-    return f"/api/v1/god/setup/agent-studio/characters/{quote(map_id)}/{quote(filename)}"
+def _validate_and_resize_sprite_sheet(raw_bytes: bytes) -> bytes:
+    try:
+        with Image.open(io.BytesIO(raw_bytes)) as original:
+            image = original.convert("RGBA")
+    except (UnidentifiedImageError, OSError) as exc:
+        raise ValueError(f"generated image is not a readable PNG/WebP/JPEG: {exc}") from exc
+
+    if image.size != AGENT_SPRITE_SIZE:
+        image = image.resize(AGENT_SPRITE_SIZE, Image.Resampling.LANCZOS)
+
+    alpha_values = list(image.getchannel("A").getdata())
+    visible_pixels = sum(1 for value in alpha_values if value > 12)
+    transparent_pixels = len(alpha_values) - visible_pixels
+    if visible_pixels < 240:
+        raise ValueError("generated sprite sheet is empty")
+    if transparent_pixels < int(len(alpha_values) * 0.08):
+        raise ValueError("generated sprite sheet must have transparent or background-safe empty space")
+
+    frame_w, frame_h = AGENT_SPRITE_FRAME_SIZE
+    for row in range(4):
+        for col in range(3):
+            frame = image.crop((col * frame_w, row * frame_h, (col + 1) * frame_w, (row + 1) * frame_h))
+            frame_visible = sum(1 for value in frame.getchannel("A").getdata() if value > 12)
+            if frame_visible < 20:
+                raise ValueError(f"frame {row * 3 + col + 1} is not usable")
+
+    output = io.BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
+def _unique_sprite_filename(root: Path, *, agent_id: int, agent_name: str) -> tuple[str, str]:
+    slug_source = agent_name or f"agent_{agent_id}"
+    slug = _sanitize_slug(slug_source)
+    base = f"Generated_Agent_{int(agent_id)}_{slug}"
+    filename = f"{base}.png"
+    counter = 2
+    while (root / filename).exists():
+        filename = f"{base}_{counter}.png"
+        counter += 1
+    return Path(filename).stem, filename
+
+
+async def _generate_agent_sprite_asset(
+    *,
+    reference_bytes: bytes,
+    reference_filename: str,
+    content_type: str,
+    agent_id: int,
+    agent_name: str,
+    map_id: str,
+    prompt: str,
+    mbti: str,
+    appearance: dict[str, Any],
+    image_config: dict[str, Any],
+) -> AgentStudioCharacterAsset:
+    resolved_config = _resolve_image_config(image_config)
+    package = _load_map_package(map_id)
+    root = _agent_studio_character_root(package)
+
+    api_key = resolved_config["IMAGE_GEN_API_KEY"].strip()
+    api_base = resolved_config.get("IMAGE_GEN_API_BASE", IMAGE_ENV_DEFAULTS["IMAGE_GEN_API_BASE"]).strip()
+    model = resolved_config.get("IMAGE_GEN_MODEL_NAME", IMAGE_ENV_DEFAULTS["IMAGE_GEN_MODEL_NAME"]).strip()
+    sprite_prompt = _agent_sprite_prompt(agent_name=agent_name, prompt=prompt, mbti=mbti, appearance=appearance)
+    last_error = "unknown validation failure"
+
+    for _attempt in range(AGENT_SPRITE_GENERATION_ATTEMPTS):
+        raw = await _request_openai_sprite_image(
+            api_key=api_key,
+            api_base=api_base,
+            model=model,
+            prompt=sprite_prompt,
+            reference_bytes=reference_bytes,
+            reference_filename=reference_filename,
+            content_type=content_type,
+        )
+        try:
+            sprite_bytes = _validate_and_resize_sprite_sheet(raw)
+        except ValueError as exc:
+            last_error = str(exc)
+            continue
+
+        sprite_name, filename = _unique_sprite_filename(root, agent_id=agent_id, agent_name=agent_name)
+        target = root / filename
+        temp_target = target.with_suffix(".tmp")
+        temp_target.write_bytes(sprite_bytes)
+        temp_target.replace(target)
+        _write_image_env_values(resolved_config)
+        source = {
+            "provider": resolved_config.get("IMAGE_GEN_PROVIDER", "openai"),
+            "model": model,
+            "api_base": api_base,
+            "reference_filename": Path(reference_filename or "reference.png").name,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "map_id": package.map_id,
+        }
+        return AgentStudioCharacterAsset(
+            sprite_name=sprite_name,
+            filename=filename,
+            image_url=_character_asset_url(package.map_id, filename),
+            frame_width=AGENT_SPRITE_FRAME_SIZE[0],
+            frame_height=AGENT_SPRITE_FRAME_SIZE[1],
+            source_photo_name=Path(reference_filename or "").name or None,
+            preview_data_url=f"data:image/png;base64,{base64.b64encode(sprite_bytes).decode('ascii')}",
+            source=source,
+        )
+
+    raise HTTPException(
+        status_code=502,
+        detail=f"Image model did not produce a valid 96x128 / 32x32-frame sprite sheet: {last_error}",
+    )
 
 
 def _scenario_templates(background: str, language: str) -> list[dict[str, Any]]:
@@ -1419,16 +1606,6 @@ def _readme_for_draft(context: dict[str, Any], init_config: dict[str, Any], step
     )
 
 
-def _sanitize_model_error(text: str, api_key: str) -> str:
-    sanitized = text
-    if api_key:
-        sanitized = sanitized.replace(api_key, "sk-...redacted")
-        if len(api_key) > 12:
-            sanitized = sanitized.replace(api_key[:8], "sk-...").replace(api_key[-4:], "****")
-    sanitized = re.sub(r"sk-[A-Za-z0-9_\-*]{8,}", "sk-...redacted", sanitized)
-    return sanitized[:800]
-
-
 async def _call_openai_compatible(
     *,
     api_key: str,
@@ -1665,6 +1842,7 @@ def _write_latest_draft(basics: DraftBasics, draft: dict[str, Any]) -> None:
 @router.get("/status")
 async def setup_status() -> dict[str, Any]:
     env = _merged_env()
+    image_env = _merged_image_env()
     current = _read_current_experiment()
     hypothesis_id = str((current or {}).get("hypothesis_id") or "")
     experiment_id = str((current or {}).get("experiment_id") or "1")
@@ -1685,6 +1863,7 @@ async def setup_status() -> dict[str, Any]:
         "maps": maps,
         "map_locations": _map_locations_for_status(selected_map_id),
         "model_config": {key: _redact_value(key, env.get(key)) for key in MODEL_KEYS},
+        "image_model_config": {key: _redact_value(key, image_env.get(key)) for key in IMAGE_MODEL_KEYS},
         "current_experiment": current,
         "setup_mode": os.environ.get("GOD_SETUP_MODE") == "1",
         "default_experiments": default_experiments,
@@ -1751,32 +1930,54 @@ async def generate_agent_studio_options(
 async def generate_agent_studio_character(
     file: UploadFile = File(...),
     map_id: str = Form(DEFAULT_MAP_ID),
+    agent_id: int = Form(0),
     agent_name: str = Form(""),
     prompt: str = Form(""),
     mbti: str = Form(""),
+    appearance_json: str = Form("{}"),
+    image_api_key: str = Form(""),
+    image_api_base: str = Form(""),
+    image_model: str = Form(""),
+    image_provider: str = Form("openai"),
 ) -> AgentStudioCharacterAsset:
+    map_id = _form_text(map_id, DEFAULT_MAP_ID)
+    agent_name = _form_text(agent_name)
+    prompt = _form_text(prompt)
+    mbti = _form_text(mbti)
+    appearance_json = _form_text(appearance_json, "{}")
+    image_api_key = _form_text(image_api_key)
+    image_api_base = _form_text(image_api_base)
+    image_model = _form_text(image_model)
+    image_provider = _form_text(image_provider, "openai")
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Image upload is empty")
     if len(content) > 8 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Image upload is too large; keep it under 8 MB")
 
-    package = _load_map_package(map_id)
-    root = _agent_studio_character_root(package)
-    slug_source = agent_name or Path(file.filename or "agent").stem or "agent"
-    slug = _studio_slug(slug_source, "agent")
-    filename = f"AgentStudio_{slug}_{uuid.uuid4().hex[:8]}.png"
-    sprite_path = root / filename
-    sprite_bytes = _render_agent_studio_spritesheet(
-        photo_bytes=content,
-        prompt="\n".join([prompt, mbti, agent_name]),
-    )
-    sprite_path.write_bytes(sprite_bytes)
-    return AgentStudioCharacterAsset(
-        sprite_name=sprite_path.stem,
-        filename=filename,
-        image_url=_character_asset_url(package.map_id, filename),
-        source_photo_name=Path(file.filename or "").name or None,
+    try:
+        appearance = json.loads(appearance_json or "{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"appearance_json must be a JSON object: {exc}") from exc
+    if not isinstance(appearance, dict):
+        raise HTTPException(status_code=400, detail="appearance_json must be a JSON object")
+
+    return await _generate_agent_sprite_asset(
+        reference_bytes=content,
+        reference_filename=file.filename or "reference.png",
+        content_type=file.content_type or "image/png",
+        agent_id=agent_id,
+        agent_name=agent_name,
+        map_id=map_id,
+        prompt=prompt,
+        mbti=mbti,
+        appearance=appearance,
+        image_config={
+            "image_api_key": image_api_key,
+            "image_api_base": image_api_base,
+            "image_model": image_model,
+            "image_provider": image_provider,
+        },
     )
 
 

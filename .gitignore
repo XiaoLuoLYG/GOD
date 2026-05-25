@@ -58,3 +58,6 @@ agentsociety/quick_experiments/hypothesis_pku_trump_visit/**/run_stuck*/
 agentsociety/quick_experiments/hypothesis_pku_trump_visit/**/run_launcher.log
 agentsociety/quick_experiments/hypothesis_god_town/experiment_1/run/**/*.log
 agentsociety/quick_experiments/hypothesis_pku_trump_visit/experiment_1/run/**/*.log
+
+# Agent Studio generates these locally; configs should not depend on committed test sprites.
+agentsociety/custom/maps/*/characters/Generated_Agent_*.png

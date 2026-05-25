@@ -56,6 +56,7 @@ type AgentEditorModalProps = {
     open: boolean;
     editingAgentId: number | null;
     form: FormInstance<AgentFormValues>;
+    initialValues?: AgentFormValues | null;
     agentClasses?: AgentClassInfo[];
     width?: number;
     minAgentId?: number;
@@ -100,10 +101,20 @@ type CharacterAsset = {
     frame_height: number;
     source_photo_name?: string | null;
     generated_from_photo?: boolean;
+    preview_data_url?: string | null;
+    source?: Record<string, unknown>;
 };
 
-const stepKeys = ['seed', 'identity', 'appearance', 'personality', 'daily', 'review'] as const;
-type StepKey = typeof stepKeys[number];
+const defaultImageConfig = {
+    image_provider: 'openai',
+    image_api_base: 'https://api.openai.com/v1',
+    image_model: 'gpt-image-1.5',
+    image_api_key: '',
+};
+
+const allStepKeys = ['seed', 'identity', 'appearance', 'personality', 'daily', 'review'] as const;
+type StepKey = typeof allStepKeys[number];
+type ChoiceStepKey = Exclude<StepKey, 'seed' | 'review'>;
 
 const stepIcons: Record<StepKey, React.ReactNode> = {
     seed: <RobotOutlined />,
@@ -120,6 +131,31 @@ const safeParseObject = (value: string, fallback: Record<string, any>) => {
     } catch {
         return fallback;
     }
+};
+
+const asRecord = (value: unknown): Record<string, any> => (
+    value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}
+);
+
+const compactRecord = (value: Record<string, any>) => (
+    Object.fromEntries(
+        Object.entries(value).filter(([, item]) => item !== undefined && item !== null && item !== '')
+    )
+);
+
+const storableCharacterAsset = (asset?: CharacterAsset | null): CharacterAsset | null => {
+    if (!asset) return null;
+    const cleaned = compactRecord({
+        sprite_name: asset.sprite_name,
+        filename: asset.filename,
+        image_url: asset.image_url,
+        frame_width: asset.frame_width,
+        frame_height: asset.frame_height,
+        source_photo_name: asset.source_photo_name,
+        generated_from_photo: asset.generated_from_photo,
+        source: asset.source,
+    }) as CharacterAsset;
+    return cleaned.sprite_name && cleaned.filename ? cleaned : null;
 };
 
 const valueForOption = (group: StudioGroup, option: StudioOption) => (
@@ -149,6 +185,34 @@ const firstLocationId = (locations: AgentStudioLocation[], fallback?: string) =>
 const shortText = (value: unknown, max = 180) => {
     const text = String(value || '').trim();
     return text.length > max ? `${text.slice(0, max)}...` : text;
+};
+
+const studioGroupMeta = (language: string): Record<string, { title: string; step: ChoiceStepKey; allow_custom: boolean }> => {
+    const zh = !language.startsWith('en');
+    return {
+        identity_role: { title: zh ? '身份角色' : 'Role', step: 'identity', allow_custom: true },
+        identity_function: { title: zh ? '剧情功能' : 'Scenario function', step: 'identity', allow_custom: true },
+        appearance_form: { title: zh ? '形体' : 'Body', step: 'appearance', allow_custom: true },
+        appearance_eyes: { title: zh ? '眼神' : 'Eyes', step: 'appearance', allow_custom: true },
+        appearance_hair: { title: zh ? '发型' : 'Hair', step: 'appearance', allow_custom: true },
+        appearance_style: { title: zh ? '服装风格' : 'Style', step: 'appearance', allow_custom: true },
+        personality_core: { title: zh ? '核心性格' : 'Core personality', step: 'personality', allow_custom: true },
+        personality_social: { title: zh ? '社交方式' : 'Social style', step: 'personality', allow_custom: true },
+        personality_decision: { title: zh ? '决策倾向' : 'Decision style', step: 'personality', allow_custom: true },
+        personality_mood: { title: zh ? '情绪底色' : 'Mood', step: 'personality', allow_custom: true },
+        routine_goal: { title: zh ? '日常目标' : 'Daily goal', step: 'daily', allow_custom: true },
+        routine_habit: { title: zh ? '日常习惯' : 'Daily habit', step: 'daily', allow_custom: true },
+        relationship_style: { title: zh ? '关系习惯' : 'Relationship habit', step: 'daily', allow_custom: true },
+        initial_location: { title: zh ? '初始位置' : 'Initial location', step: 'daily', allow_custom: false },
+    };
+};
+
+const semanticGroupsForChoice = (groupId: string) => {
+    if (groupId.startsWith('identity_')) return ['identity'];
+    if (groupId.startsWith('personality_')) return ['personality'];
+    if (groupId === 'routine_goal' || groupId === 'routine_habit' || groupId === 'initial_location') return ['routine'];
+    if (groupId === 'relationship_style') return ['relationships'];
+    return [];
 };
 
 const knownContextText: Record<string, Record<'en' | 'zh', string>> = {
@@ -194,6 +258,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
     open,
     editingAgentId,
     form,
+    initialValues,
     agentClasses = [],
     width = 980,
     minAgentId = 0,
@@ -215,7 +280,10 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
     const [sourcePrompt, setSourcePrompt] = useState('');
     const [mbti, setMbti] = useState('');
     const [photoName, setPhotoName] = useState('');
+    const [photoFile, setPhotoFile] = useState<File | null>(null);
+    const [photoPreviewUrl, setPhotoPreviewUrl] = useState('');
     const [characterAsset, setCharacterAsset] = useState<CharacterAsset | null>(null);
+    const [imageConfig, setImageConfig] = useState(defaultImageConfig);
     const [groups, setGroups] = useState<StudioGroup[]>([]);
     const [selectedChoices, setSelectedChoices] = useState<Record<string, string>>({});
     const [customChoices, setCustomChoices] = useState<Record<string, string>>({});
@@ -229,10 +297,20 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
     const [generationRound, setGenerationRound] = useState(0);
     const [warnings, setWarnings] = useState<string[]>([]);
     const [autoGeneratePending, setAutoGeneratePending] = useState(false);
+    const [touchedSemanticGroups, setTouchedSemanticGroups] = useState<Set<string>>(() => new Set());
+
+    const profileForView = useMemo(() => safeParseObject(profileJsonText, {}), [profileJsonText]);
+    const appearanceForView = asRecord(profileForView.appearance);
+    const hasExistingSprite = Boolean(appearanceForView.character_sprite);
+    const hasVisualReference = Boolean(photoFile || photoName || characterAsset || hasExistingSprite);
+    const stepKeys = useMemo<StepKey[]>(() => (
+        hasVisualReference ? allStepKeys.filter((key) => key !== 'appearance') : [...allStepKeys]
+    ), [hasVisualReference]);
+    const currentStepKey = stepKeys[currentStep] || 'review';
 
     const visibleGroups = useMemo(() => (
-        groups.filter((group) => group.step === stepKeys[currentStep])
-    ), [currentStep, groups]);
+        groups.filter((group) => group.step === currentStepKey)
+    ), [currentStepKey, groups]);
 
     const groupById = useMemo(() => {
         const map = new Map<string, StudioGroup>();
@@ -245,38 +323,192 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         || localizedContextValue(experimentContext, 'world_setting', i18n.language);
     const selectedLocationLabel = labelForChoice(groupById.get('initial_location'), initialLocationValue);
 
+    const buildLocalGroups = (
+        nextSelected: Record<string, string>,
+        nextCustom: Record<string, string>,
+    ): StudioGroup[] => {
+        const meta = studioGroupMeta(i18n.language);
+        const locale = localeKey(i18n.language);
+        return Object.entries(meta).map(([id, item]) => {
+            if (id === 'initial_location') {
+                return {
+                    id,
+                    title: item.title,
+                    step: item.step,
+                    allow_custom: false,
+                    options: mapLocations.map((location) => ({
+                        id: location.id,
+                        label: String(location.localized?.[locale]?.name || location.name || location.id),
+                    })),
+                };
+            }
+            const values = [nextCustom[id], nextSelected[id]].filter((value): value is string => Boolean(value));
+            const options = Array.from(new Set(values)).map((value, index) => ({
+                id: `stored_${id}_${index}`,
+                label: value,
+            }));
+            return {
+                id,
+                title: item.title,
+                step: item.step,
+                allow_custom: item.allow_custom,
+                options,
+            };
+        });
+    };
+
+    const withStoredChoices = (
+        sourceGroups: StudioGroup[],
+        nextSelected: Record<string, string>,
+        nextCustom: Record<string, string>,
+    ) => {
+        const baseGroups = sourceGroups.length ? sourceGroups : buildLocalGroups(nextSelected, nextCustom);
+        return baseGroups.map((group) => {
+            if (group.id === 'initial_location') {
+                return group.options.length ? group : buildLocalGroups(nextSelected, nextCustom).find((item) => item.id === group.id) || group;
+            }
+            return [nextCustom[group.id], nextSelected[group.id]]
+                .filter((value): value is string => Boolean(value))
+                .reduce((current, value) => withPersistentChoice(current, value), group);
+        });
+    };
+
+    const assetFromProfile = (profile: Record<string, any>): CharacterAsset | null => {
+        const studio = asRecord(profile.agent_studio);
+        const source = asRecord(studio.source);
+        const existingAsset = studio.character_asset || source.character_asset || asRecord(profile.appearance).character_asset;
+        if (existingAsset && typeof existingAsset === 'object' && typeof existingAsset.sprite_name === 'string') {
+            return existingAsset as CharacterAsset;
+        }
+        const appearance = asRecord(profile.appearance);
+        const spriteName = String(appearance.character_sprite || '').trim();
+        if (!spriteName) return null;
+        const filename = String(appearance.character_sprite_filename || `${spriteName}.png`);
+        return {
+            sprite_name: spriteName,
+            filename,
+            image_url: `/api/v1/god/setup/agent-studio/characters/${encodeURIComponent(mapId)}/${encodeURIComponent(filename)}`,
+            frame_width: 32,
+            frame_height: 32,
+            source: asRecord(appearance.character_sprite_source),
+        };
+    };
+
+    const buildStudioDraft = (
+        profile: Record<string, any>,
+        studio: Record<string, any>,
+        nextInitialLocation?: string,
+    ) => {
+        const appearance = asRecord(profile.appearance);
+        const personality = asRecord(profile.personality);
+        const routine = asRecord(profile.routine);
+        const selected = { ...asRecord(studio.selected_choices) } as Record<string, string>;
+        const custom = { ...asRecord(studio.custom_choices) } as Record<string, string>;
+        const legacyChoices: Record<string, unknown> = {
+            identity_role: profile.role,
+            identity_function: profile.scenario_role || profile.role,
+            appearance_form: appearance.form,
+            appearance_eyes: appearance.eyes,
+            appearance_hair: appearance.hair,
+            appearance_style: appearance.style,
+            personality_core: personality.core || profile.persona,
+            personality_social: personality.social,
+            personality_decision: personality.decision,
+            personality_mood: personality.mood,
+            routine_goal: routine.goal || profile.goal,
+            routine_habit: routine.habit || profile.daily_routine,
+            relationship_style: routine.relationship_style || profile.relationships,
+        };
+        Object.entries(legacyChoices).forEach(([id, raw]) => {
+            const value = String(raw || '').trim();
+            if (!value) return;
+            if (!selected[id]) selected[id] = value;
+            if (!custom[id] && !asRecord(studio.selected_choices)[id]) custom[id] = value;
+        });
+        selected.initial_location = String(
+            nextInitialLocation
+            || selected.initial_location
+            || routine.initial_location
+            || firstLocationId(mapLocations, defaultInitialLocation)
+        );
+        const storedGroups = Array.isArray(studio.groups) ? studio.groups as StudioGroup[] : [];
+        return {
+            selected,
+            custom,
+            groups: withStoredChoices(storedGroups, selected, custom),
+        };
+    };
+
+    const mergeProfilePatch = (
+        currentProfile: Record<string, any>,
+        patch: Record<string, any>,
+        nextSelected: Record<string, string>,
+        nextCustom: Record<string, string>,
+        nextCharacterAsset: CharacterAsset | null = characterAsset,
+        nextPhotoName = photoName,
+        nextName = name,
+    ) => {
+        const patchAppearance = asRecord(patch.appearance);
+        const storedCharacterAsset = storableCharacterAsset(nextCharacterAsset);
+        const nextAppearance: Record<string, any> = {
+            ...asRecord(currentProfile.appearance),
+            ...patchAppearance,
+        };
+        if (storedCharacterAsset) {
+            nextAppearance.character_asset = storedCharacterAsset;
+            nextAppearance.character_sprite = storedCharacterAsset.sprite_name;
+            nextAppearance.character_sprite_filename = storedCharacterAsset.filename;
+            nextAppearance.character_sprite_source = storedCharacterAsset.source || {};
+        }
+        const currentStudio = asRecord(currentProfile.agent_studio);
+        const patchStudio = asRecord(patch.agent_studio);
+        const { groups: _currentGroups, ...currentStudioRest } = currentStudio;
+        const { groups: _patchGroups, ...patchStudioRest } = patchStudio;
+        const { appearance: _patchAppearance, agent_studio: _patchAgentStudio, ...patchRest } = patch;
+        return {
+            ...currentProfile,
+            ...patchRest,
+            appearance: nextAppearance,
+            name: nextName || patch.name || currentProfile.name,
+            scenario: patch.scenario || currentProfile.scenario || contextBackground,
+            agent_studio: {
+                version: 1,
+                ...currentStudioRest,
+                ...patchStudioRest,
+                source: {
+                    ...asRecord(currentStudio.source),
+                    ...asRecord(patchStudio.source),
+                    prompt: sourcePrompt,
+                    mbti: mbti || undefined,
+                    photo_name: nextPhotoName || undefined,
+                    character_asset: storedCharacterAsset || undefined,
+                },
+                selected_choices: nextSelected,
+                custom_choices: nextCustom,
+                map_id: mapId,
+                character_asset: storedCharacterAsset || undefined,
+            },
+        };
+    };
+
     const applyProfilePatch = (
         patch: Record<string, any>,
         nextSelected: Record<string, string>,
         nextCustom: Record<string, string>,
-        nextGroups: StudioGroup[],
         nextCharacterAsset: CharacterAsset | null = characterAsset,
         nextPhotoName = photoName,
         nextName = name,
     ) => {
         const currentProfile = safeParseObject(profileJsonText, {});
-        const nextProfile = {
-            ...currentProfile,
-            ...patch,
-            name: nextName || patch.name || currentProfile.name,
-            scenario: patch.scenario || currentProfile.scenario || contextBackground,
-            agent_studio: {
-                ...(currentProfile.agent_studio || {}),
-                ...(patch.agent_studio || {}),
-                source: {
-                    prompt: sourcePrompt,
-                    mbti,
-                    photo_name: nextPhotoName,
-                    character_asset: nextCharacterAsset,
-                },
-                selected_choices: nextSelected,
-                custom_choices: nextCustom,
-                groups: nextGroups,
-                map_id: mapId,
-                character_asset: nextCharacterAsset,
-            },
-        };
-        setProfileJsonText(jsonStringify(nextProfile));
+        setProfileJsonText(jsonStringify(mergeProfilePatch(
+            currentProfile,
+            patch,
+            nextSelected,
+            nextCustom,
+            nextCharacterAsset,
+            nextPhotoName,
+            nextName,
+        )));
     };
 
     const patchFromSelections = (
@@ -285,6 +517,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         nextGroups = groups,
         nextCharacterAsset: CharacterAsset | null = characterAsset,
         nextPhotoName = photoName,
+        semanticScope?: 'all' | Set<string>,
     ) => {
         const label = (id: string) => labelForChoice(nextGroups.find((group) => group.id === id), nextSelected[id] || '');
         const role = label('identity_role') || 'participant';
@@ -298,51 +531,91 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         const relation = label('relationship_style');
         const location = labelForChoice(nextGroups.find((group) => group.id === 'initial_location'), nextSelected.initial_location || initialLocationValue);
         const zh = !i18n.language.startsWith('en');
-        return {
-            name,
-            role,
-            persona: zh
-                ? `${core}，${social}，倾向于${decision}，情绪底色是${mood}。${sourcePrompt ? `设定种子：${sourcePrompt}` : ''}`
-                : `${core}; ${social}; tends toward ${decision}; emotional tone: ${mood}. ${sourcePrompt ? `Seed: ${sourcePrompt}` : ''}`,
-            daily_routine: zh
-                ? `${habit}，常在${location}附近活动，围绕“${goal}”安排日常。`
-                : `${habit}; usually acts around ${location} and organizes the day around "${goal}".`,
-            relationships: zh
-                ? `关系习惯是${relation}，会根据当前实验背景和其他居民反应调整互动。`
-                : `Relationship habit: ${relation}; adapts to the current scenario and other residents' reactions.`,
-            goal,
-            constraints: zh
-                ? '只能使用当前地图已有地点行动；地图外概念会转译为当前地图内的行为。'
-                : 'Use only locations available on the current map; off-map concepts are translated into behavior on this map.',
-            scenario: contextBackground,
-            scenario_role: functionLabel,
-            mbti: mbti || undefined,
-            appearance: {
+        const includeSemantic = (key: string) => semanticScope === 'all' || Boolean(semanticScope?.has(key));
+        const storedCharacterAsset = storableCharacterAsset(nextCharacterAsset);
+        const appearancePatch = compactRecord({
+            ...(hasVisualReference ? {} : {
                 form: label('appearance_form'),
                 eyes: label('appearance_eyes'),
                 hair: label('appearance_hair'),
                 style: label('appearance_style'),
-                photo_reference: nextPhotoName || undefined,
-                character_asset: nextCharacterAsset || undefined,
-                character_sprite: nextCharacterAsset?.sprite_name,
-            },
-            personality: { core, social, decision, mood },
-            routine: {
+            }),
+            photo_reference: nextPhotoName || undefined,
+            character_asset: storedCharacterAsset || undefined,
+            character_sprite: nextCharacterAsset?.sprite_name,
+            character_sprite_filename: nextCharacterAsset?.filename,
+            character_sprite_source: nextCharacterAsset?.source,
+        });
+        const patch: Record<string, any> = {
+            name,
+            mbti: mbti || undefined,
+            appearance: appearancePatch,
+            personality: compactRecord({ core, social, decision, mood }),
+            routine: compactRecord({
                 goal,
                 habit,
                 relationship_style: relation,
                 initial_location: nextSelected.initial_location || initialLocationValue,
                 initial_location_label: location,
-            },
+            }),
             agent_studio: {
-                source: { prompt: sourcePrompt, mbti, photo_name: nextPhotoName, character_asset: nextCharacterAsset },
+                version: 1,
+                source: { prompt: sourcePrompt, mbti, photo_name: nextPhotoName, character_asset: storedCharacterAsset },
                 selected_choices: nextSelected,
                 custom_choices: nextCustom,
-                groups: nextGroups,
                 map_id: mapId,
-                character_asset: nextCharacterAsset,
+                character_asset: storedCharacterAsset,
             },
         };
+        if (includeSemantic('identity')) {
+            patch.role = role;
+            patch.scenario_role = functionLabel;
+        }
+        if (includeSemantic('personality')) {
+            const personaParts = zh
+                ? [
+                    core,
+                    social,
+                    decision ? `倾向于${decision}` : '',
+                    mood ? `情绪底色是${mood}` : '',
+                    sourcePrompt ? `设定种子：${sourcePrompt}` : '',
+                ]
+                : [
+                    core,
+                    social,
+                    decision ? `tends toward ${decision}` : '',
+                    mood ? `emotional tone: ${mood}` : '',
+                    sourcePrompt ? `Seed: ${sourcePrompt}` : '',
+                ];
+            patch.persona = `${personaParts.filter(Boolean).join(zh ? '，' : '; ')}${zh ? '。' : '.'}`;
+        }
+        if (includeSemantic('routine')) {
+            patch.goal = goal;
+            const routineParts = zh
+                ? [
+                    habit,
+                    location ? `常在${location}附近活动` : '',
+                    goal ? `围绕“${goal}”安排日常` : '',
+                ]
+                : [
+                    habit,
+                    location ? `usually acts around ${location}` : '',
+                    goal ? `organizes the day around "${goal}"` : '',
+                ];
+            patch.daily_routine = `${routineParts.filter(Boolean).join(zh ? '，' : '; ')}${zh ? '。' : '.'}`;
+        }
+        if (includeSemantic('relationships')) {
+            patch.relationships = zh
+                ? `关系习惯是${relation}，会根据当前实验背景和其他居民反应调整互动。`
+                : `Relationship habit: ${relation}; adapts to the current scenario and other residents' reactions.`;
+        }
+        if (semanticScope === 'all') {
+            patch.constraints = zh
+                ? '只能使用当前地图已有地点行动；地图外概念会转译为当前地图内的行为。'
+                : 'Use only locations available on the current map; off-map concepts are translated into behavior on this map.';
+            patch.scenario = contextBackground;
+        }
+        return patch;
     };
 
     const requestGeneration = async (
@@ -366,7 +639,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                         prompt: sourcePrompt,
                         mbti,
                         photo_name: photoName,
-                        character_asset: characterAsset,
+                        character_asset: storableCharacterAsset(characterAsset),
                         round: nextRound,
                         reroll_group: rerollGroupId,
                     },
@@ -418,11 +691,21 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
             if (nextName !== name) {
                 setName(nextName);
             }
+            const semanticScope = rerollGroupId ? new Set(semanticGroupsForChoice(rerollGroupId)) : 'all';
+            const nextPatch = rerollGroupId
+                ? patchFromSelections(
+                    nextSelected,
+                    nextCustom,
+                    nextGroups,
+                    payload.character_asset || characterAsset,
+                    photoName,
+                    semanticScope,
+                )
+                : (payload.profile_patch || {});
             applyProfilePatch(
-                rerollGroupId ? patchFromSelections(nextSelected, nextCustom, nextGroups, payload.character_asset || characterAsset) : (payload.profile_patch || {}),
+                nextPatch,
                 nextSelected,
                 nextCustom,
-                nextGroups,
                 payload.character_asset || characterAsset,
                 photoName,
                 nextName,
@@ -437,37 +720,52 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
 
     useEffect(() => {
         if (!open) return;
-        const values = form.getFieldsValue();
+        const values = initialValues || form.getFieldsValue();
         const profile = safeParseObject(values.profile_json || '{}', {});
         const kwargs = safeParseObject(values.kwargs_json || '{}', {});
-        const studio = profile.agent_studio || {};
-        const nextCharacterAsset = studio.character_asset || studio.source?.character_asset || profile.appearance?.character_asset || null;
-        const nextSelected = {
-            ...(studio.selected_choices || {}),
-            initial_location: initialLocation || studio.selected_choices?.initial_location || profile.routine?.initial_location || firstLocationId(mapLocations, defaultInitialLocation),
-        };
-        const nextCustom = studio.custom_choices || {};
-        const nextGroups = Array.isArray(studio.groups) ? studio.groups : [];
+        const studio = asRecord(profile.agent_studio);
+        const isNewAgent = editingAgentId === null;
+        const draft = isNewAgent
+            ? {
+                selected: { initial_location: initialLocation || firstLocationId(mapLocations, defaultInitialLocation) },
+                custom: {},
+                groups: [] as StudioGroup[],
+            }
+            : buildStudioDraft(profile, studio, initialLocation);
+        const nextCharacterAsset = assetFromProfile(profile);
         const nextName = String(values.name || profile.name || `Agent ${values.agent_id || 1}`);
         setCurrentStep(0);
         setAgentId(Number(values.agent_id || minAgentId || 1));
         setAgentType(String(values.agent_type || 'JiuwenClawAgent'));
         setName(nextName);
-        setSourcePrompt(String(studio.source?.prompt || ''));
-        setMbti(String(profile.mbti || studio.source?.mbti || ''));
-        setPhotoName(String(studio.source?.photo_name || profile.appearance?.photo_reference || ''));
+        setSourcePrompt(String(asRecord(studio.source).prompt || ''));
+        setMbti(String(profile.mbti || asRecord(studio.source).mbti || ''));
+        setPhotoName(String(asRecord(studio.source).photo_name || asRecord(profile.appearance).photo_reference || ''));
+        setPhotoFile(null);
+        setPhotoPreviewUrl('');
         setCharacterAsset(nextCharacterAsset);
-        setSelectedChoices(nextSelected);
-        setCustomChoices(nextCustom);
-        setGroups(nextGroups);
-        setInitialLocationValue(nextSelected.initial_location);
+        setImageConfig(defaultImageConfig);
+        setSelectedChoices(draft.selected);
+        setCustomChoices(draft.custom);
+        setGroups(draft.groups);
+        setInitialLocationValue(draft.selected.initial_location);
         setProfileJsonText(jsonStringify(profile));
         setKwargsJsonText(jsonStringify(kwargs));
         setWarnings([]);
-        setAutoGeneratePending(!nextGroups.length);
+        setTouchedSemanticGroups(new Set());
+        setAutoGeneratePending(isNewAgent && !draft.groups.length);
         // Values are intentionally loaded when the modal opens.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [open, editingAgentId]);
+    }, [open, editingAgentId, initialValues]);
+
+    useEffect(() => {
+        setCurrentStep((value) => Math.min(value, stepKeys.length - 1));
+    }, [stepKeys.length]);
+
+    useEffect(() => {
+        if (!photoPreviewUrl) return undefined;
+        return () => URL.revokeObjectURL(photoPreviewUrl);
+    }, [photoPreviewUrl]);
 
     useEffect(() => {
         if (!open || !autoGeneratePending) return;
@@ -477,16 +775,32 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, autoGeneratePending]);
 
-    const uploadCharacterPhoto = async (file: File) => {
+    const selectCharacterPhoto = (file: File) => {
         setPhotoName(file.name);
+        setPhotoFile(file);
+        setPhotoPreviewUrl(URL.createObjectURL(file));
+        setCharacterAsset(null);
+    };
+
+    const requestCharacterGeneration = async () => {
+        if (!photoFile) {
+            message.warning(copy('spritePhotoRequired'));
+            return;
+        }
         setCharacterGenerating(true);
         try {
             const data = new FormData();
-            data.append('file', file);
+            data.append('file', photoFile);
             data.append('map_id', mapId);
+            data.append('agent_id', String(agentId));
             data.append('agent_name', name || `Agent ${agentId}`);
             data.append('prompt', sourcePrompt);
             data.append('mbti', mbti);
+            data.append('appearance_json', JSON.stringify({}));
+            data.append('image_api_key', imageConfig.image_api_key);
+            data.append('image_api_base', imageConfig.image_api_base);
+            data.append('image_model', imageConfig.image_model);
+            data.append('image_provider', imageConfig.image_provider);
             const response = await fetchCustom('/api/v1/god/setup/agent-studio/character', {
                 method: 'POST',
                 body: data,
@@ -496,8 +810,9 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
             }
             const nextAsset = await response.json() as CharacterAsset;
             setCharacterAsset(nextAsset);
-            const nextPatch = patchFromSelections(selectedChoices, customChoices, groups, nextAsset, file.name);
-            applyProfilePatch(nextPatch, selectedChoices, customChoices, groups, nextAsset, file.name);
+            const nextPatch = patchFromSelections(selectedChoices, customChoices, groups, nextAsset, photoFile.name);
+            applyProfilePatch(nextPatch, selectedChoices, customChoices, nextAsset, photoFile.name);
+            setImageConfig((current) => ({ ...current, image_api_key: '' }));
             message.success(copy('characterGenerated'));
         } catch (error) {
             message.error(copy('characterFailed', { error: error instanceof Error ? error.message : String(error) }));
@@ -509,15 +824,16 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
     const selectChoice = (group: StudioGroup, value: string) => {
         const nextSelected = { ...selectedChoices, [group.id]: value };
         const nextInitial = group.id === 'initial_location' ? value : initialLocationValue;
+        const semanticScope = new Set(semanticGroupsForChoice(group.id));
+        setTouchedSemanticGroups((current) => new Set([...current, ...semanticScope]));
         setSelectedChoices(nextSelected);
         if (group.id === 'initial_location') {
             setInitialLocationValue(value);
         }
         applyProfilePatch(
-            patchFromSelections({ ...nextSelected, initial_location: nextInitial }, customChoices, groups),
+            patchFromSelections({ ...nextSelected, initial_location: nextInitial }, customChoices, groups, characterAsset, photoName, semanticScope),
             { ...nextSelected, initial_location: nextInitial },
             customChoices,
-            groups,
         );
     };
 
@@ -526,6 +842,8 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         if (!value) return;
         const nextCustom = { ...customChoices, [group.id]: value };
         const nextSelected = { ...selectedChoices, [group.id]: value };
+        const semanticScope = new Set(semanticGroupsForChoice(group.id));
+        setTouchedSemanticGroups((current) => new Set([...current, ...semanticScope]));
         const nextGroups = groups.map((item) => {
             if (item.id !== group.id) return item;
             const exists = item.options.some((option) => option.label === value);
@@ -539,7 +857,11 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         setGroups(nextGroups);
         setCustomEditingGroup(null);
         setCustomText('');
-        applyProfilePatch(patchFromSelections(nextSelected, nextCustom, nextGroups), nextSelected, nextCustom, nextGroups);
+        applyProfilePatch(
+            patchFromSelections(nextSelected, nextCustom, nextGroups, characterAsset, photoName, semanticScope),
+            nextSelected,
+            nextCustom,
+        );
     };
 
     const rerollOptions = async (groupId?: string) => {
@@ -552,12 +874,22 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
     };
 
     const submitAgent = async () => {
+        if (photoFile && !characterAsset) {
+            message.warning(copy('spriteRequiredBeforeSave'));
+            return;
+        }
         try {
-            const profile = {
-                ...parseJsonObject(profileJsonText, 'profile_json'),
-                ...patchFromSelections({ ...selectedChoices, initial_location: initialLocationValue }, customChoices, groups),
+            const baseProfile = parseJsonObject(profileJsonText, 'profile_json');
+            const nextSelected = { ...selectedChoices, initial_location: initialLocationValue };
+            const profile = mergeProfilePatch(
+                baseProfile,
+                patchFromSelections(nextSelected, customChoices, groups, characterAsset, photoName, touchedSemanticGroups),
+                nextSelected,
+                customChoices,
+                characterAsset,
+                photoName,
                 name,
-            };
+            );
             const extraKwargs = parseJsonObject(kwargsJsonText, 'kwargs_json');
             const agent: AgentRecord = {
                 agent_id: Number(agentId),
@@ -592,7 +924,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                     {characterAsset ? (
                         <img
                             className="agent-studio-sprite-preview"
-                            src={absoluteAssetUrl(characterAsset.image_url)}
+                            src={characterAsset.preview_data_url || absoluteAssetUrl(characterAsset.image_url)}
                             alt={copy('characterAlt')}
                         />
                     ) : (
@@ -625,7 +957,15 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
             <div className="agent-studio-main">
                 <div className="agent-studio-field-row">
                     <Form.Item label={t('agentBuilder.fields.agentId')} required>
-                        <InputNumber min={minAgentId} value={agentId} onChange={(value) => setAgentId(Number(value || minAgentId || 1))} style={{ width: '100%' }} />
+                        <InputNumber
+                            min={minAgentId}
+                            value={agentId}
+                            onChange={(value) => {
+                                setAgentId(Number(value || minAgentId || 1));
+                                if (photoFile) setCharacterAsset(null);
+                            }}
+                            style={{ width: '100%' }}
+                        />
                     </Form.Item>
                     <Form.Item label={t('agentBuilder.fields.agentType')} required>
                         {agentClasses.length ? (
@@ -643,7 +983,14 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                         )}
                     </Form.Item>
                     <Form.Item label={t('agentBuilder.fields.name')} required>
-                        <Input value={name} onChange={(event) => setName(event.target.value)} placeholder={copy('namePlaceholder')} />
+                        <Input
+                            value={name}
+                            onChange={(event) => {
+                                setName(event.target.value);
+                                if (photoFile) setCharacterAsset(null);
+                            }}
+                            placeholder={copy('namePlaceholder')}
+                        />
                     </Form.Item>
                 </div>
                 <Form.Item label={copy('seedPrompt')}>
@@ -661,22 +1008,83 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                     <Form.Item label={copy('photoReference')}>
                         <Upload
                             beforeUpload={(file) => {
-                                void uploadCharacterPhoto(file);
+                                selectCharacterPhoto(file);
                                 return false;
                             }}
                             showUploadList={false}
                             maxCount={1}
                             accept="image/*"
                         >
-                            <Button icon={<UploadOutlined />} loading={characterGenerating}>{photoName || copy('choosePhoto')}</Button>
+                            <Tooltip title={photoName || undefined}>
+                                <Button className="agent-studio-photo-button" icon={<UploadOutlined />}>
+                                    <span className="agent-studio-photo-name">{photoName || copy('choosePhoto')}</span>
+                                </Button>
+                            </Tooltip>
                         </Upload>
                     </Form.Item>
-                    <Form.Item label=" ">
+                    <Form.Item label=" " colon={false}>
                         <Button type="primary" icon={<RobotOutlined />} loading={generating} onClick={() => requestGeneration()}>
                             {copy('generate')}
                         </Button>
                     </Form.Item>
                 </div>
+                {photoFile && (
+                    <div className="agent-studio-sprite-panel">
+                        <div className="agent-studio-preview-row">
+                            {photoPreviewUrl && (
+                                <div className="agent-studio-preview-box">
+                                    <Text type="secondary">{copy('referencePreview')}</Text>
+                                    <img src={photoPreviewUrl} alt={photoName} />
+                                </div>
+                            )}
+                            <div className="agent-studio-preview-box sprite">
+                                <Text type="secondary">{copy('spritePreview')}</Text>
+                                {characterAsset ? (
+                                    <img
+                                        src={characterAsset.preview_data_url || absoluteAssetUrl(characterAsset.image_url)}
+                                        alt={characterAsset.sprite_name}
+                                    />
+                                ) : (
+                                    <div className="agent-studio-preview-empty">{copy('spritePending')}</div>
+                                )}
+                            </div>
+                        </div>
+                        <div className="agent-studio-field-row image-config">
+                            <Form.Item label="IMAGE_GEN_PROVIDER">
+                                <Select
+                                    value={imageConfig.image_provider}
+                                    onChange={(value) => setImageConfig((current) => ({ ...current, image_provider: value }))}
+                                    options={[{ value: 'openai', label: 'openai' }]}
+                                />
+                            </Form.Item>
+                            <Form.Item label="IMAGE_GEN_API_BASE">
+                                <Input
+                                    value={imageConfig.image_api_base}
+                                    onChange={(event) => setImageConfig((current) => ({ ...current, image_api_base: event.target.value }))}
+                                />
+                            </Form.Item>
+                            <Form.Item label="IMAGE_GEN_MODEL_NAME">
+                                <Input
+                                    value={imageConfig.image_model}
+                                    onChange={(event) => setImageConfig((current) => ({ ...current, image_model: event.target.value }))}
+                                />
+                            </Form.Item>
+                            <Form.Item label="IMAGE_GEN_API_KEY">
+                                <Input.Password
+                                    value={imageConfig.image_api_key}
+                                    onChange={(event) => setImageConfig((current) => ({ ...current, image_api_key: event.target.value }))}
+                                    autoComplete="off"
+                                />
+                            </Form.Item>
+                        </div>
+                        <Space wrap>
+                            <Button type="primary" icon={<RobotOutlined />} loading={characterGenerating} onClick={requestCharacterGeneration}>
+                                {copy('generateSprite')}
+                            </Button>
+                            {characterAsset && <Tag color="green">{characterAsset.sprite_name}</Tag>}
+                        </Space>
+                    </div>
+                )}
             </div>
             <div className="agent-studio-side">
                 <Text strong>{copy('worldContext')}</Text>
@@ -713,8 +1121,9 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                                 type="button"
                                 className={`agent-studio-choice ${selected === value ? 'selected' : ''}`}
                                 onClick={() => selectChoice(group, value)}
+                                title={option.label}
                             >
-                                <span>{option.label}</span>
+                                <span>{shortText(option.label, 80)}</span>
                                 {option.description && <small>{option.description}</small>}
                             </button>
                         );
@@ -722,13 +1131,14 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                     {group.allow_custom && (
                         customEditingGroup === group.id ? (
                             <div className="agent-studio-custom">
-                                <Input
+                                <Input.TextArea
                                     size="small"
                                     value={customText}
                                     onChange={(event) => setCustomText(event.target.value)}
                                     onPressEnter={() => saveCustomChoice(group)}
                                     placeholder={copy('customPlaceholder')}
-                                    maxLength={32}
+                                    maxLength={1200}
+                                    autoSize={{ minRows: 1, maxRows: 5 }}
                                 />
                                 <Button size="small" type="primary" onClick={() => saveCustomChoice(group)}>{copy('useCustom')}</Button>
                             </div>
@@ -741,7 +1151,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                                     setCustomText(customChoices[group.id] || '');
                                 }}
                             >
-                                <span>{customChoices[group.id] || copy('customChoice')}</span>
+                                <span>{shortText(customChoices[group.id] || copy('customChoice'), 80)}</span>
                             </button>
                         )
                     )}
@@ -812,6 +1222,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         : currentStep === stepKeys.length - 1
             ? renderReviewStep()
             : renderChoiceStep();
+    const saveDisabled = Boolean(photoFile && !characterAsset) || characterGenerating;
 
     return (
         <Modal
@@ -827,7 +1238,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                 currentStep < stepKeys.length - 1 ? (
                     <Button key="next" type="primary" onClick={() => setCurrentStep((value) => Math.min(stepKeys.length - 1, value + 1))}>{copy('next')}</Button>
                 ) : (
-                    <Button key="save" type="primary" onClick={submitAgent}>{copy('saveAgent')}</Button>
+                    <Button key="save" type="primary" disabled={saveDisabled} onClick={submitAgent}>{copy('saveAgent')}</Button>
                 ),
             ]}
         >

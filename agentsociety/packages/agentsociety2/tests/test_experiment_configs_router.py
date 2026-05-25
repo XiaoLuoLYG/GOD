@@ -9,6 +9,7 @@ from agentsociety2.backend.routers.experiment_configs import (
     _preview_agents,
     apply_agents,
     get_init_config,
+    put_init_config,
 )
 
 
@@ -124,6 +125,42 @@ def test_apply_agents_writes_valid_config_and_syncs_env(tmp_path):
     ]
 
 
+def test_apply_agents_replace_removes_orphan_initial_locations(tmp_path):
+    exp_dir = tmp_path / "hypothesis_1" / "experiment_1" / "init"
+    exp_dir.mkdir(parents=True)
+    config = _base_config()
+    config["env_modules"][0]["kwargs"]["initial_locations"] = {
+        "1": "school",
+        "2": "park",
+    }
+    (exp_dir / "init_config.json").write_text(json.dumps(config), encoding="utf-8")
+
+    anyio.run(
+        apply_agents,
+        "1",
+        "1",
+        ApplyAgentsRequest(
+            mode="replace",
+            agents=[
+                {
+                    "agent_id": 2,
+                    "agent_type": "PersonAgent",
+                    "kwargs": {
+                        "id": 2,
+                        "name": "Bob",
+                        "profile": {"name": "Bob"},
+                    },
+                }
+            ],
+        ),
+        str(tmp_path),
+    )
+
+    saved = json.loads((exp_dir / "init_config.json").read_text(encoding="utf-8"))
+    assert saved["env_modules"][0]["kwargs"]["agent_id_name_pairs"] == [[2, "Bob"]]
+    assert saved["env_modules"][0]["kwargs"]["initial_locations"] == {"2": "park"}
+
+
 def test_apply_agents_rejects_existing_duplicate_id(tmp_path):
     exp_dir = tmp_path / "hypothesis_1" / "experiment_1" / "init"
     exp_dir.mkdir(parents=True)
@@ -151,6 +188,31 @@ def test_apply_agents_rejects_existing_duplicate_id(tmp_path):
             ),
             str(tmp_path),
         )
+
+
+def test_put_init_config_rejects_duplicate_agent_id(tmp_path):
+    exp_dir = tmp_path / "hypothesis_1" / "experiment_1" / "init"
+    exp_dir.mkdir(parents=True)
+    config = _base_config()
+    config["agents"].append(
+        {
+            "agent_id": 1,
+            "agent_type": "PersonAgent",
+            "kwargs": {
+                "id": 1,
+                "name": "Duplicate Alice",
+                "profile": {"name": "Duplicate Alice"},
+            },
+        }
+    )
+    (exp_dir / "init_config.json").write_text(json.dumps(_base_config()), encoding="utf-8")
+
+    with pytest.raises(HTTPException):
+        anyio.run(put_init_config, "1", "1", config, str(tmp_path))
+
+    saved = json.loads((exp_dir / "init_config.json").read_text(encoding="utf-8"))
+    assert len(saved["agents"]) == 1
+    assert saved["agents"][0]["kwargs"]["profile"]["name"] == "Alice"
 
 
 def test_get_init_config_returns_experiment_context_and_map_locations(monkeypatch, tmp_path):
