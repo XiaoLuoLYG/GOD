@@ -381,15 +381,42 @@ def _preview_agents(content: str, import_format: ImportFormat) -> ImportPreviewR
 def _sync_agent_id_name_pairs(config: dict[str, Any]) -> list[str]:
     warnings: list[str] = []
     pairs = [[agent["agent_id"], _agent_name(agent)] for agent in config.get("agents", [])]
+    valid_agent_ids = {str(agent["agent_id"]) for agent in config.get("agents", [])}
     synced = False
     for module in config.get("env_modules", []):
         kwargs = module.get("kwargs")
         if isinstance(kwargs, dict) and "agent_id_name_pairs" in kwargs:
             kwargs["agent_id_name_pairs"] = pairs
             synced = True
+        if isinstance(kwargs, dict) and isinstance(kwargs.get("initial_locations"), dict):
+            kwargs["initial_locations"] = {
+                str(agent_id): location
+                for agent_id, location in kwargs["initial_locations"].items()
+                if str(agent_id) in valid_agent_ids
+            }
     if not synced:
         warnings.append("No env module with kwargs.agent_id_name_pairs was found; agent names were not synced to env modules.")
     return warnings
+
+
+def _ensure_unique_agent_ids(config: dict[str, Any]) -> None:
+    ids = [
+        agent.get("agent_id")
+        for agent in config.get("agents", [])
+        if isinstance(agent, dict) and isinstance(agent.get("agent_id"), int)
+    ]
+    if len(ids) == len(set(ids)):
+        return
+    seen: set[int] = set()
+    duplicates: list[int] = []
+    for agent_id in ids:
+        if agent_id in seen and agent_id not in duplicates:
+            duplicates.append(agent_id)
+        seen.add(agent_id)
+    raise HTTPException(
+        status_code=400,
+        detail=f"Duplicate agent_id values are not allowed: {duplicates}",
+    )
 
 
 @router.get("/{hypothesis_id}/{experiment_id}/init", response_model=InitConfigResponse)
@@ -420,6 +447,7 @@ async def put_init_config(
 ) -> InitConfigResponse:
     config_path = _init_config_path(workspace_path, hypothesis_id, experiment_id)
     validated = _validate_init_config(config)
+    _ensure_unique_agent_ids(validated)
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(json.dumps(validated, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return InitConfigResponse(config=validated, path=str(config_path))
@@ -465,9 +493,7 @@ async def apply_agents(
             raise HTTPException(status_code=400, detail=f"Duplicate agent_id already exists: {duplicate_ids}")
         config["agents"] = existing + incoming
 
-    all_ids = [agent.get("agent_id") for agent in config.get("agents", []) if isinstance(agent, dict)]
-    if len(all_ids) != len(set(all_ids)):
-        raise HTTPException(status_code=400, detail="Duplicate agent_id values are not allowed")
+    _ensure_unique_agent_ids(config)
 
     warnings = _sync_agent_id_name_pairs(config) if request.sync_agent_id_name_pairs else []
     validated = _validate_init_config(config)

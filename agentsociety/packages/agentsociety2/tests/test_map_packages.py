@@ -143,6 +143,20 @@ def test_map_package_rejects_resource_escape(tmp_path: Path) -> None:
     assert any("escapes package root" in message for message in validation.errors)
 
 
+def test_character_sprite_path_rejects_unsafe_character_root(tmp_path: Path) -> None:
+    package = _write_package(tmp_path / "agentsociety")
+    manifest_path = package / "map.yaml"
+    manifest_path.write_text(
+        manifest_path.read_text(encoding="utf-8").replace("character_root: characters", "character_root: ../outside"),
+        encoding="utf-8",
+    )
+
+    package_info = map_packages.load_map_package_by_manifest(manifest_path)
+
+    assert package_info.validation.ok is False
+    assert any("escapes package root" in message for message in package_info.validation.errors)
+
+
 def test_missing_map_id_falls_back_to_default(tmp_path: Path) -> None:
     agentsociety_root = tmp_path / "agentsociety"
     package = _write_package(agentsociety_root)

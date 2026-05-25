@@ -7,10 +7,35 @@
 
 .agent-studio {
     min-height: 540px;
+    container-type: inline-size;
 }
 
 .agent-studio-steps {
     margin-bottom: 18px;
+}
+
+.agent-studio .ant-form-item {
+    margin-bottom: 0;
+}
+
+.agent-studio .ant-form-item-row {
+    display: block;
+}
+
+.agent-studio .ant-form-item-label {
+    padding: 0 0 6px;
+    text-align: left;
+}
+
+.agent-studio .ant-form-item-label > label {
+    max-width: 100%;
+    height: 22px;
+    line-height: 22px;
+    white-space: nowrap;
+}
+
+.agent-studio .ant-form-item-control {
+    width: 100%;
 }
 
 .agent-studio-grid {
@@ -45,13 +70,101 @@
 
 .agent-studio-field-row {
     display: grid;
-    grid-template-columns: 120px minmax(180px, 1fr) minmax(160px, 1fr);
+    grid-template-columns: minmax(110px, 0.6fr) minmax(220px, 1.2fr) minmax(220px, 1.4fr);
     gap: 12px;
 }
 
+.agent-studio-field-row .ant-form-item {
+    min-width: 0;
+}
+
 .agent-studio-field-row.compact {
-    grid-template-columns: minmax(120px, 160px) minmax(180px, 1fr) auto;
+    grid-template-columns: minmax(120px, 160px) minmax(220px, 1fr) auto;
     align-items: end;
+}
+
+.agent-studio-field-row.image-config {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: end;
+}
+
+.agent-studio-field-row.image-config .ant-form-item-label > label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.agent-studio-photo-button {
+    max-width: 100%;
+}
+
+.agent-studio-photo-button .ant-btn-icon {
+    flex: 0 0 auto;
+}
+
+.agent-studio-photo-name {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-studio-field-row.compact .ant-upload-wrapper,
+.agent-studio-field-row.compact .ant-upload {
+    max-width: 100%;
+}
+
+.agent-studio-sprite-panel {
+    display: grid;
+    gap: 12px;
+    margin-top: 12px;
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid #d9e1ee;
+    border-radius: 8px;
+    background: #fbfdff;
+    box-sizing: border-box;
+}
+
+.agent-studio-preview-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.agent-studio-preview-box {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.agent-studio-preview-box img,
+.agent-studio-preview-empty {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    height: 160px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #fff;
+}
+
+.agent-studio-preview-box img {
+    object-fit: contain;
+}
+
+.agent-studio-preview-box.sprite img {
+    image-rendering: pixelated;
+}
+
+.agent-studio-preview-empty {
+    display: grid;
+    place-items: center;
+    color: #64748b;
+    text-align: center;
+    padding: 10px;
 }
 
 .agent-studio-stepbar {
@@ -132,8 +245,14 @@
 .agent-studio-custom {
     display: flex;
     gap: 6px;
-    align-items: center;
-    min-width: min(260px, 100%);
+    align-items: flex-start;
+    min-width: min(360px, 100%);
+    max-width: 100%;
+}
+
+.agent-studio-custom .ant-input {
+    min-width: 0;
+    flex: 1;
 }
 
 .agent-studio-review {
@@ -170,6 +289,13 @@
     min-width: 0;
     display: grid;
     gap: 6px;
+}
+
+.agent-studio-preview-copy .ant-tag {
+    max-width: 100%;
+    margin-inline-end: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .agent-studio-sprite-preview,
@@ -270,7 +396,9 @@
     .agent-studio-choice-grid,
     .agent-studio-review-grid,
     .agent-studio-field-row,
-    .agent-studio-field-row.compact {
+    .agent-studio-field-row.compact,
+    .agent-studio-field-row.image-config,
+    .agent-studio-preview-row {
         grid-template-columns: 1fr;
         display: grid;
     }
@@ -285,5 +413,44 @@
 
     .agent-studio-review-summary .ant-space {
         margin-top: 10px;
+    }
+}
+
+@container (max-width: 920px) {
+    .agent-studio-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .agent-studio-side {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+        gap: 12px;
+        align-items: start;
+    }
+
+    .agent-studio-side > .agent-studio-preview-card {
+        grid-row: span 4;
+        margin-top: 0;
+    }
+}
+
+@container (max-width: 700px) {
+    .agent-studio-field-row,
+    .agent-studio-field-row.compact,
+    .agent-studio-field-row.image-config,
+    .agent-studio-preview-row {
+        grid-template-columns: 1fr;
+    }
+
+    .agent-studio-field-row.compact .ant-form-item:last-child {
+        justify-self: start;
+    }
+
+    .agent-studio-side {
+        grid-template-columns: 1fr;
+    }
+
+    .agent-studio-side > .agent-studio-preview-card {
+        grid-row: auto;
     }
 }
