@@ -4,14 +4,30 @@
   "time": "2026-05-15T19:50:00+08:00",
   "status": "completed",
   "token_usage": {},
-  "selected_skills": [],
+  "selected_skills": [
+    "routine.daily",
+    "social.reply",
+    "memory.record",
+    "map.navigate",
+    "safety.respond",
+    "class.organize",
+    "roster.verify",
+    "notice.write",
+    "peer.communicate",
+    "writing.feedback"
+  ],
   "activated_skills": [],
   "mounted_skill_ids": [
     "routine.daily",
     "social.reply",
     "memory.record",
     "map.navigate",
-    "safety.respond"
+    "safety.respond",
+    "class.organize",
+    "roster.verify",
+    "notice.write",
+    "peer.communicate",
+    "writing.feedback"
   ],
   "last_skill_decision": {},
   "id": 2,
@@ -75,7 +91,12 @@
       "social.reply",
       "memory.record",
       "map.navigate",
-      "safety.respond"
+      "safety.respond",
+      "class.organize",
+      "roster.verify",
+      "notice.write",
+      "peer.communicate",
+      "writing.feedback"
     ],
     "last_skill_decision": {},
     "last_skill_result": {},

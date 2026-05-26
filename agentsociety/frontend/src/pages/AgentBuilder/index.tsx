@@ -96,12 +96,31 @@ const DEFAULT_PROFILE: DefaultProfile = {
     goal: '参与小镇日常协作，并在下一次 step 中根据环境变化做出响应。',
 };
 
+const DEFAULT_COMMON_SKILL_IDS = [
+    'routine.daily',
+    'social.reply',
+    'memory.record',
+    'map.navigate',
+    'safety.respond',
+];
+
+const DEFAULT_PERSONAL_SKILL_IDS = [
+    'community.coordinate',
+    'conflict.mediate',
+    'first_aid.basic',
+    'notice.write',
+    'messaging.group',
+];
+
 const DEFAULT_JIUWEN_KWARGS = {
     jiuwenclaw_ws_url: 'ws://127.0.0.1:19092',
     session_id: 'god_town_live_agent_1',
     mode: 'agent.plan',
     trusted_dirs: [] as string[],
     enable_memory: true,
+    enable_skill_runtime: true,
+    common_skill_ids: DEFAULT_COMMON_SKILL_IDS,
+    skill_ids: DEFAULT_PERSONAL_SKILL_IDS,
     request_timeout: 900,
     channel_id: 'agentsociety',
 };
@@ -112,9 +131,6 @@ const SHARED_JIUWEN_KWARG_KEYS = [
     'mode',
     'trusted_dirs',
     'enable_memory',
-    'enable_skill_runtime',
-    'common_skill_ids',
-    'skill_ids',
     'experiment_context',
     'request_timeout',
 ] as const;
@@ -283,6 +299,35 @@ const pickSharedJiuwenKwargs = (kwargs: Record<string, any> | undefined) => {
     return shared;
 };
 
+const normalizePersonalSkillIds = (value: unknown) => {
+    if (!Array.isArray(value)) return DEFAULT_PERSONAL_SKILL_IDS;
+    const result: string[] = [];
+    value.forEach((item) => {
+        const skillId = String(item || '').trim();
+        if (skillId && !result.includes(skillId)) {
+            result.push(skillId);
+        }
+    });
+    return result.length ? result.slice(0, 5) : DEFAULT_PERSONAL_SKILL_IDS;
+};
+
+const normalizeJiuwenRuntimeAgent = (agent: AgentRecord): AgentRecord => {
+    if (agent.agent_type !== 'JiuwenClawAgent') return agent;
+    const kwargs = { ...(agent.kwargs || {}) };
+    delete kwargs.enable_daily_life;
+    delete kwargs.daily_life_skill_path;
+    delete kwargs.skill_runtime_skill_names;
+    return {
+        ...agent,
+        kwargs: {
+            ...kwargs,
+            enable_skill_runtime: true,
+            common_skill_ids: DEFAULT_COMMON_SKILL_IDS,
+            skill_ids: normalizePersonalSkillIds(kwargs.skill_ids),
+        },
+    };
+};
+
 const buildDefaultAgentValues = (
     nextId: number,
     classes: AgentClassInfo[],
@@ -308,6 +353,9 @@ const buildDefaultAgentValues = (
                 ? sharedExisting.trusted_dirs
                 : (workspacePath ? [workspacePath.replace(/\/quick_experiments$/, '')] : DEFAULT_JIUWEN_KWARGS.trusted_dirs),
             experiment_context: experimentContext || sharedExisting.experiment_context,
+            enable_skill_runtime: true,
+            common_skill_ids: DEFAULT_COMMON_SKILL_IDS,
+            skill_ids: DEFAULT_PERSONAL_SKILL_IDS,
         }
         : {};
 
@@ -536,14 +584,15 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
 
     const upsertAgent = async (agent: AgentRecord, meta?: AgentEditorSaveMeta) => {
         if (!config) return;
+        const normalizedAgent = normalizeJiuwenRuntimeAgent(agent);
         const nextAgents = editingAgentId === null
-            ? [...agents, agent]
-            : agents.map((item) => item.agent_id === editingAgentId ? agent : item);
+            ? [...agents, normalizedAgent]
+            : agents.map((item) => item.agent_id === editingAgentId ? normalizedAgent : item);
         if (getDuplicateIds(nextAgents).size > 0 || nextAgents.some((item) => !item.kwargs || item.kwargs.id !== item.agent_id)) {
             message.error(t('agentBuilder.messages.invalidAgents'));
             return;
         }
-        const nextConfig = syncEnvForAgents(config, nextAgents, agent, meta);
+        const nextConfig = syncEnvForAgents(config, nextAgents, normalizedAgent, meta);
         if (autoSaveOnAgentSave) {
             if (!(await persistConfig(nextConfig))) {
                 return;

@@ -626,9 +626,45 @@ def test_normalize_draft_backfills_scenario_specific_agents(monkeypatch, tmp_pat
 
     agents = draft["init_config"]["agents"]
     profiles = [agent["kwargs"]["profile"] for agent in agents]
+    assert all(agent["kwargs"]["enable_skill_runtime"] is True for agent in agents)
     assert agents[0]["kwargs"]["skill_ids"] != agents[1]["kwargs"]["skill_ids"]
     assert "skills" not in profiles[0]
     assert "采购" in profiles[1]["persona"]
+
+
+def test_normalize_draft_removes_legacy_jiuwen_runtime_fields(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    monkeypatch.setattr(god_setup, "_known_location_ids", lambda: ["school", "park", "cafe"])
+    raw = _raw_draft()
+    raw["init_config"]["agents"][0]["kwargs"].update(
+        {
+            "enable_skill_runtime": False,
+            "common_skill_ids": [],
+            "skill_ids": [],
+            "enable_daily_life": True,
+            "daily_life_skill_path": "legacy.py",
+            "skill_runtime_skill_names": ["legacy.daily"],
+        }
+    )
+    raw["init_config"]["agents"][0]["kwargs"]["profile"]["skills"] = ["class.learn"]
+
+    draft = god_setup._normalize_draft(
+        raw,
+        DraftBasics(
+            title="Legacy Config",
+            background="Coordinate classroom research.",
+            agent_count=2,
+        ),
+    )
+
+    kwargs = draft["init_config"]["agents"][0]["kwargs"]
+    assert kwargs["enable_skill_runtime"] is True
+    assert kwargs["common_skill_ids"] == god_setup.COMMON_SKILL_IDS
+    assert kwargs["skill_ids"] == ["class.learn"]
+    assert "skills" not in kwargs["profile"]
+    assert "enable_daily_life" not in kwargs
+    assert "daily_life_skill_path" not in kwargs
+    assert "skill_runtime_skill_names" not in kwargs
 
 
 def test_generate_draft_accepts_empty_basics_with_defaults(monkeypatch, tmp_path):

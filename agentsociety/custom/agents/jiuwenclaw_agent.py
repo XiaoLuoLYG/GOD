@@ -212,6 +212,7 @@ class JiuwenClawAgent(AgentBase):
         enable_skill_runtime: bool = True,
         common_skill_ids: list[str] | None = None,
         skill_ids: list[str] | None = None,
+        mounted_skill_ids: list[str] | None = None,
         skill_runtime_skill_names: list[str] | None = None,
         experiment_context: Any | None = None,
     ) -> None:
@@ -223,15 +224,28 @@ class JiuwenClawAgent(AgentBase):
         self._request_timeout = float(request_timeout)
         self._enable_memory = bool(enable_memory)
         self._channel_id = channel_id or DEFAULT_CHANNEL_ID
-        # Legacy constructor fields are accepted for old configs, but daily
-        # behavior now comes only from executable common_skill_ids.
-        _ = (enable_daily_life, daily_life_skill_path, skill_runtime_skill_names)
-        self._enable_skill_runtime = bool(enable_skill_runtime)
+        # Legacy constructor fields are accepted for old configs. Runtime
+        # behavior is always driven by executable AgentSociety skills.
+        _ = (
+            enable_daily_life,
+            daily_life_skill_path,
+            enable_skill_runtime,
+            skill_runtime_skill_names,
+        )
+        self._enable_skill_runtime = True
         self._experiment_context = experiment_context
         self._common_skill_ids = self._normalize_skill_ids(
             common_skill_ids or DEFAULT_COMMON_SKILLS
         )
-        self._skill_ids = self._normalize_skill_ids(skill_ids or [])
+        personal_skill_ids = self._normalize_skill_ids(skill_ids or [])
+        if not personal_skill_ids and mounted_skill_ids:
+            common_set = set(self._common_skill_ids)
+            personal_skill_ids = [
+                item
+                for item in self._normalize_skill_ids(mounted_skill_ids)
+                if item not in common_set
+            ]
+        self._skill_ids = personal_skill_ids
         self._skill_registry = SkillRegistry()
         self._skill_registry.scan_custom(_workspace_root_from_file())
         self._skill_runtime = AgentSkillRuntime(
@@ -302,18 +316,12 @@ Initialization example:
 
     async def init(self, env: Any) -> None:
         await super().init(env)
-        run_dir = getattr(env, "run_dir", None)
-        if run_dir is None:
+        if getattr(env, "run_dir", None) is None:
+            self._agent_work_dir = None
             return
-        if self._enable_skill_runtime:
-            self._skill_registry.scan_custom(_workspace_root_from_file())
-            self._agent_work_dir = self._skill_runtime.ensure_agent_work_dir(env)
-            self._skill_runtime.ensure_standard_workspace_dirs()
-        else:
-            self._agent_work_dir = (
-                Path(run_dir) / "agents" / f"agent_{self.id:04d}"
-            ).resolve()
-            self._agent_work_dir.mkdir(parents=True, exist_ok=True)
+        self._skill_registry.scan_custom(_workspace_root_from_file())
+        self._agent_work_dir = self._skill_runtime.ensure_agent_work_dir(env)
+        self._skill_runtime.ensure_standard_workspace_dirs()
         self._write_json(
             "agent_config.json",
             {
@@ -391,95 +399,26 @@ Initialization example:
             pending_interventions
         )
 
-        if self._enable_skill_runtime and self._agent_work_dir is not None:
-            result = await self._run_skill_runtime(
-                tick=tick,
-                t=t,
-                observation=observation,
-                pending_interventions=pending_interventions,
-                broadcast_result=broadcast_result,
-            )
-            status = "completed" if result.get("ok", True) else "error"
-            self._last_environment_result = json.dumps(
-                result.get("environment_effects") or [],
-                ensure_ascii=False,
-            )
-            self._persist_runtime_state(tick=tick, t=t, status=status)
-            public_summary = str(result.get("public_summary") or "技能步骤已完成。")
-            environment_summary = result.get("environment_effects") or []
-            if environment_summary:
-                return (
-                    f"{public_summary}\n\n"
-                    f"环境结果：{json.dumps(environment_summary, ensure_ascii=False)}"
-                )
-            return public_summary
-
-        prompt = self._build_step_prompt(
+        result = await self._run_skill_runtime(
             tick=tick,
             t=t,
-            observation=str(observation),
+            observation=observation,
             pending_interventions=pending_interventions,
             broadcast_result=broadcast_result,
-            skill_runtime_result=None,
         )
-        try:
-            raw_decision = await self._send_jiuwenclaw_request(prompt)
-        except Exception as exc:
-            raw_decision = f"JiuwenClaw request failed: {exc}"
-            self._last_response = raw_decision
-            self._last_environment_result = ""
-            self._append_thread_message("user", prompt, tick=tick, t=t)
-            self._append_thread_message("assistant", raw_decision, tick=tick, t=t)
-            self._persist_runtime_state(tick=tick, t=t, status="error")
-            return raw_decision
-        self._last_response = raw_decision
-        self._append_thread_message("user", prompt, tick=tick, t=t)
-        self._append_thread_message("assistant", raw_decision, tick=tick, t=t)
-
-        decision = self._parse_step_decision(raw_decision)
-        public_summary = str(decision.get("public_summary") or raw_decision).strip()
-        environment_instruction = str(
-            decision.get("environment_instruction") or ""
-        ).strip()
-        action_proposal = self._action_proposal_from_decision(decision)
-
-        if not decision.get("_parsed"):
-            if action_proposal:
-                env_result = await self._apply_action_proposal(action_proposal)
-                self._last_environment_result = env_result
-                self._persist_runtime_state(tick=tick, t=t, status="completed")
-                return f"{public_summary}\n\n环境结果：{env_result}"
-            self._last_environment_result = ""
-            self._persist_runtime_state(tick=tick, t=t, status="completed")
-            return public_summary
-
-        if action_proposal:
-            env_result = await self._apply_action_proposal(action_proposal)
-            self._last_environment_result = env_result
-            self._persist_runtime_state(tick=tick, t=t, status="completed")
-            return f"{public_summary}\n\n环境结果：{env_result}"
-
-        if environment_instruction:
-            try:
-                _, env_result = await self.ask_env(
-                    {"variables": {}},
-                    environment_instruction,
-                    readonly=False,
-                )
-                self._last_environment_result = str(env_result)
-                if self._last_environment_result:
-                    self._persist_runtime_state(tick=tick, t=t, status="completed")
-                    return (
-                        f"{public_summary}\n\n"
-                        f"环境结果：{self._last_environment_result}"
-                    )
-            except Exception as exc:
-                self._last_environment_result = f"环境动作执行失败：{exc}"
-                self._persist_runtime_state(tick=tick, t=t, status="error")
-                return f"{public_summary}\n\n{self._last_environment_result}"
-
-        self._last_environment_result = ""
-        self._persist_runtime_state(tick=tick, t=t, status="completed")
+        status = "completed" if result.get("ok", True) else "error"
+        self._last_environment_result = json.dumps(
+            result.get("environment_effects") or [],
+            ensure_ascii=False,
+        )
+        self._persist_runtime_state(tick=tick, t=t, status=status)
+        public_summary = str(result.get("public_summary") or "技能步骤已完成。")
+        environment_summary = result.get("environment_effects") or []
+        if environment_summary:
+            return (
+                f"{public_summary}\n\n"
+                f"环境结果：{json.dumps(environment_summary, ensure_ascii=False)}"
+            )
         return public_summary
 
     def queue_intervention(self, instruction: str) -> str:
@@ -516,10 +455,7 @@ Initialization example:
         pending_interventions: list[str] | None = None,
         broadcast_result: str = "",
     ) -> dict[str, Any]:
-        if (
-            not self._enable_skill_runtime
-            or self._agent_work_dir is None
-        ):
+        if self._agent_work_dir is None:
             self._last_selected_skills = set()
             self._last_activated_skills = set()
             self._last_skill_results = []
@@ -1512,6 +1448,7 @@ Initialization example:
             "enable_skill_runtime": self._enable_skill_runtime,
             "common_skill_ids": list(self._common_skill_ids),
             "skill_ids": list(self._skill_ids),
+            "mounted_skill_ids": self._mounted_skill_ids(),
             "experiment_context": _json_safe(self._experiment_context),
             "last_response": self._last_response,
             "last_environment_result": self._last_environment_result,
@@ -1542,9 +1479,7 @@ Initialization example:
         )
         self._enable_memory = bool(dump_data.get("enable_memory", self._enable_memory))
         self._channel_id = str(dump_data.get("channel_id", self._channel_id))
-        self._enable_skill_runtime = bool(
-            dump_data.get("enable_skill_runtime", self._enable_skill_runtime)
-        )
+        self._enable_skill_runtime = True
         if "experiment_context" in dump_data:
             self._experiment_context = dump_data["experiment_context"]
         common_skill_ids = dump_data.get("common_skill_ids")
@@ -1553,6 +1488,13 @@ Initialization example:
         skill_ids = dump_data.get("skill_ids")
         if isinstance(skill_ids, list):
             self._skill_ids = self._normalize_skill_ids(skill_ids)
+        elif isinstance(dump_data.get("mounted_skill_ids"), list):
+            common_set = set(self._common_skill_ids)
+            self._skill_ids = [
+                item
+                for item in self._normalize_skill_ids(dump_data["mounted_skill_ids"])
+                if item not in common_set
+            ]
         self._last_response = str(dump_data.get("last_response", ""))
         self._last_environment_result = str(
             dump_data.get("last_environment_result", "")

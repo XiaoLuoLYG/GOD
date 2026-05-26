@@ -90,6 +90,74 @@ def test_json_import_preview_requires_kwargs_id_for_full_agent_config():
     assert "kwargs.id is required" in preview.rows[0].errors
 
 
+def test_json_import_preview_normalizes_jiuwen_runtime_kwargs():
+    content = json.dumps(
+        [
+            {
+                "agent_id": 2,
+                "agent_type": "JiuwenClawAgent",
+                "kwargs": {
+                    "id": 2,
+                    "name": "Jiuwen Bob",
+                    "enable_skill_runtime": False,
+                    "skill_ids": [],
+                    "skill_runtime_skill_names": ["legacy.daily"],
+                    "profile": {
+                        "name": "Jiuwen Bob",
+                        "skills": ["class.learn"],
+                    },
+                },
+            }
+        ]
+    )
+
+    preview = _preview_agents(content, "json")
+
+    assert preview.valid_count == 1
+    kwargs = preview.rows[0].agent["kwargs"]
+    assert kwargs["enable_skill_runtime"] is True
+    assert kwargs["common_skill_ids"] == [
+        "routine.daily",
+        "social.reply",
+        "memory.record",
+        "map.navigate",
+        "safety.respond",
+    ]
+    assert kwargs["skill_ids"] == ["class.learn"]
+    assert "skill_runtime_skill_names" not in kwargs
+    assert "skills" not in kwargs["profile"]
+
+
+def test_json_import_preview_preserves_custom_personal_skill_ids():
+    content = json.dumps(
+        [
+            {
+                "agent_id": 2,
+                "agent_type": "JiuwenClawAgent",
+                "kwargs": {
+                    "id": 2,
+                    "name": "Jiuwen Bob",
+                    "enable_skill_runtime": False,
+                    "skill_ids": [
+                        "custom.skill",
+                        "class.learn",
+                        "custom.skill",
+                        "",
+                    ],
+                    "profile": {"name": "Jiuwen Bob"},
+                },
+            }
+        ]
+    )
+
+    preview = _preview_agents(content, "json")
+
+    assert preview.valid_count == 1
+    kwargs = preview.rows[0].agent["kwargs"]
+    assert kwargs["enable_skill_runtime"] is True
+    assert kwargs["skill_ids"] == ["custom.skill", "class.learn"]
+
+
 def test_apply_agents_writes_valid_config_and_syncs_env(tmp_path):
     exp_dir = tmp_path / "hypothesis_1" / "experiment_1" / "init"
     exp_dir.mkdir(parents=True)
@@ -123,6 +191,66 @@ def test_apply_agents_writes_valid_config_and_syncs_env(tmp_path):
         [1, "Alice"],
         [2, "Bob"],
     ]
+
+
+def test_put_init_config_normalizes_jiuwen_agents(tmp_path):
+    exp_dir = tmp_path / "hypothesis_1" / "experiment_1" / "init"
+    exp_dir.mkdir(parents=True)
+    config = _base_config()
+    config["agents"] = [
+        {
+            "agent_id": 1,
+            "agent_type": "JiuwenClawAgent",
+            "kwargs": {
+                "id": 1,
+                "name": "Jiuwen Alice",
+                "enable_skill_runtime": False,
+                "common_skill_ids": [],
+                "skill_ids": [],
+                "profile": {"name": "Jiuwen Alice"},
+            },
+        }
+    ]
+
+    response = anyio.run(put_init_config, "1", "1", config, str(tmp_path))
+
+    kwargs = response.config["agents"][0]["kwargs"]
+    assert kwargs["enable_skill_runtime"] is True
+    assert len(kwargs["common_skill_ids"]) == 5
+    assert len(kwargs["skill_ids"]) == 5
+
+
+def test_apply_agents_normalizes_jiuwen_agents(tmp_path):
+    exp_dir = tmp_path / "hypothesis_1" / "experiment_1" / "init"
+    exp_dir.mkdir(parents=True)
+    (exp_dir / "init_config.json").write_text(json.dumps(_base_config()), encoding="utf-8")
+
+    anyio.run(
+        apply_agents,
+        "1",
+        "1",
+        ApplyAgentsRequest(
+            agents=[
+                {
+                    "agent_id": 2,
+                    "agent_type": "JiuwenClawAgent",
+                    "kwargs": {
+                        "id": 2,
+                        "name": "Jiuwen Bob",
+                        "enable_skill_runtime": False,
+                        "profile": {"name": "Jiuwen Bob"},
+                    },
+                }
+            ]
+        ),
+        str(tmp_path),
+    )
+
+    saved = json.loads((exp_dir / "init_config.json").read_text(encoding="utf-8"))
+    kwargs = saved["agents"][1]["kwargs"]
+    assert kwargs["enable_skill_runtime"] is True
+    assert len(kwargs["common_skill_ids"]) == 5
+    assert len(kwargs["skill_ids"]) == 5
 
 
 def test_apply_agents_replace_removes_orphan_initial_locations(tmp_path):

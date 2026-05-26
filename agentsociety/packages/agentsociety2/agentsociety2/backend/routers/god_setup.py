@@ -1429,12 +1429,20 @@ def _normalize_skill_ids_from_profile(raw: Any, fallback: Any) -> list[str]:
         candidates.extend(str(item).strip() for item in raw if str(item).strip())
     if not candidates and isinstance(fallback, list):
         candidates.extend(str(item).strip() for item in fallback if str(item).strip())
-    known = set(PERSONA_SKILL_IDS)
-    normalized = [item for item in candidates if item in known]
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in candidates:
+        if item and item not in seen:
+            seen.add(item)
+            normalized.append(item)
     if normalized:
         return normalized[:5]
     if isinstance(fallback, list):
-        fallback_ids = [str(item).strip() for item in fallback if str(item).strip() in known]
+        fallback_ids: list[str] = []
+        for item in fallback:
+            skill_id = str(item).strip()
+            if skill_id and skill_id not in fallback_ids:
+                fallback_ids.append(skill_id)
         if fallback_ids:
             return fallback_ids[:5]
     return list(PERSONA_SKILL_IDS[:5])
@@ -1498,8 +1506,14 @@ def _normalize_draft(raw: dict[str, Any], basics: DraftBasics) -> dict[str, Any]
             "scenario_role": str(profile.get("scenario_role") or profile.get("role") or "participant"),
         }
         profile.pop("skills", None)
+        kwargs_skill_ids = kwargs.get("skill_ids")
+        source_skill_ids = (
+            kwargs_skill_ids
+            if isinstance(kwargs_skill_ids, list) and kwargs_skill_ids
+            else source_profile_skills
+        )
         raw_skill_ids = _normalize_skill_ids_from_profile(
-            kwargs.get("skill_ids") if isinstance(kwargs.get("skill_ids"), list) else source_profile_skills,
+            source_skill_ids,
             default_kwargs.get("skill_ids", []),
         )
         kwargs = {
@@ -1508,10 +1522,13 @@ def _normalize_draft(raw: dict[str, Any], basics: DraftBasics) -> dict[str, Any]
             "id": merged["agent_id"],
             "name": name,
             "profile": profile,
+            "enable_skill_runtime": True,
             "common_skill_ids": list(COMMON_SKILL_IDS),
             "skill_ids": raw_skill_ids,
             "experiment_context": context,
         }
+        kwargs.pop("enable_daily_life", None)
+        kwargs.pop("daily_life_skill_path", None)
         kwargs.pop("skill_runtime_skill_names", None)
         merged["kwargs"] = kwargs
         normalized_agents.append(merged)

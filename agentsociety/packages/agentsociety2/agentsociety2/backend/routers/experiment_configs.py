@@ -20,6 +20,61 @@ router = APIRouter(prefix="/api/v1/experiment-configs", tags=["experiment-config
 ImportFormat = Literal["csv", "json", "auto"]
 ApplyMode = Literal["append", "replace"]
 
+COMMON_SKILL_IDS = [
+    "routine.daily",
+    "social.reply",
+    "memory.record",
+    "map.navigate",
+    "safety.respond",
+]
+PERSONA_SKILL_IDS = [
+    "community.coordinate",
+    "conflict.mediate",
+    "first_aid.basic",
+    "notice.write",
+    "messaging.group",
+    "tools.repair",
+    "inventory.count",
+    "route.localmap",
+    "ledger.basic",
+    "neighbor.support",
+    "class.organize",
+    "youth.communicate",
+    "writing.feedback",
+    "history.localtelling",
+    "library.curate",
+    "care.basic",
+    "chronic.followup",
+    "emotion.calm",
+    "health.educate",
+    "record.shortnote",
+    "cooking.lightmeal",
+    "listen.relay",
+    "shop.run",
+    "social.matchmake",
+    "community.observe",
+    "class.learn",
+    "sketch.draw",
+    "phone.photolog",
+    "computer.basic",
+    "peer.communicate",
+    "route.recall",
+    "garden.basic",
+    "repair.basic",
+    "crowd.guide",
+    "radio.comms",
+    "vegetable.source",
+    "stall.run",
+    "price.negotiate",
+    "ingredient.advise",
+    "gossip.filter",
+]
+LEGACY_JIUWEN_KWARG_KEYS = (
+    "enable_daily_life",
+    "daily_life_skill_path",
+    "skill_runtime_skill_names",
+)
+
 
 class InitConfigResponse(BaseModel):
     config: dict[str, Any]
@@ -193,6 +248,56 @@ def _agent_name(agent: dict[str, Any]) -> str:
     return f"Agent_{agent.get('agent_id')}"
 
 
+def _default_skill_ids(agent_id: int, count: int = 5) -> list[str]:
+    start = ((max(agent_id, 1) - 1) * count) % len(PERSONA_SKILL_IDS)
+    rotated = PERSONA_SKILL_IDS[start:] + PERSONA_SKILL_IDS[:start]
+    return rotated[:count]
+
+
+def _normalize_personal_skill_ids(raw: Any, agent_id: int) -> list[str]:
+    source = raw if isinstance(raw, list) else []
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in source:
+        skill_id = str(item).strip()
+        if skill_id and skill_id not in seen:
+            seen.add(skill_id)
+            result.append(skill_id)
+    return result[:5] if result else _default_skill_ids(agent_id)
+
+
+def _normalize_jiuwen_agent_runtime(agent: dict[str, Any]) -> None:
+    if str(agent.get("agent_type") or "") != "JiuwenClawAgent":
+        return
+    kwargs = agent.get("kwargs")
+    if not isinstance(kwargs, dict):
+        return
+    try:
+        agent_id = int(agent.get("agent_id") or kwargs.get("id") or 0)
+    except (TypeError, ValueError):
+        agent_id = 0
+    profile = kwargs.get("profile")
+    source_skills: Any = kwargs.get("skill_ids")
+    if isinstance(profile, dict):
+        if not isinstance(source_skills, list) or not source_skills:
+            source_skills = profile.get("skills")
+        profile.pop("skills", None)
+    kwargs["enable_skill_runtime"] = True
+    kwargs["common_skill_ids"] = list(COMMON_SKILL_IDS)
+    kwargs["skill_ids"] = _normalize_personal_skill_ids(source_skills, agent_id)
+    for key in LEGACY_JIUWEN_KWARG_KEYS:
+        kwargs.pop(key, None)
+
+
+def _normalize_init_config_agents(config: dict[str, Any]) -> None:
+    agents = config.get("agents")
+    if not isinstance(agents, list):
+        return
+    for agent in agents:
+        if isinstance(agent, dict):
+            _normalize_jiuwen_agent_runtime(agent)
+
+
 def _validate_agent_payload(agent: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     agent_id = agent.get("agent_id")
@@ -270,6 +375,7 @@ def _build_agent_from_csv_row(row: dict[str, Any], row_index: int) -> ImportPrev
     kwargs["profile"] = profile
 
     agent = {"agent_id": agent_id, "agent_type": agent_type, "kwargs": kwargs}
+    _normalize_jiuwen_agent_runtime(agent)
     errors.extend(_validate_agent_payload(agent))
     return ImportPreviewRow(
         row_index=row_index,
@@ -330,6 +436,7 @@ def _parse_json_import(content: str) -> list[ImportPreviewRow]:
                 },
             }
 
+        _normalize_jiuwen_agent_runtime(agent)
         errors.extend(_validate_agent_payload(agent))
         rows.append(
             ImportPreviewRow(
@@ -446,6 +553,7 @@ async def put_init_config(
     workspace_path: str = Query(..., description="Workspace root path"),
 ) -> InitConfigResponse:
     config_path = _init_config_path(workspace_path, hypothesis_id, experiment_id)
+    _normalize_init_config_agents(config)
     validated = _validate_init_config(config)
     _ensure_unique_agent_ids(validated)
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -493,6 +601,7 @@ async def apply_agents(
             raise HTTPException(status_code=400, detail=f"Duplicate agent_id already exists: {duplicate_ids}")
         config["agents"] = existing + incoming
 
+    _normalize_init_config_agents(config)
     _ensure_unique_agent_ids(config)
 
     warnings = _sync_agent_id_name_pairs(config) if request.sync_agent_id_name_pairs else []

@@ -46,12 +46,9 @@
   "jiuwenclaw_ws_url": "ws://127.0.0.1:19092",
   "session_id": "pku_trump_visit_fresh_20260518_004747_agent_9",
   "mode": "agent.plan",
-  "trusted_dirs": [
-    "<GOD_ROOT>/agentsociety"
-  ],
   "request_timeout": 900.0,
   "enable_memory": false,
-  "enable_skill_runtime": false,
+  "enable_skill_runtime": true,
   "common_skill_ids": [
     "routine.daily",
     "social.reply",
@@ -59,13 +56,24 @@
     "map.navigate",
     "safety.respond"
   ],
-  "skill_ids": [],
+  "skill_ids": [
+    "route.localmap",
+    "crowd.guide",
+    "phone.photolog",
+    "history.localtelling",
+    "messaging.group"
+  ],
   "mounted_skill_ids": [
     "routine.daily",
     "social.reply",
     "memory.record",
     "map.navigate",
-    "safety.respond"
+    "safety.respond",
+    "route.localmap",
+    "crowd.guide",
+    "phone.photolog",
+    "history.localtelling",
+    "messaging.group"
   ],
   "experiment_context": {
     "title": "北大校园日常观察",
@@ -99,5 +107,18 @@
       "食堂、宿舍、图书馆、实验楼、教学楼、体育馆和校园草坪用于展示日常生活。"
     ],
     "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-  }
+  },
+  "selected_skills": [
+    "routine.daily",
+    "social.reply",
+    "memory.record",
+    "map.navigate",
+    "safety.respond",
+    "route.localmap",
+    "crowd.guide",
+    "phone.photolog",
+    "history.localtelling",
+    "messaging.group"
+  ],
+  "activated_skills": []
 }

@@ -46,12 +46,9 @@
   "jiuwenclaw_ws_url": "ws://127.0.0.1:19092",
   "session_id": "pku_trump_visit_fresh_20260518_004747_agent_21",
   "mode": "agent.plan",
-  "trusted_dirs": [
-    "<GOD_ROOT>/agentsociety"
-  ],
   "request_timeout": 900.0,
   "enable_memory": false,
-  "enable_skill_runtime": false,
+  "enable_skill_runtime": true,
   "common_skill_ids": [
     "routine.daily",
     "social.reply",
@@ -59,13 +56,24 @@
     "map.navigate",
     "safety.respond"
   ],
-  "skill_ids": [],
+  "skill_ids": [
+    "info.research",
+    "computer.basic",
+    "messaging.group",
+    "record.shortnote",
+    "writing.feedback"
+  ],
   "mounted_skill_ids": [
     "routine.daily",
     "social.reply",
     "memory.record",
     "map.navigate",
-    "safety.respond"
+    "safety.respond",
+    "info.research",
+    "computer.basic",
+    "messaging.group",
+    "record.shortnote",
+    "writing.feedback"
   ],
   "experiment_context": {
     "title": "访问代表团待命",
@@ -78,5 +86,18 @@
       "台词自然，不把场外说明说进台词。"
     ],
     "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-  }
+  },
+  "selected_skills": [
+    "routine.daily",
+    "social.reply",
+    "memory.record",
+    "map.navigate",
+    "safety.respond",
+    "info.research",
+    "computer.basic",
+    "messaging.group",
+    "record.shortnote",
+    "writing.feedback"
+  ],
+  "activated_skills": []
 }

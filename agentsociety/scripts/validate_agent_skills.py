@@ -178,6 +178,8 @@ def mounted_skill_ids_from_config(config_path: Path) -> tuple[list[list[str]], l
             errors.append(f"agent {agent_id}: profile.skills must not be used")
         if kwargs.get("skill_runtime_skill_names"):
             errors.append(f"agent {agent_id}: skill_runtime_skill_names must not be used")
+        if kwargs.get("enable_skill_runtime") is not True:
+            errors.append(f"agent {agent_id}: enable_skill_runtime must be true")
         if common != COMMON_SKILL_IDS:
             errors.append(f"agent {agent_id}: common_skill_ids does not match required common set")
         if not isinstance(personal, list) or not personal:

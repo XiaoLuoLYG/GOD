@@ -199,7 +199,7 @@
         "session_id": "pku_trump_visit_run_1_agent_1",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -234,7 +234,33 @@
             "食堂、宿舍、图书馆、实验楼、教学楼、体育馆和校园草坪用于展示日常生活。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "class.learn",
+          "info.research",
+          "peer.communicate",
+          "writing.feedback",
+          "record.shortnote"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "class.learn",
+          "info.research",
+          "peer.communicate",
+          "writing.feedback",
+          "record.shortnote"
+        ]
       }
     },
     {
@@ -307,7 +333,7 @@
         "session_id": "pku_trump_visit_run_1_agent_2",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -342,7 +368,33 @@
             "食堂、宿舍、图书馆、实验楼、教学楼、体育馆和校园草坪用于展示日常生活。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "class.organize",
+          "roster.verify",
+          "notice.write",
+          "peer.communicate",
+          "writing.feedback"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "class.organize",
+          "roster.verify",
+          "notice.write",
+          "peer.communicate",
+          "writing.feedback"
+        ]
       }
     },
     {
@@ -416,7 +468,7 @@
         "session_id": "pku_trump_visit_run_1_agent_3",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -451,7 +503,33 @@
             "食堂、宿舍、图书馆、实验楼、教学楼、体育馆和校园草坪用于展示日常生活。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "info.research",
+          "computer.basic",
+          "script.automate",
+          "record.shortnote",
+          "peer.communicate"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "info.research",
+          "computer.basic",
+          "script.automate",
+          "record.shortnote",
+          "peer.communicate"
+        ]
       }
     },
     {
@@ -523,7 +601,7 @@
         "session_id": "pku_trump_visit_run_1_agent_4",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -558,7 +636,33 @@
             "食堂、宿舍、图书馆、实验楼、教学楼、体育馆和校园草坪用于展示日常生活。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "library.curate",
+          "info.research",
+          "record.shortnote",
+          "listen.relay",
+          "notice.write"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "library.curate",
+          "info.research",
+          "record.shortnote",
+          "listen.relay",
+          "notice.write"
+        ]
       }
     },
     {
@@ -629,7 +733,7 @@
         "session_id": "pku_trump_visit_run_1_agent_5",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -664,7 +768,33 @@
             "食堂、宿舍、图书馆、实验楼、教学楼、体育馆和校园草坪用于展示日常生活。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "class.organize",
+          "info.research",
+          "writing.feedback",
+          "notice.write",
+          "roster.verify"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "class.organize",
+          "info.research",
+          "writing.feedback",
+          "notice.write",
+          "roster.verify"
+        ]
       }
     },
     {
@@ -737,7 +867,7 @@
         "session_id": "pku_trump_visit_run_1_agent_6",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -772,7 +902,33 @@
             "食堂、宿舍、图书馆、实验楼、教学楼、体育馆和校园草坪用于展示日常生活。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "info.research",
+          "computer.basic",
+          "privacy.protect",
+          "writing.feedback",
+          "record.shortnote"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "info.research",
+          "computer.basic",
+          "privacy.protect",
+          "writing.feedback",
+          "record.shortnote"
+        ]
       }
     },
     {
@@ -848,7 +1004,7 @@
         "session_id": "pku_trump_visit_run_1_agent_7",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -883,7 +1039,33 @@
             "食堂、宿舍、图书馆、实验楼、教学楼、体育馆和校园草坪用于展示日常生活。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "route.localmap",
+          "history.localtelling",
+          "social.matchmake",
+          "phone.photolog",
+          "record.shortnote"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "route.localmap",
+          "history.localtelling",
+          "social.matchmake",
+          "phone.photolog",
+          "record.shortnote"
+        ]
       }
     },
     {
@@ -955,7 +1137,7 @@
         "session_id": "pku_trump_visit_run_1_agent_8",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -990,7 +1172,33 @@
             "食堂、宿舍、图书馆、实验楼、教学楼、体育馆和校园草坪用于展示日常生活。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "shop.run",
+          "cooking.lightmeal",
+          "gossip.filter",
+          "ingredient.advise",
+          "listen.relay"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "shop.run",
+          "cooking.lightmeal",
+          "gossip.filter",
+          "ingredient.advise",
+          "listen.relay"
+        ]
       }
     },
     {
@@ -1064,7 +1272,7 @@
         "session_id": "pku_trump_visit_run_1_agent_9",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -1099,7 +1307,33 @@
             "食堂、宿舍、图书馆、实验楼、教学楼、体育馆和校园草坪用于展示日常生活。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "route.localmap",
+          "crowd.guide",
+          "phone.photolog",
+          "history.localtelling",
+          "messaging.group"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "route.localmap",
+          "crowd.guide",
+          "phone.photolog",
+          "history.localtelling",
+          "messaging.group"
+        ]
       }
     },
     {
@@ -1171,7 +1405,7 @@
         "session_id": "pku_trump_visit_run_1_agent_10",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -1206,7 +1440,33 @@
             "食堂、宿舍、图书馆、实验楼、教学楼、体育馆和校园草坪用于展示日常生活。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "peer.communicate",
+          "community.coordinate",
+          "messaging.group",
+          "notice.write",
+          "crowd.guide"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "peer.communicate",
+          "community.coordinate",
+          "messaging.group",
+          "notice.write",
+          "crowd.guide"
+        ]
       }
     },
     {
@@ -1276,7 +1536,7 @@
         "session_id": "pku_trump_visit_run_1_agent_11",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -1311,7 +1571,33 @@
             "食堂、宿舍、图书馆、实验楼、教学楼、体育馆和校园草坪用于展示日常生活。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "roster.verify",
+          "class.organize",
+          "messaging.group",
+          "notice.write",
+          "crowd.guide"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "roster.verify",
+          "class.organize",
+          "messaging.group",
+          "notice.write",
+          "crowd.guide"
+        ]
       }
     },
     {
@@ -1384,7 +1670,7 @@
         "session_id": "pku_trump_visit_run_1_agent_12",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -1419,7 +1705,33 @@
             "食堂、宿舍、图书馆、实验楼、教学楼、体育馆和校园草坪用于展示日常生活。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "info.research",
+          "record.shortnote",
+          "writing.feedback",
+          "gossip.filter",
+          "messaging.group"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "info.research",
+          "record.shortnote",
+          "writing.feedback",
+          "gossip.filter",
+          "messaging.group"
+        ]
       }
     },
     {
@@ -1492,7 +1804,7 @@
         "session_id": "pku_trump_visit_run_1_agent_13",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -1527,7 +1839,33 @@
             "食堂、宿舍、图书馆、实验楼、教学楼、体育馆和校园草坪用于展示日常生活。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "class.learn",
+          "info.research",
+          "peer.communicate",
+          "writing.feedback",
+          "record.shortnote"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "class.learn",
+          "info.research",
+          "peer.communicate",
+          "writing.feedback",
+          "record.shortnote"
+        ]
       }
     },
     {
@@ -1601,7 +1939,7 @@
         "session_id": "pku_trump_visit_run_1_agent_14",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -1636,7 +1974,33 @@
             "食堂、宿舍、图书馆、实验楼、教学楼、体育馆和校园草坪用于展示日常生活。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "computer.basic",
+          "script.automate",
+          "info.research",
+          "peer.communicate",
+          "privacy.protect"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "computer.basic",
+          "script.automate",
+          "info.research",
+          "peer.communicate",
+          "privacy.protect"
+        ]
       }
     },
     {
@@ -1708,7 +2072,7 @@
         "session_id": "pku_trump_visit_run_1_agent_15",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -1743,7 +2107,33 @@
             "食堂、宿舍、图书馆、实验楼、教学楼、体育馆和校园草坪用于展示日常生活。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "info.research",
+          "computer.basic",
+          "record.shortnote",
+          "writing.feedback",
+          "privacy.protect"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "info.research",
+          "computer.basic",
+          "record.shortnote",
+          "writing.feedback",
+          "privacy.protect"
+        ]
       }
     },
     {
@@ -1815,7 +2205,7 @@
         "session_id": "pku_trump_visit_run_1_agent_16",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -1850,7 +2240,33 @@
             "食堂、宿舍、图书馆、实验楼、教学楼、体育馆和校园草坪用于展示日常生活。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "social.matchmake",
+          "community.observe",
+          "messaging.group",
+          "peer.communicate",
+          "info.research"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "social.matchmake",
+          "community.observe",
+          "messaging.group",
+          "peer.communicate",
+          "info.research"
+        ]
       }
     },
     {
@@ -1924,7 +2340,7 @@
         "session_id": "pku_trump_visit_run_1_agent_17",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -1959,7 +2375,33 @@
             "食堂、宿舍、图书馆、实验楼、教学楼、体育馆和校园草坪用于展示日常生活。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "peer.communicate",
+          "youth.communicate",
+          "crowd.guide",
+          "health.educate",
+          "record.shortnote"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "peer.communicate",
+          "youth.communicate",
+          "crowd.guide",
+          "health.educate",
+          "record.shortnote"
+        ]
       }
     },
     {
@@ -2033,7 +2475,7 @@
         "session_id": "pku_trump_visit_run_1_agent_18",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -2068,7 +2510,33 @@
             "食堂、宿舍、图书馆、实验楼、教学楼、体育馆和校园草坪用于展示日常生活。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "peer.communicate",
+          "computer.basic",
+          "gossip.filter",
+          "record.shortnote",
+          "youth.communicate"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "peer.communicate",
+          "computer.basic",
+          "gossip.filter",
+          "record.shortnote",
+          "youth.communicate"
+        ]
       }
     },
     {
@@ -2145,7 +2613,7 @@
         "session_id": "pku_trump_visit_run_1_agent_19",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -2159,7 +2627,33 @@
             "台词自然，不把场外说明说进台词。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "route.localmap",
+          "crowd.guide",
+          "messaging.group",
+          "history.localtelling",
+          "record.shortnote"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "route.localmap",
+          "crowd.guide",
+          "messaging.group",
+          "history.localtelling",
+          "record.shortnote"
+        ]
       }
     },
     {
@@ -2233,7 +2727,7 @@
         "session_id": "pku_trump_visit_run_1_agent_20",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -2247,7 +2741,33 @@
             "台词自然，不把场外说明说进台词。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "info.research",
+          "computer.basic",
+          "messaging.group",
+          "privacy.protect",
+          "record.shortnote"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "info.research",
+          "computer.basic",
+          "messaging.group",
+          "privacy.protect",
+          "record.shortnote"
+        ]
       }
     },
     {
@@ -2321,7 +2841,7 @@
         "session_id": "pku_trump_visit_run_1_agent_21",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -2335,7 +2855,33 @@
             "台词自然，不把场外说明说进台词。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "info.research",
+          "computer.basic",
+          "messaging.group",
+          "record.shortnote",
+          "writing.feedback"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "info.research",
+          "computer.basic",
+          "messaging.group",
+          "record.shortnote",
+          "writing.feedback"
+        ]
       }
     },
     {
@@ -2413,7 +2959,7 @@
         "session_id": "pku_trump_visit_run_1_agent_22",
         "mode": "agent.plan",
         "enable_memory": false,
-        "enable_skill_runtime": false,
+        "enable_skill_runtime": true,
         "request_timeout": 900,
         "channel_id": "agentsociety",
         "experiment_context": {
@@ -2427,7 +2973,33 @@
             "台词自然，不把场外说明说进台词。"
           ],
           "language": "仅使用简体中文；真实人物姓名可以保留英文，机器协议字段除外。"
-        }
+        },
+        "common_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond"
+        ],
+        "skill_ids": [
+          "crowd.guide",
+          "roster.verify",
+          "messaging.group",
+          "notice.write",
+          "route.localmap"
+        ],
+        "mounted_skill_ids": [
+          "routine.daily",
+          "social.reply",
+          "memory.record",
+          "map.navigate",
+          "safety.respond",
+          "crowd.guide",
+          "roster.verify",
+          "messaging.group",
+          "notice.write",
+          "route.localmap"
+        ]
       }
     }
   ],
