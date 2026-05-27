@@ -5,7 +5,9 @@ from pathlib import Path
 
 import anyio
 import pytest
+from fastapi import FastAPI
 from fastapi import HTTPException, UploadFile
+from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
 from agentsociety2.backend.routers import god_setup
@@ -517,6 +519,42 @@ def test_generate_draft_normalizes_model_output(monkeypatch, tmp_path):
     assert latest["draft"]["experiment_context"]["title"] == "Stanford Prison Adaptation"
 
 
+def test_latest_draft_route_returns_persisted_setup_draft(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    latest_path = tmp_path / ".god" / "run" / "latest-draft.json"
+    latest_path.parent.mkdir(parents=True)
+    latest_path.write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-05-27T00:00:00+00:00",
+                "basics": {
+                    "title": "Moon Tower",
+                    "background": "A generated moon base draft.",
+                    "agent_count": 2,
+                    "map_id": "moon_tower",
+                    "language": "zh",
+                    "start_t": "2026-05-11T08:20:00+08:00",
+                    "num_steps": 4,
+                    "tick": 1800,
+                    "movement_tiles_per_second": 8,
+                    "movement_min_steps_per_trip": 3,
+                },
+                "draft": _raw_draft(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    app = FastAPI()
+    app.include_router(god_setup.router)
+
+    response = TestClient(app).get("/api/v1/god/setup/latest-draft")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["draft"]["experiment_context"]["title"] == "Stanford Prison Adaptation"
+    assert payload["basics"]["map_id"] == "moon_tower"
+
+
 def test_generate_draft_uses_saved_api_base_when_request_omits_it(monkeypatch, tmp_path):
     _configure_tmp_god(monkeypatch, tmp_path)
     monkeypatch.setenv("GOD_LLM_API_BASE", "https://api.openai.com/v1")
@@ -777,3 +815,99 @@ def test_start_default_experiment_can_select_pku_without_writing_env_map(monkeyp
     assert current["hypothesis_id"] == "pku_trump_visit"
     assert current["map_id"] == "pku"
     assert "GOD_MAP_ID=pku" not in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+def test_complete_role_visuals_updates_missing_agent_images(monkeypatch, tmp_path):
+    monkeypatch.setenv("GOD_ROOT", str(tmp_path))
+    monkeypatch.setenv("GOD_ENV_FILE", str(tmp_path / ".env"))
+    monkeypatch.setenv("LIVE_WORKSPACE_PATH", str(tmp_path / "agentsociety" / "quick_experiments"))
+    package_root = tmp_path / "agentsociety" / "custom" / "maps" / "demo_map"
+    (package_root / "characters").mkdir(parents=True)
+    (package_root / "visuals").mkdir(parents=True)
+    (package_root / "visuals" / "map.json").write_text(
+        json.dumps(
+            {
+                "type": "map",
+                "orientation": "orthogonal",
+                "width": 2,
+                "height": 2,
+                "tilewidth": 32,
+                "tileheight": 32,
+                "tilesets": [],
+                "layers": [
+                    {"name": "Ground", "type": "tilelayer", "width": 2, "height": 2, "data": [0, 0, 0, 0]},
+                    {"name": "Collisions", "type": "tilelayer", "width": 2, "height": 2, "data": [0, 0, 0, 0]},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (package_root / "map.yaml").write_text(
+        "\n".join(
+            [
+                "schema_version: 1",
+                "map_id: demo_map",
+                "display_name: Demo Map",
+                "tiled_map_path: visuals/map.json",
+                "tile_size: 32",
+                "character_root: characters",
+                "locations:",
+                "- id: plaza",
+                "  name: Plaza",
+                "  anchor_tile: {x: 0, y: 0}",
+                "  interaction_ids: [wait]",
+                "interactions:",
+                "- id: wait",
+                "  name: Wait",
+                "  allowed_location_ids: [plaza]",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    async def fake_generate(**kwargs):
+        filename = f"Generated_Agent_{kwargs['agent_id']}_demo.png"
+        (package_root / "characters" / filename).write_bytes(b"png")
+        return god_setup.AgentStudioCharacterAsset(
+            sprite_name=Path(filename).stem,
+            filename=filename,
+            image_url=f"/api/v1/god/setup/agent-studio/characters/demo_map/{filename}",
+            frame_width=32,
+            frame_height=32,
+            generated_from_photo=False,
+            source={"map_id": "demo_map"},
+        )
+
+    monkeypatch.setattr(god_setup, "_generate_agent_sprite_asset", fake_generate)
+    draft = {
+        "experiment_context": {"title": "Demo", "background": "A demo scenario", "map_id": "demo_map"},
+        "init_config": {
+            "env_modules": [{"module_type": "PixelTownSocialEnv", "kwargs": {"map_id": "demo_map"}}],
+            "agents": [
+                {
+                    "agent_id": 1,
+                    "agent_type": "JiuwenClawAgent",
+                    "kwargs": {
+                        "id": 1,
+                        "name": "Ada",
+                        "profile": {"name": "Ada", "role": "student", "persona": "curious"},
+                    },
+                }
+            ],
+        },
+        "steps": {},
+        "readme": "",
+        "warnings": [],
+    }
+
+    result = anyio.run(
+        god_setup.complete_role_visuals,
+        god_setup.CompleteRoleVisualsRequest(draft=draft),
+    )
+
+    agent = result.draft["init_config"]["agents"][0]
+    assert result.completed_count == 1
+    assert result.failed_count == 0
+    assert agent["kwargs"]["profile"]["appearance"]["character_sprite"] == "Generated_Agent_1_demo"
+    assert agent["kwargs"]["profile"]["agent_studio"]["character_asset"]["filename"] == "Generated_Agent_1_demo.png"

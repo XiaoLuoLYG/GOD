@@ -28,6 +28,7 @@ promos/
 *.db
 *.sqlite
 *.sqlite3
+.superpowers/
 logs/
 agentsociety_data/
 agentsociety/agentsociety_data/
@@ -61,3 +62,6 @@ agentsociety/quick_experiments/hypothesis_pku_trump_visit/experiment_1/run/**/*.
 
 # Agent Studio generates these locally; configs should not depend on committed test sprites.
 agentsociety/custom/maps/*/characters/Generated_Agent_*.png
+
+# Map Studio generated packages are local user output by default.
+agentsociety/custom/generated_maps/

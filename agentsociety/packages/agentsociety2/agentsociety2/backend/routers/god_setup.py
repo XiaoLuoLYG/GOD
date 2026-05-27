@@ -28,6 +28,7 @@ from agentsociety2.config import extract_json
 from agentsociety2.backend.services.map_packages import (
     DEFAULT_MAP_ID,
     MapPackage,
+    character_sprites,
     list_map_packages,
     load_map_package,
     map_package_summary,
@@ -267,6 +268,26 @@ class AgentStudioGenerateResponse(BaseModel):
     character_asset: AgentStudioCharacterAsset | None = None
 
 
+class CompleteRoleVisualsRequest(BaseModel):
+    draft: dict[str, Any]
+    image_config: dict[str, Any] = Field(default_factory=dict)
+
+
+class CompleteRoleVisualResult(BaseModel):
+    agent_id: int
+    name: str
+    status: str
+    filename: str | None = None
+    error: str | None = None
+
+
+class CompleteRoleVisualsResponse(BaseModel):
+    draft: dict[str, Any]
+    results: list[CompleteRoleVisualResult]
+    completed_count: int
+    failed_count: int
+
+
 def _god_root() -> Path:
     raw = os.getenv("GOD_ROOT")
     if raw:
@@ -416,7 +437,10 @@ def _default_experiment_status(workspace: Path) -> list[dict[str, Any]]:
 
 def _map_service_root() -> Path | None:
     candidate = _god_root() / "agentsociety"
-    return candidate if (candidate / "custom" / "maps").exists() else None
+    return candidate if (
+        (candidate / "custom" / "maps").exists()
+        or (candidate / "custom" / "generated_maps").exists()
+    ) else None
 
 
 def _load_map_package(map_id: str | None = None) -> MapPackage:
@@ -792,6 +816,60 @@ def _persistable_character_asset(value: Any) -> dict[str, Any] | None:
     return asset
 
 
+def _profile_appearance(profile: dict[str, Any]) -> dict[str, Any]:
+    appearance = profile.get("appearance")
+    if isinstance(appearance, dict):
+        return appearance
+    appearance = {}
+    profile["appearance"] = appearance
+    return appearance
+
+
+def _profile_has_valid_character_sprite(package: MapPackage, profile: dict[str, Any]) -> bool:
+    appearance = profile.get("appearance") if isinstance(profile.get("appearance"), dict) else {}
+    requested = str(appearance.get("character_sprite") or "").strip()
+    if not requested:
+        return False
+    return requested in {str(sprite["name"]) for sprite in character_sprites(package)}
+
+
+def _role_image_prompt(agent: dict[str, Any]) -> str:
+    kwargs = agent.get("kwargs") if isinstance(agent.get("kwargs"), dict) else {}
+    profile = kwargs.get("profile") if isinstance(kwargs.get("profile"), dict) else {}
+    parts = [
+        str(kwargs.get("name") or profile.get("name") or f"Agent {agent.get('agent_id', '')}"),
+        str(profile.get("role") or profile.get("scenario_role") or ""),
+        str(profile.get("persona") or ""),
+        str(profile.get("goal") or ""),
+        str(profile.get("daily_routine") or ""),
+    ]
+    return " | ".join(part for part in parts if part.strip())[:1200]
+
+
+def _attach_character_asset_to_agent(agent: dict[str, Any], asset: AgentStudioCharacterAsset) -> None:
+    kwargs = agent.get("kwargs")
+    if not isinstance(kwargs, dict):
+        kwargs = {}
+        agent["kwargs"] = kwargs
+    profile = kwargs.get("profile")
+    if not isinstance(profile, dict):
+        profile = {}
+        kwargs["profile"] = profile
+    appearance = _profile_appearance(profile)
+    stored = _persistable_character_asset(asset.model_dump(mode="json")) or {}
+    appearance["character_asset"] = stored
+    appearance["character_sprite"] = asset.sprite_name
+    appearance["character_sprite_filename"] = asset.filename
+    appearance["character_sprite_source"] = stored.get("source") or {}
+    studio = profile.setdefault("agent_studio", {})
+    if not isinstance(studio, dict):
+        studio = {}
+        profile["agent_studio"] = studio
+    studio["version"] = 1
+    studio["character_asset"] = stored
+    studio["map_id"] = stored.get("source", {}).get("map_id")
+
+
 def _agent_studio_response(request: AgentStudioGenerateRequest) -> AgentStudioGenerateResponse:
     zh = _language_is_zh(request.language)
     background = _localized_context_value(request.experiment_context, "background", request.language)
@@ -978,8 +1056,8 @@ def _agent_sprite_prompt(*, agent_name: str, prompt: str, mbti: str, appearance:
     appearance_text = json.dumps(appearance, ensure_ascii=False, sort_keys=True)[:1200]
     name = agent_name.strip() or "the reference character"
     return (
-        "Use the uploaded reference image as the character identity reference. "
         "Generate a transparent-background pixel-art RPG character spritesheet for GOD PixelReplay. "
+        "If a reference image is provided, use it as the identity reference; otherwise infer a distinct readable character from the agent context. "
         "The output must be one clean 3-column by 4-row sprite sheet, no labels, no text, no gridlines, no extra objects. "
         "Rows must be: facing down, facing left, facing right, facing up. "
         "Each row must contain three full-body walking frames of the same character, centered in each cell. "
@@ -1009,32 +1087,46 @@ async def _request_openai_sprite_image(
     api_base: str,
     model: str,
     prompt: str,
-    reference_bytes: bytes,
+    reference_bytes: bytes | None,
     reference_filename: str,
     content_type: str,
 ) -> bytes:
     base = api_base.rstrip("/") or IMAGE_ENV_DEFAULTS["IMAGE_GEN_API_BASE"]
-    url = base if base.endswith("/images/edits") else f"{base}/images/edits"
-    form = aiohttp.FormData()
-    form.add_field("model", model)
-    form.add_field("prompt", prompt)
-    form.add_field("size", "1024x1024")
-    form.add_field("n", "1")
-    form.add_field("background", "transparent")
-    form.add_field("output_format", "png")
-    form.add_field(
-        "image",
-        reference_bytes,
-        filename=Path(reference_filename or "reference.png").name,
-        content_type=content_type or "image/png",
-    )
+    if reference_bytes:
+        url = base if base.endswith("/images/edits") else f"{base}/images/edits"
+        request_kwargs: dict[str, Any] = {"data": aiohttp.FormData()}
+        form = request_kwargs["data"]
+        form.add_field("model", model)
+        form.add_field("prompt", prompt)
+        form.add_field("size", "1024x1024")
+        form.add_field("n", "1")
+        form.add_field("background", "transparent")
+        form.add_field("output_format", "png")
+        form.add_field(
+            "image",
+            reference_bytes,
+            filename=Path(reference_filename or "reference.png").name,
+            content_type=content_type or "image/png",
+        )
+    else:
+        url = base if base.endswith("/images/generations") else f"{base}/images/generations"
+        request_kwargs = {
+            "json": {
+                "model": model,
+                "prompt": prompt,
+                "size": "1024x1024",
+                "n": 1,
+                "background": "transparent",
+                "output_format": "png",
+            }
+        }
     timeout = aiohttp.ClientTimeout(total=float(os.getenv("GOD_AGENT_SPRITE_TIMEOUT", "240")))
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(
                 url,
                 headers={"authorization": f"Bearer {api_key}"},
-                data=form,
+                **request_kwargs,
             ) as response:
                 text = await response.text()
                 if response.status >= 400:
@@ -1106,7 +1198,7 @@ def _unique_sprite_filename(root: Path, *, agent_id: int, agent_name: str) -> tu
 
 async def _generate_agent_sprite_asset(
     *,
-    reference_bytes: bytes,
+    reference_bytes: bytes | None,
     reference_filename: str,
     content_type: str,
     agent_id: int,
@@ -1153,17 +1245,19 @@ async def _generate_agent_sprite_asset(
             "provider": resolved_config.get("IMAGE_GEN_PROVIDER", "openai"),
             "model": model,
             "api_base": api_base,
-            "reference_filename": Path(reference_filename or "reference.png").name,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "map_id": package.map_id,
         }
+        if reference_bytes:
+            source["reference_filename"] = Path(reference_filename or "reference.png").name
         return AgentStudioCharacterAsset(
             sprite_name=sprite_name,
             filename=filename,
             image_url=_character_asset_url(package.map_id, filename),
             frame_width=AGENT_SPRITE_FRAME_SIZE[0],
             frame_height=AGENT_SPRITE_FRAME_SIZE[1],
-            source_photo_name=Path(reference_filename or "").name or None,
+            source_photo_name=Path(reference_filename or "").name if reference_bytes else None,
+            generated_from_photo=bool(reference_bytes),
             preview_data_url=f"data:image/png;base64,{base64.b64encode(sprite_bytes).decode('ascii')}",
             source=source,
         )
@@ -1856,6 +1950,26 @@ def _write_latest_draft(basics: DraftBasics, draft: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def _read_latest_draft() -> dict[str, Any] | None:
+    path = _latest_draft_file()
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Latest draft is unreadable: {exc}") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("draft"), dict):
+        raise HTTPException(status_code=500, detail="Latest draft is malformed")
+    basics = payload.get("basics")
+    if not isinstance(basics, dict):
+        basics = {}
+    return {
+        "generated_at": str(payload.get("generated_at") or ""),
+        "basics": basics,
+        "draft": payload["draft"],
+    }
+
+
 @router.get("/status")
 async def setup_status() -> dict[str, Any]:
     env = _merged_env()
@@ -1890,6 +2004,14 @@ async def setup_status() -> dict[str, Any]:
         ),
         "needs_setup": not bool(env.get("GOD_LLM_API_KEY")) or not has_current,
     }
+
+
+@router.get("/latest-draft")
+async def latest_draft() -> dict[str, Any]:
+    payload = _read_latest_draft()
+    if payload is None:
+        raise HTTPException(status_code=404, detail="No generated setup draft found")
+    return payload
 
 
 @router.post("/model-config")
@@ -2010,6 +2132,61 @@ async def get_agent_studio_character_asset(
         if candidate.exists() and candidate.is_file():
             return FileResponse(candidate)
     raise HTTPException(status_code=404, detail=f"Character asset not found: {character_name}")
+
+
+@router.post("/agent-studio/complete-role-visuals", response_model=CompleteRoleVisualsResponse)
+async def complete_role_visuals(request: CompleteRoleVisualsRequest) -> CompleteRoleVisualsResponse:
+    draft = deepcopy(request.draft)
+    init_config = draft.get("init_config") if isinstance(draft.get("init_config"), dict) else {}
+    env_modules = init_config.get("env_modules", []) if isinstance(init_config, dict) else []
+    env_kwargs = env_modules[0].get("kwargs", {}) if env_modules and isinstance(env_modules[0], dict) else {}
+    context = draft.get("experiment_context", {}) if isinstance(draft.get("experiment_context"), dict) else {}
+    map_id = str(env_kwargs.get("map_id") or context.get("map_id") or DEFAULT_MAP_ID)
+    package = _load_map_package(map_id)
+    agents = init_config.get("agents", []) if isinstance(init_config, dict) else []
+    results: list[CompleteRoleVisualResult] = []
+
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        kwargs = agent.get("kwargs") if isinstance(agent.get("kwargs"), dict) else {}
+        profile = kwargs.get("profile") if isinstance(kwargs.get("profile"), dict) else {}
+        agent_id = int(agent.get("agent_id") or kwargs.get("id") or 0)
+        name = str(kwargs.get("name") or profile.get("name") or f"Agent {agent_id}")
+        if _profile_has_valid_character_sprite(package, profile):
+            appearance = profile.get("appearance") if isinstance(profile.get("appearance"), dict) else {}
+            results.append(
+                CompleteRoleVisualResult(
+                    agent_id=agent_id,
+                    name=name,
+                    status="skipped",
+                    filename=str(appearance.get("character_sprite_filename") or ""),
+                )
+            )
+            continue
+        try:
+            asset = await _generate_agent_sprite_asset(
+                reference_bytes=None,
+                reference_filename="",
+                content_type="image/png",
+                agent_id=agent_id,
+                agent_name=name,
+                map_id=package.map_id,
+                prompt=_role_image_prompt(agent),
+                mbti=str(profile.get("mbti") or ""),
+                appearance=profile.get("appearance") if isinstance(profile.get("appearance"), dict) else {},
+                image_config=request.image_config,
+            )
+            _attach_character_asset_to_agent(agent, asset)
+            results.append(
+                CompleteRoleVisualResult(agent_id=agent_id, name=name, status="completed", filename=asset.filename)
+            )
+        except Exception as exc:
+            results.append(CompleteRoleVisualResult(agent_id=agent_id, name=name, status="failed", error=str(exc)))
+
+    completed = sum(1 for item in results if item.status == "completed")
+    failed = sum(1 for item in results if item.status == "failed")
+    return CompleteRoleVisualsResponse(draft=draft, results=results, completed_count=completed, failed_count=failed)
 
 
 @router.post("/publish")

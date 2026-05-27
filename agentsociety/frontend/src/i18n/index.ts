@@ -35,6 +35,8 @@ import enSetup from './locales/en/setup';
 import zhSetup from './locales/zh/setup';
 import enAgentBuilder from './locales/en/agentBuilder';
 import zhAgentBuilder from './locales/zh/agentBuilder';
+import enMapStudio from './locales/en/mapStudio';
+import zhMapStudio from './locales/zh/mapStudio';
 
 // Combine translations
 const resources = {
@@ -56,6 +58,7 @@ const resources = {
             skill: enSkill,
             setup: enSetup,
             agentBuilder: enAgentBuilder,
+            mapStudio: enMapStudio,
         }
     },
     zh: {
@@ -76,6 +79,7 @@ const resources = {
             skill: zhSkill,
             setup: zhSetup,
             agentBuilder: zhAgentBuilder,
+            mapStudio: zhMapStudio,
         }
     }
 };
