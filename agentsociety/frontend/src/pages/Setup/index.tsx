@@ -23,6 +23,7 @@ import type { ColumnsType } from 'antd/es/table';
 import {
     ApiOutlined,
     CheckCircleOutlined,
+    CompassOutlined,
     DeleteOutlined,
     EditOutlined,
     ExperimentOutlined,
@@ -33,7 +34,7 @@ import {
     ThunderboltOutlined,
     UserAddOutlined,
 } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { fetchCustom } from '../../components/fetch';
 import LanguageToggle from '../../components/LanguageToggle';
@@ -148,6 +149,19 @@ type DraftPayload = {
     warnings: string[];
 };
 
+type CompleteRoleVisualsResponse = {
+    draft: DraftPayload;
+    results: Array<{ agent_id: number; name: string; status: string; filename?: string; error?: string }>;
+    completed_count: number;
+    failed_count: number;
+};
+
+type LatestDraftPayload = {
+    generated_at: string;
+    basics?: Partial<BasicsForm>;
+    draft: DraftPayload;
+};
+
 type LaunchResult = {
     hypothesis_id: string;
     experiment_id: string;
@@ -196,6 +210,14 @@ const compactJson = (value: any, length = 140) => {
 
 const agentName = (agent: AgentRecord) => (
     String(agent.kwargs?.name || agent.kwargs?.profile?.name || `Agent ${agent.agent_id}`)
+);
+
+const agentCharacterSprite = (agent: AgentRecord) => (
+    String(agent.kwargs?.profile?.appearance?.character_sprite || '')
+);
+
+const roleImageCount = (agents: AgentRecord[]) => (
+    agents.filter((agent) => agentCharacterSprite(agent)).length
 );
 
 const help = (text: string) => (
@@ -307,6 +329,7 @@ const basicsMatch = (left: BasicsForm, right: BasicsForm) => (
 
 export default function SetupPage() {
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
     const { t, i18n } = useTranslation();
     const copy = (key: string, values?: Record<string, unknown>) => (
         t(`setup.${key}`, values) as string
@@ -324,12 +347,19 @@ export default function SetupPage() {
     const [generating, setGenerating] = useState(false);
     const [publishing, setPublishing] = useState(false);
     const [startingDefault, setStartingDefault] = useState<string | null>(null);
+    const [latestDraftAvailable, setLatestDraftAvailable] = useState(false);
     const [launchPending, setLaunchPending] = useState<LaunchResult | null>(null);
     const [agentModalOpen, setAgentModalOpen] = useState(false);
     const [editingAgentId, setEditingAgentId] = useState<number | null>(null);
+    const [completingRoleImages, setCompletingRoleImages] = useState(false);
+    const [contextJsonText, setContextJsonText] = useState('');
+    const [stepsJsonText, setStepsJsonText] = useState('');
+    const [contextJsonError, setContextJsonError] = useState<string | null>(null);
+    const [stepsJsonError, setStepsJsonError] = useState<string | null>(null);
     const [basicsValues, setBasicsValues] = useState<BasicsForm>(() => loadStoredBasics(localizedDefaultBasics));
     const basicsRef = useRef<BasicsForm>(basicsValues);
     const previousDefaultBasicsRef = useRef<BasicsForm>(localizedDefaultBasics);
+    const requestedMapId = String(searchParams.get('map_id') || '').trim();
     const [agentForm] = Form.useForm<AgentFormValues>();
     const [modelForm] = Form.useForm<ModelForm>();
     const [basicsForm] = Form.useForm<BasicsForm>();
@@ -372,6 +402,26 @@ export default function SetupPage() {
             label: `${locationDisplayName(location)} (${location.id})`,
         }))
     ), [i18n.language, mapLocations, selectedMap?.map_id, selectedMapId]);
+    const draftJsonHasErrors = Boolean(contextJsonError || stepsJsonError);
+
+    const renderLaunchPendingAlert = (marginBottom = 18) => (
+        launchPending ? (
+            <Alert
+                type="success"
+                showIcon
+                message={copy('launchPending.title')}
+                description={(
+                    <Space direction="vertical" size={4}>
+                        <Text>{copy('launchPending.description')}</Text>
+                        <Text code>
+                            {launchPending.hypothesis_id} / experiment_{launchPending.experiment_id}
+                        </Text>
+                    </Space>
+                )}
+                style={{ marginBottom }}
+            />
+        ) : null
+    );
 
     const loadStatus = async () => {
         setLoadingStatus(true);
@@ -381,8 +431,15 @@ export default function SetupPage() {
             const storedBasics = basicsRef.current;
             const defaultMapId = localizedDefaultBasics.map_id || 'the_ville';
             const selectedMapId = payload.selected_map_id || defaultMapId;
+            const requestedMapExists = requestedMapId
+                ? (payload.maps || []).some((item) => item.map_id === requestedMapId)
+                : false;
             const selectedMapExists = (payload.maps || []).some((item) => item.map_id === selectedMapId);
-            if (selectedMapExists && storedBasics.map_id === defaultMapId && selectedMapId !== defaultMapId) {
+            if (requestedMapExists) {
+                syncBasicsValues({ ...storedBasics, map_id: requestedMapId });
+                basicsForm.setFieldsValue({ map_id: requestedMapId });
+                setCurrentStep(2);
+            } else if (selectedMapExists && storedBasics.map_id === defaultMapId && selectedMapId !== defaultMapId) {
                 syncBasicsValues({ ...storedBasics, map_id: selectedMapId });
                 basicsForm.setFieldsValue({ map_id: selectedMapId });
             }
@@ -395,6 +452,7 @@ export default function SetupPage() {
                 GOD_BACKEND_PORT: payload.model_config.GOD_BACKEND_PORT?.value || '8001',
                 GOD_FRONTEND_PORT: payload.model_config.GOD_FRONTEND_PORT?.value || '5174',
             });
+            void loadLatestDraft(false);
         } catch (error) {
             messageApi.error(copy('messages.loadStatusFailed', { error: errorText(error) }));
         } finally {
@@ -406,6 +464,20 @@ export default function SetupPage() {
         loadStatus();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    useEffect(() => {
+        if (!draft) {
+            setContextJsonText('');
+            setStepsJsonText('');
+            setContextJsonError(null);
+            setStepsJsonError(null);
+            return;
+        }
+        setContextJsonText(jsonStringify(draft.experiment_context));
+        setStepsJsonText(jsonStringify(draft.steps));
+        setContextJsonError(null);
+        setStepsJsonError(null);
+    }, [draft]);
 
     useEffect(() => {
         if (currentStep === 2) {
@@ -458,6 +530,33 @@ export default function SetupPage() {
         return normalized;
     };
 
+    const loadLatestDraft = async (navigateToDraft = false) => {
+        try {
+            const response = await fetchCustom('/api/v1/god/setup/latest-draft');
+            if (response.status === 404) {
+                setLatestDraftAvailable(false);
+                return false;
+            }
+            if (!response.ok) {
+                throw new Error(await response.text());
+            }
+            const payload = await response.json() as LatestDraftPayload;
+            setLatestDraftAvailable(true);
+            setDraft((current) => (!current || navigateToDraft ? payload.draft : current));
+            if (payload.basics) {
+                const normalized = syncBasicsValues({ ...basicsRef.current, ...payload.basics });
+                basicsForm.setFieldsValue(normalized);
+            }
+            if (navigateToDraft) {
+                setCurrentStep(4);
+            }
+            return true;
+        } catch (error) {
+            messageApi.warning(copy('messages.loadLatestDraftFailed', { error: errorText(error) }));
+            return false;
+        }
+    };
+
     useEffect(() => {
         const previousDefaults = previousDefaultBasicsRef.current;
         if (basicsMatch(basicsRef.current, previousDefaults)) {
@@ -503,6 +602,7 @@ export default function SetupPage() {
                 }),
             });
             setDraft(payload);
+            setLatestDraftAvailable(true);
             setCurrentStep(4);
             messageApi.success(copy('messages.draftGenerated'));
         } catch (error) {
@@ -537,6 +637,63 @@ export default function SetupPage() {
         }
     };
 
+    const validateContextJsonText = (text: string) => {
+        try {
+            parseJsonObject(text, 'experiment_context');
+            setContextJsonError(null);
+        } catch (error) {
+            setContextJsonError(errorText(error));
+        }
+    };
+
+    const validateStepsJsonText = (text: string) => {
+        try {
+            parseJsonObject(text, 'steps');
+            setStepsJsonError(null);
+        } catch (error) {
+            setStepsJsonError(errorText(error));
+        }
+    };
+
+    const draftFromJsonText = () => {
+        if (!draft) return null;
+        const next = cloneDraft(draft);
+        next.experiment_context = parseJsonObject(contextJsonText, 'experiment_context');
+        next.steps = parseJsonObject(stepsJsonText, 'steps');
+        next.init_config.agents = next.init_config.agents.map((agent) => ({
+            ...agent,
+            kwargs: {
+                ...agent.kwargs,
+                experiment_context: next.experiment_context,
+                profile: {
+                    ...(agent.kwargs?.profile || {}),
+                    scenario: String(next.experiment_context.background || ''),
+                },
+            },
+        }));
+        return next;
+    };
+
+    const commitDraftJsonEdits = () => {
+        try {
+            const next = draftFromJsonText();
+            if (!next) return null;
+            setContextJsonError(null);
+            setStepsJsonError(null);
+            setDraft(next);
+            return next;
+        } catch (error) {
+            const message = errorText(error);
+            if (message.includes('experiment_context')) {
+                setContextJsonError(message);
+            } else if (message.includes('steps')) {
+                setStepsJsonError(message);
+            }
+            messageApi.error(copy('edit.fixDraftJsonBeforeLaunch'));
+            return null;
+        }
+    };
+
     const updateContextJson = (text: string) => {
         if (!draft) return;
         try {
@@ -554,9 +711,12 @@ export default function SetupPage() {
                 },
             }));
             setDraft(next);
+            setContextJsonError(null);
             messageApi.success(copy('messages.contextUpdated'));
         } catch (error) {
-            messageApi.error(errorText(error));
+            const message = errorText(error);
+            setContextJsonError(message);
+            messageApi.error(copy('edit.contextJsonInvalid', { error: message }));
         }
     };
 
@@ -566,9 +726,12 @@ export default function SetupPage() {
             const next = cloneDraft(draft);
             next.steps = parseJsonObject(text, 'steps');
             setDraft(next);
+            setStepsJsonError(null);
             messageApi.success(copy('messages.stepsUpdated'));
         } catch (error) {
-            messageApi.error(errorText(error));
+            const message = errorText(error);
+            setStepsJsonError(message);
+            messageApi.error(copy('edit.stepsJsonInvalid', { error: message }));
         }
     };
 
@@ -678,6 +841,33 @@ export default function SetupPage() {
         setAgentModalOpen(false);
     };
 
+    const completeRoleImages = async () => {
+        if (!draft) return;
+        setCompletingRoleImages(true);
+        try {
+            const result = await fetchJson<CompleteRoleVisualsResponse>('/api/v1/god/setup/agent-studio/complete-role-visuals', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ draft }),
+            });
+            setDraft(result.draft);
+            if (result.failed_count > 0) {
+                messageApi.warning(copy('messages.roleImagesPartial', {
+                    completed: result.completed_count,
+                    failed: result.failed_count,
+                }));
+            } else {
+                messageApi.success(copy('messages.roleImagesCompleted', {
+                    completed: result.completed_count,
+                }));
+            }
+        } catch (error) {
+            messageApi.error(copy('messages.roleImagesFailed', { error: errorText(error) }));
+        } finally {
+            setCompletingRoleImages(false);
+        }
+    };
+
     const deleteAgent = (agentId: number) => {
         if (!draft) return;
         const next = cloneDraft(draft);
@@ -692,6 +882,12 @@ export default function SetupPage() {
 
     const publishAndStart = async () => {
         if (!draft) return;
+        if (draftJsonHasErrors) {
+            messageApi.error(copy('edit.fixDraftJsonBeforeLaunch'));
+            return;
+        }
+        const publishDraft = commitDraftJsonEdits();
+        if (!publishDraft) return;
         const modelValues = await modelForm.validateFields();
         setPublishing(true);
         try {
@@ -699,7 +895,7 @@ export default function SetupPage() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    draft,
+                    draft: publishDraft,
                     model_config: modelValues,
                     start_immediately: true,
                 }),
@@ -744,12 +940,38 @@ export default function SetupPage() {
             ),
         },
         {
+            title: copy('edit.table.roleImage'),
+            width: 150,
+            render: (_, record) => (
+                agentCharacterSprite(record)
+                    ? <Tag color="green">{copy('edit.roleImageReady')}</Tag>
+                    : <Tag>{copy('edit.roleImageMissing')}</Tag>
+            ),
+        },
+        {
             title: copy('edit.table.actions'),
             width: 104,
             render: (_, record) => (
                 <Space size={6}>
-                    <Button size="small" icon={<EditOutlined />} onClick={() => openAgentModal(record)} />
-                    <Button size="small" danger icon={<DeleteOutlined />} onClick={() => deleteAgent(record.agent_id)} />
+                    <Tooltip title={copy('edit.table.editAgent')}>
+                        <Button
+                            size="small"
+                            icon={<EditOutlined />}
+                            aria-label={copy('edit.table.editAgent')}
+                            title={copy('edit.table.editAgent')}
+                            onClick={() => openAgentModal(record)}
+                        />
+                    </Tooltip>
+                    <Tooltip title={copy('edit.table.deleteAgent')}>
+                        <Button
+                            size="small"
+                            danger
+                            icon={<DeleteOutlined />}
+                            aria-label={copy('edit.table.deleteAgent')}
+                            title={copy('edit.table.deleteAgent')}
+                            onClick={() => deleteAgent(record.agent_id)}
+                        />
+                    </Tooltip>
                 </Space>
             ),
         },
@@ -763,22 +985,7 @@ export default function SetupPage() {
                 message={copy('model.notice')}
                 style={{ marginBottom: 18 }}
             />
-            {launchPending && (
-                <Alert
-                    type="success"
-                    showIcon
-                    message={copy('launchPending.title')}
-                    description={(
-                        <Space direction="vertical" size={4}>
-                            <Text>{copy('launchPending.description')}</Text>
-                            <Text code>
-                                {launchPending.hypothesis_id} / experiment_{launchPending.experiment_id}
-                            </Text>
-                        </Space>
-                    )}
-                    style={{ marginBottom: 18 }}
-                />
-            )}
+            {renderLaunchPendingAlert()}
             <Form form={modelForm} layout="vertical">
                 <Row gutter={16}>
                     <Col xs={24} lg={8}>
@@ -860,22 +1067,7 @@ export default function SetupPage() {
 
     const renderExperimentChoiceStep = () => (
         <Card className="setup-card" title={<Space><ExperimentOutlined />{copy('choice.title')}</Space>}>
-            {launchPending && (
-                <Alert
-                    type="success"
-                    showIcon
-                    message={copy('launchPending.title')}
-                    description={(
-                        <Space direction="vertical" size={4}>
-                            <Text>{copy('launchPending.description')}</Text>
-                            <Text code>
-                                {launchPending.hypothesis_id} / experiment_{launchPending.experiment_id}
-                            </Text>
-                        </Space>
-                    )}
-                    style={{ marginBottom: 18 }}
-                />
-            )}
+            {renderLaunchPendingAlert()}
             <Alert
                 type="info"
                 showIcon
@@ -1043,6 +1235,15 @@ export default function SetupPage() {
                     style={{ marginBottom: 16 }}
                 />
             )}
+            {selectedMap && selectedMap.character_count === 0 && (
+                <Alert
+                    type="info"
+                    showIcon
+                    message={copy('basics.noRoleImagesTitle')}
+                    description={copy('basics.noRoleImagesDescription')}
+                    style={{ marginBottom: 16 }}
+                />
+            )}
             <Space>
                 <Button onClick={() => setCurrentStep(1)}>{copy('basics.back')}</Button>
                 <Button
@@ -1118,7 +1319,21 @@ export default function SetupPage() {
             />
             <Space>
                 <Button onClick={() => setCurrentStep(2)}>{copy('generate.back')}</Button>
-                <Button disabled={!draft} onClick={() => setCurrentStep(4)}>{copy('generate.viewDraft')}</Button>
+                <Button
+                    disabled={!draft && !latestDraftAvailable}
+                    onClick={async () => {
+                        if (draft) {
+                            setCurrentStep(4);
+                            return;
+                        }
+                        const loaded = await loadLatestDraft(true);
+                        if (!loaded) {
+                            messageApi.info(copy('generate.noDraft'));
+                        }
+                    }}
+                >
+                    {copy('generate.viewDraft')}
+                </Button>
             </Space>
         </Card>
     );
@@ -1157,10 +1372,22 @@ export default function SetupPage() {
                                     />
                                     <Input.TextArea
                                         rows={16}
-                                        defaultValue={jsonStringify(draft.experiment_context)}
+                                        value={contextJsonText}
+                                        status={contextJsonError ? 'error' : undefined}
                                         spellCheck={false}
+                                        onChange={(event) => {
+                                            setContextJsonText(event.target.value);
+                                            validateContextJsonText(event.target.value);
+                                        }}
                                         onBlur={(event) => updateContextJson(event.target.value)}
                                     />
+                                    {contextJsonError && (
+                                        <Alert
+                                            type="error"
+                                            showIcon
+                                            message={copy('edit.contextJsonInvalid', { error: contextJsonError })}
+                                        />
+                                    )}
                                 </Space>
                             ),
                         },
@@ -1169,11 +1396,24 @@ export default function SetupPage() {
                             label: copy('edit.agentsTab', { count: draft.init_config.agents.length }),
                             children: (
                                 <>
-                                    <Space style={{ marginBottom: 12 }}>
+                                    <Space wrap style={{ marginBottom: 12 }}>
                                         <Button type="primary" icon={<UserAddOutlined />} onClick={() => openAgentModal()}>
                                             {copy('edit.addAgent')}
                                         </Button>
+                                        <Button loading={completingRoleImages} onClick={completeRoleImages}>
+                                            {copy('edit.completeRoleImages')}
+                                        </Button>
+                                        <Tag>{copy('edit.roleImageCount', {
+                                            completed: roleImageCount(draft.init_config.agents),
+                                            total: draft.init_config.agents.length,
+                                        })}</Tag>
                                     </Space>
+                                    <Alert
+                                        type="info"
+                                        showIcon
+                                        message={copy('edit.roleImageNotice')}
+                                        style={{ marginBottom: 12 }}
+                                    />
                                     <Table
                                         rowKey="agent_id"
                                         columns={agentColumns}
@@ -1222,12 +1462,27 @@ export default function SetupPage() {
                             key: 'steps',
                             label: copy('edit.stepsTab'),
                             children: (
-                                <Input.TextArea
-                                    rows={16}
-                                    defaultValue={jsonStringify(draft.steps)}
-                                    spellCheck={false}
-                                    onBlur={(event) => updateStepsJson(event.target.value)}
-                                />
+                                <>
+                                    <Input.TextArea
+                                        rows={16}
+                                        value={stepsJsonText}
+                                        status={stepsJsonError ? 'error' : undefined}
+                                        spellCheck={false}
+                                        onChange={(event) => {
+                                            setStepsJsonText(event.target.value);
+                                            validateStepsJsonText(event.target.value);
+                                        }}
+                                        onBlur={(event) => updateStepsJson(event.target.value)}
+                                    />
+                                    {stepsJsonError && (
+                                        <Alert
+                                            type="error"
+                                            showIcon
+                                            message={copy('edit.stepsJsonInvalid', { error: stepsJsonError })}
+                                            style={{ marginTop: 12 }}
+                                        />
+                                    )}
+                                </>
                             ),
                         },
                     ]}
@@ -1235,8 +1490,27 @@ export default function SetupPage() {
                 <Divider />
                 <Space>
                     <Button onClick={() => setCurrentStep(3)}>{copy('edit.backToGenerate')}</Button>
-                    <Button type="primary" onClick={() => setCurrentStep(5)}>{copy('edit.confirmLaunch')}</Button>
+                    <Button
+                        type="primary"
+                        disabled={draftJsonHasErrors}
+                        onClick={() => {
+                            const next = commitDraftJsonEdits();
+                            if (next) {
+                                setCurrentStep(5);
+                            }
+                        }}
+                    >
+                        {copy('edit.confirmLaunch')}
+                    </Button>
                 </Space>
+                {draftJsonHasErrors && (
+                    <Alert
+                        type="error"
+                        showIcon
+                        message={copy('edit.fixDraftJsonBeforeLaunch')}
+                        style={{ marginTop: 16 }}
+                    />
+                )}
             </Card>
         );
     };
@@ -1245,6 +1519,7 @@ export default function SetupPage() {
         <Card className="setup-card" title={<Space><CheckCircleOutlined />{copy('confirm.title')}</Space>}>
             {draft ? (
                 <>
+                    {renderLaunchPendingAlert(16)}
                     <div className="setup-confirm-grid">
                         <div>
                             <Text type="secondary">{copy('confirm.experimentTitle')}</Text>
@@ -1272,11 +1547,20 @@ export default function SetupPage() {
                             type="primary"
                             icon={<PlayCircleOutlined />}
                             loading={publishing}
+                            disabled={draftJsonHasErrors}
                             onClick={publishAndStart}
                         >
                             {copy('confirm.saveAndLaunch')}
                         </Button>
                     </Space>
+                    {draftJsonHasErrors && (
+                        <Alert
+                            type="error"
+                            showIcon
+                            message={copy('edit.fixDraftJsonBeforeLaunch')}
+                            style={{ marginTop: 16 }}
+                        />
+                    )}
                 </>
             ) : (
                 <Alert type="info" showIcon message={copy('confirm.noPublishableDraft')} />
@@ -1316,6 +1600,9 @@ export default function SetupPage() {
                     </div>
                     <Space wrap>
                         <LanguageToggle />
+                        <Button icon={<CompassOutlined />} onClick={() => navigate('/map-studio')}>
+                            {copy('header.mapStudio')}
+                        </Button>
                         {status?.current_experiment?.hypothesis_id && (
                             <Button onClick={() => navigate(`/pixel-replay/${status.current_experiment?.hypothesis_id}/${status.current_experiment?.experiment_id || '1'}?workspace_path=${encodeURIComponent(status.current_experiment?.workspace_path || status.workspace_path)}`)}>
                                 {copy('header.openCurrent')}

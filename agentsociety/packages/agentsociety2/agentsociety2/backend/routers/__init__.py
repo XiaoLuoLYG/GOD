@@ -10,6 +10,7 @@ from . import (
     live_experiments,
     experiment_configs,
     god_setup,
+    map_studio,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "live_experiments",
     "experiment_configs",
     "god_setup",
+    "map_studio",
 ]

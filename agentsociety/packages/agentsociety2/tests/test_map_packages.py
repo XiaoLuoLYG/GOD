@@ -157,6 +157,17 @@ def test_character_sprite_path_rejects_unsafe_character_root(tmp_path: Path) -> 
     assert any("escapes package root" in message for message in package_info.validation.errors)
 
 
+def test_empty_character_root_warning_uses_role_image_language(tmp_path: Path) -> None:
+    package = _write_package(tmp_path / "agentsociety")
+    (package / "characters" / "Resident.png").unlink()
+
+    validation = map_packages.validate_manifest_path(package / "map.yaml")
+
+    assert validation.ok is True
+    assert any("role walking image PNGs" in message for message in validation.warnings)
+    assert all("sprite" not in message.lower() for message in validation.warnings)
+
+
 def test_missing_map_id_falls_back_to_default(tmp_path: Path) -> None:
     agentsociety_root = tmp_path / "agentsociety"
     package = _write_package(agentsociety_root)
@@ -171,3 +182,40 @@ def test_missing_map_id_falls_back_to_default(tmp_path: Path) -> None:
     package_info = map_packages.load_map_package("missing_map", agentsociety_root)
 
     assert package_info.map_id == "the_ville"
+
+
+def test_generated_map_packages_are_discovered_without_drafts(tmp_path: Path) -> None:
+    agentsociety_root = tmp_path / "agentsociety"
+    authored_package = _write_package(agentsociety_root)
+    authored_package.rename(authored_package.parent / "the_ville")
+    authored_manifest = authored_package.parent / "the_ville" / "map.yaml"
+    authored_manifest.write_text(
+        authored_manifest.read_text(encoding="utf-8").replace("demo_map", "the_ville"),
+        encoding="utf-8",
+    )
+
+    generated_root = agentsociety_root / "custom" / "generated_maps"
+    generated_package = _write_package(tmp_path / "generated_source")
+    published = generated_root / "moon_tower"
+    published.parent.mkdir(parents=True)
+    generated_package.rename(published)
+    (published / "map.yaml").write_text(
+        (published / "map.yaml").read_text(encoding="utf-8").replace("demo_map", "moon_tower"),
+        encoding="utf-8",
+    )
+
+    draft_package = _write_package(tmp_path / "draft_source")
+    draft = generated_root / "_drafts" / "draft_1"
+    draft.parent.mkdir(parents=True)
+    draft_package.rename(draft)
+    (draft / "map.yaml").write_text(
+        (draft / "map.yaml").read_text(encoding="utf-8").replace("demo_map", "draft_map"),
+        encoding="utf-8",
+    )
+
+    packages = map_packages.list_map_packages(agentsociety_root)
+
+    by_id = {package.map_id: package for package in packages}
+    assert {"the_ville", "moon_tower"} <= set(by_id)
+    assert "draft_map" not in by_id
+    assert by_id["moon_tower"].validation.ok is True

@@ -29,7 +29,7 @@ import {
     SaveOutlined,
     UploadOutlined,
 } from '@ant-design/icons';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import LanguageToggle from '../../components/LanguageToggle';
 import { fetchCustom } from '../../components/fetch';
@@ -44,8 +44,10 @@ import './agentStudio.css';
 
 const { Text, Paragraph } = Typography;
 
+type UnknownRecord = Record<string, unknown>;
+
 type InitConfigPayload = {
-    env_modules: Array<{ module_type: string; kwargs: Record<string, any> }>;
+    env_modules: Array<{ module_type: string; kwargs: UnknownRecord }>;
     agents: AgentRecord[];
     codegen_router?: { final_summary_enabled?: boolean };
 };
@@ -53,7 +55,7 @@ type InitConfigPayload = {
 type InitConfigResponse = {
     config: InitConfigPayload;
     path: string;
-    experiment_context?: Record<string, any> | null;
+    experiment_context?: UnknownRecord | null;
     map_id?: string | null;
     map_locations?: AgentStudioLocation[];
 };
@@ -63,7 +65,7 @@ type ImportPreviewRow = {
     valid: boolean;
     errors: string[];
     agent?: AgentRecord;
-    raw?: Record<string, any>;
+    raw?: UnknownRecord;
 };
 
 type ImportPreview = {
@@ -135,6 +137,22 @@ const SHARED_JIUWEN_KWARG_KEYS = [
     'request_timeout',
 ] as const;
 
+const EMPTY_AGENTS: AgentRecord[] = [];
+
+const isRecord = (value: unknown): value is UnknownRecord => (
+    Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+);
+
+const asRecord = (value: unknown): UnknownRecord => isRecord(value) ? value : {};
+
+const asStringRecord = (value: unknown): Record<string, string> => Object.fromEntries(
+    Object.entries(asRecord(value)).map(([key, item]) => [key, stringValue(item)])
+);
+
+const omitKeys = (value: UnknownRecord, keys: string[]) => Object.fromEntries(
+    Object.entries(value).filter(([key]) => !keys.includes(key))
+);
+
 const getAgentName = (agent: AgentRecord) => {
     const kwargs = agent.kwargs || {};
     const profile = kwargs.profile;
@@ -145,9 +163,9 @@ const getEnvModule = (config: InitConfigPayload | null) => config?.env_modules?.
 
 const stringValue = (value: unknown) => String(value || '').trim();
 
-const storableCharacterAsset = (value: unknown): Record<string, any> | undefined => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-    const asset = value as Record<string, any>;
+const storableCharacterAsset = (value: unknown): UnknownRecord | undefined => {
+    if (!isRecord(value)) return undefined;
+    const asset = value;
     const cleaned = Object.fromEntries(
         [
             'sprite_name',
@@ -166,28 +184,17 @@ const storableCharacterAsset = (value: unknown): Record<string, any> | undefined
 };
 
 const normalizeStudioProfile = (
-    profile: Record<string, any>,
+    profile: UnknownRecord,
     mapId: string,
     initialLocation?: string,
 ) => {
-    const currentStudio = profile.agent_studio && typeof profile.agent_studio === 'object' && !Array.isArray(profile.agent_studio)
-        ? profile.agent_studio
-        : {};
-    const appearance = profile.appearance && typeof profile.appearance === 'object' && !Array.isArray(profile.appearance)
-        ? profile.appearance
-        : {};
-    const personality = profile.personality && typeof profile.personality === 'object' && !Array.isArray(profile.personality)
-        ? profile.personality
-        : {};
-    const routine = profile.routine && typeof profile.routine === 'object' && !Array.isArray(profile.routine)
-        ? profile.routine
-        : {};
-    const selectedChoices = {
-        ...(currentStudio.selected_choices || {}),
-    } as Record<string, string>;
-    const customChoices = {
-        ...(currentStudio.custom_choices || {}),
-    } as Record<string, string>;
+    const currentStudio = asRecord(profile.agent_studio);
+    const appearance = asRecord(profile.appearance);
+    const personality = asRecord(profile.personality);
+    const routine = asRecord(profile.routine);
+    const source = asRecord(currentStudio.source);
+    const selectedChoices = asStringRecord(currentStudio.selected_choices);
+    const customChoices = asStringRecord(currentStudio.custom_choices);
     const legacyChoices: Record<string, unknown> = {
         identity_role: profile.role,
         identity_function: profile.scenario_role || profile.role,
@@ -207,14 +214,14 @@ const normalizeStudioProfile = (
         const value = stringValue(raw);
         if (!value) return;
         if (!selectedChoices[key]) selectedChoices[key] = value;
-        if (!customChoices[key] && !(currentStudio.selected_choices || {})[key]) customChoices[key] = value;
+        if (!customChoices[key] && !asRecord(currentStudio.selected_choices)[key]) customChoices[key] = value;
     });
     selectedChoices.initial_location = stringValue(
         initialLocation || selectedChoices.initial_location || routine.initial_location
     );
-    const { groups: _groups, ...studioRest } = currentStudio;
+    const studioRest = omitKeys(currentStudio, ['groups']);
     const characterAsset = storableCharacterAsset(
-        currentStudio.character_asset || currentStudio.source?.character_asset || appearance.character_asset
+        currentStudio.character_asset || source.character_asset || appearance.character_asset
     );
     return {
         ...profile,
@@ -222,10 +229,10 @@ const normalizeStudioProfile = (
             version: 1,
             ...studioRest,
             source: {
-                ...(currentStudio.source || {}),
-                prompt: stringValue(currentStudio.source?.prompt),
-                mbti: stringValue(profile.mbti || currentStudio.source?.mbti) || undefined,
-                photo_name: stringValue(currentStudio.source?.photo_name || appearance.photo_reference) || undefined,
+                ...source,
+                prompt: stringValue(source.prompt),
+                mbti: stringValue(profile.mbti || source.mbti) || undefined,
+                photo_name: stringValue(source.photo_name || appearance.photo_reference) || undefined,
                 character_asset: characterAsset,
             },
             selected_choices: selectedChoices,
@@ -261,7 +268,7 @@ const normalizeAgentsForStudio = (config: InitConfigPayload, mapId: string): Ini
     };
 };
 
-const shortJson = (value: any, maxLength = 120) => {
+const shortJson = (value: unknown, maxLength = 120) => {
     const text = JSON.stringify(value ?? {});
     return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
 };
@@ -288,8 +295,8 @@ const findDefaultAgentType = (classes: AgentClassInfo[]) => {
     return classes[0]?.type || 'JiuwenClawAgent';
 };
 
-const pickSharedJiuwenKwargs = (kwargs: Record<string, any> | undefined) => {
-    const shared: Record<string, any> = {};
+const pickSharedJiuwenKwargs = (kwargs: UnknownRecord | undefined) => {
+    const shared: UnknownRecord = {};
     if (!kwargs) return shared;
     SHARED_JIUWEN_KWARG_KEYS.forEach((key) => {
         if (key in kwargs) {
@@ -334,7 +341,7 @@ const buildDefaultAgentValues = (
     currentAgents: AgentRecord[],
     workspacePath: string,
     defaultProfile: DefaultProfile,
-    experimentContext?: Record<string, any> | null,
+    experimentContext?: UnknownRecord | null,
 ): AgentFormValues => {
     const agentType = findDefaultAgentType(classes);
     const existing = currentAgents.find((agent) => agent.agent_type === agentType);
@@ -345,7 +352,7 @@ const buildDefaultAgentValues = (
         name,
         scenario: String(experimentContext?.background || ''),
     };
-    const kwargs: Record<string, any> = agentType === 'JiuwenClawAgent'
+    const kwargs: UnknownRecord = agentType === 'JiuwenClawAgent'
         ? {
             ...DEFAULT_JIUWEN_KWARGS,
             ...sharedExisting,
@@ -384,19 +391,22 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
     onSaved,
 }) => {
     const { t } = useTranslation();
+    const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
+    const explicitWorkspacePath = initialWorkspacePath || searchParams.get('workspace_path') || '';
+    const explicitHypothesisId = initialHypothesisId || searchParams.get('hypothesis_id') || '';
+    const explicitExperimentId = initialExperimentId || searchParams.get('experiment_id') || '';
     const [workspacePath, setWorkspacePath] = useState(
-        initialWorkspacePath ||
-        searchParams.get('workspace_path') ||
+        explicitWorkspacePath ||
         localStorage.getItem(STORAGE_KEY) ||
         import.meta.env.VITE_WORKSPACE_PATH ||
         ''
     );
-    const [hypothesisId, setHypothesisId] = useState(initialHypothesisId || searchParams.get('hypothesis_id') || '1');
-    const [experimentId, setExperimentId] = useState(initialExperimentId || searchParams.get('experiment_id') || '1');
+    const [hypothesisId, setHypothesisId] = useState(explicitHypothesisId || '1');
+    const [experimentId, setExperimentId] = useState(explicitExperimentId || '1');
     const [configPath, setConfigPath] = useState('');
     const [config, setConfig] = useState<InitConfigPayload | null>(null);
-    const [experimentContext, setExperimentContext] = useState<Record<string, any> | null>(null);
+    const [experimentContext, setExperimentContext] = useState<UnknownRecord | null>(null);
     const [mapId, setMapId] = useState('the_ville');
     const [mapLocations, setMapLocations] = useState<AgentStudioLocation[]>([]);
     const [agentClasses, setAgentClasses] = useState<AgentClassInfo[]>([]);
@@ -412,7 +422,8 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
     const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
     const [form] = Form.useForm<AgentFormValues>();
 
-    const agents = config?.agents || [];
+    const agents = config?.agents ?? EMPTY_AGENTS;
+    const hasExplicitContext = Boolean(explicitWorkspacePath && explicitHypothesisId && explicitExperimentId);
     const duplicateIds = useMemo(() => getDuplicateIds(agents), [agents]);
     const hasInvalidAgents = agents.some((agent) => !agent.kwargs || agent.kwargs.id !== agent.agent_id) || duplicateIds.size > 0;
     const defaultProfile = useMemo<DefaultProfile>(() => ({
@@ -461,7 +472,9 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                 throw new Error(await response.text());
             }
             const payload = await response.json() as InitConfigResponse;
-            const resolvedMapId = payload.map_id || payload.experiment_context?.map_id || payload.config.env_modules?.[0]?.kwargs?.map_id || 'the_ville';
+            const resolvedMapId = stringValue(
+                payload.map_id || payload.experiment_context?.map_id || payload.config.env_modules?.[0]?.kwargs?.map_id
+            ) || 'the_ville';
             const normalizedConfig = normalizeAgentsForStudio(payload.config, resolvedMapId);
             setConfig(normalizedConfig);
             setConfigPath(payload.path);
@@ -529,8 +542,9 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
     };
 
     const openEditAgent = (agent: AgentRecord) => {
-        const profile = agent.kwargs?.profile || {};
-        const { id, name, profile: _profile, ...extraKwargs } = agent.kwargs || {};
+        const profile = asRecord(agent.kwargs?.profile);
+        const name = agent.kwargs?.name;
+        const extraKwargs = omitKeys(agent.kwargs || {}, ['id', 'name', 'profile']);
         const values = {
             agent_id: agent.agent_id,
             agent_type: agent.agent_type,
@@ -698,7 +712,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
         {
             title: t('agentBuilder.columns.kwargs'),
             render: (_, record) => {
-                const { profile, ...rest } = record.kwargs || {};
+                const rest = omitKeys(record.kwargs || {}, ['profile']);
                 return (
                     <Tooltip title={<pre style={{ margin: 0 }}>{jsonStringify(rest)}</pre>}>
                         <Text code>{shortJson(rest)}</Text>
@@ -932,6 +946,27 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
 
     if (embedded) {
         return content;
+    }
+
+    if (!embedded && !hasExplicitContext) {
+        return (
+            <div className="agent-builder-page">
+                <Card className="agent-studio-empty-state" title={t('agentBuilder.empty.title')}>
+                    <Alert
+                        type="info"
+                        showIcon
+                        message={t('agentBuilder.empty.message')}
+                        description={t('agentBuilder.empty.description')}
+                        style={{ marginBottom: 16 }}
+                    />
+                    <Space wrap>
+                        <Button type="primary" onClick={() => navigate('/setup')}>
+                            {t('agentBuilder.empty.backToSetup')}
+                        </Button>
+                    </Space>
+                </Card>
+            </div>
+        );
     }
 
     return (

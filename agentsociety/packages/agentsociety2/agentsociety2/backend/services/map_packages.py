@@ -13,6 +13,7 @@ import yaml
 
 
 DEFAULT_MAP_ID = "the_ville"
+GENERATED_MAPS_DIRNAME = "generated_maps"
 MANIFEST_FILENAMES = ("map.yaml", "map.yml", "town.yaml", "town.yml", "map.json", "town.json")
 REQUIRED_ROUTE_PAIRS: dict[str, tuple[tuple[str, str], ...]] = {
     "the_ville": (("park", "cafe"), ("home", "market")),
@@ -92,6 +93,15 @@ def maps_root(root: Path | None = None) -> Path:
     return (root or agentsociety_root()) / "custom" / "maps"
 
 
+def generated_maps_root(root: Path | None = None) -> Path:
+    return (root or agentsociety_root()) / "custom" / GENERATED_MAPS_DIRNAME
+
+
+def map_package_roots(root: Path | None = None) -> tuple[Path, ...]:
+    root = root or agentsociety_root()
+    return (maps_root(root), generated_maps_root(root))
+
+
 def _load_structured(path: Path) -> dict[str, Any]:
     text = path.read_text(encoding="utf-8")
     if path.suffix.lower() in {".yaml", ".yml"}:
@@ -159,23 +169,25 @@ def _manifest_path_for_dir(path: Path) -> Path | None:
 def resolve_manifest_path(map_id: str | None = None, root: Path | None = None) -> Path:
     root = root or agentsociety_root()
     requested = str(map_id or DEFAULT_MAP_ID).strip() or DEFAULT_MAP_ID
-    direct_dir = maps_root(root) / requested
-    direct_manifest = _manifest_path_for_dir(direct_dir)
-    if direct_manifest:
-        return direct_manifest.resolve()
+    for root_path in map_package_roots(root):
+        direct_dir = root_path / requested
+        direct_manifest = _manifest_path_for_dir(direct_dir)
+        if direct_manifest:
+            return direct_manifest.resolve()
 
-    for package_dir in sorted(maps_root(root).iterdir() if maps_root(root).exists() else []):
-        if not package_dir.is_dir() or package_dir.name.startswith(("_", ".")):
-            continue
-        manifest_path = _manifest_path_for_dir(package_dir)
-        if not manifest_path:
-            continue
-        try:
-            manifest = _load_structured(manifest_path)
-        except Exception:
-            continue
-        if str(manifest.get("map_id") or package_dir.name) == requested:
-            return manifest_path.resolve()
+    for root_path in map_package_roots(root):
+        for package_dir in sorted(root_path.iterdir() if root_path.exists() else []):
+            if not package_dir.is_dir() or package_dir.name.startswith(("_", ".")):
+                continue
+            manifest_path = _manifest_path_for_dir(package_dir)
+            if not manifest_path:
+                continue
+            try:
+                manifest = _load_structured(manifest_path)
+            except Exception:
+                continue
+            if str(manifest.get("map_id") or package_dir.name) == requested:
+                return manifest_path.resolve()
 
     if requested != DEFAULT_MAP_ID:
         return resolve_manifest_path(DEFAULT_MAP_ID, root)
@@ -412,7 +424,7 @@ def validate_manifest_path(manifest_path: Path) -> MapValidation:
             if not root.exists() or not root.is_dir():
                 warnings.append(f"character_root missing: {root}")
             elif not any(root.glob("*.png")):
-                warnings.append(f"character_root has no png sprites: {root}")
+                warnings.append(f"character_root has no role walking image PNGs: {root}")
 
     return MapValidation(not errors, tuple(errors), tuple(warnings))
 
@@ -439,29 +451,37 @@ def load_map_package(map_id: str | None = None, root: Path | None = None) -> Map
 def list_map_packages(root: Path | None = None) -> list[MapPackage]:
     root = root or agentsociety_root()
     found: list[MapPackage] = []
-    root_path = maps_root(root)
-    if not root_path.exists():
-        return found
-    for package_dir in sorted(root_path.iterdir()):
-        if not package_dir.is_dir() or package_dir.name.startswith(("_", ".")):
+    seen: set[str] = set()
+    for root_path in map_package_roots(root):
+        if not root_path.exists():
             continue
-        manifest_path = _manifest_path_for_dir(package_dir)
-        if not manifest_path:
-            continue
-        try:
-            found.append(load_map_package_by_manifest(manifest_path))
-        except Exception:
-            validation = validate_manifest_path(manifest_path)
-            found.append(
-                MapPackage(
-                    map_id=package_dir.name,
-                    display_name=package_dir.name,
-                    package_path=package_dir,
-                    manifest_path=manifest_path,
-                    manifest={},
-                    validation=validation,
+        for package_dir in sorted(root_path.iterdir()):
+            if not package_dir.is_dir() or package_dir.name.startswith(("_", ".")):
+                continue
+            manifest_path = _manifest_path_for_dir(package_dir)
+            if not manifest_path:
+                continue
+            try:
+                package = load_map_package_by_manifest(manifest_path)
+                if package.map_id in seen:
+                    continue
+                seen.add(package.map_id)
+                found.append(package)
+            except Exception:
+                validation = validate_manifest_path(manifest_path)
+                if package_dir.name in seen:
+                    continue
+                seen.add(package_dir.name)
+                found.append(
+                    MapPackage(
+                        map_id=package_dir.name,
+                        display_name=package_dir.name,
+                        package_path=package_dir,
+                        manifest_path=manifest_path,
+                        manifest={},
+                        validation=validation,
+                    )
                 )
-            )
     return found
 
 
@@ -484,11 +504,35 @@ def localized_metadata(value: Any) -> dict[str, dict[str, Any]]:
     return localized
 
 
+def _is_generated_map_package(package: MapPackage, root: Path | None = None) -> bool:
+    root = root or agentsociety_root()
+    try:
+        package.package_path.resolve().relative_to(generated_maps_root(root).resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _public_display_name(package: MapPackage, root: Path | None = None) -> str:
+    if _is_generated_map_package(package, root):
+        return package.map_id
+    return package.display_name
+
+
+def _public_localized_metadata(package: MapPackage, root: Path | None = None) -> dict[str, dict[str, Any]]:
+    localized = localized_metadata(package.manifest.get("localized"))
+    if _is_generated_map_package(package, root):
+        localized = {locale: dict(fields) for locale, fields in localized.items()}
+        for locale in ("en", "zh"):
+            localized.setdefault(locale, {})["display_name"] = package.map_id
+    return localized
+
+
 def map_package_summary(package: MapPackage, root: Path | None = None) -> dict[str, Any]:
     return {
         "map_id": package.map_id,
-        "display_name": package.display_name,
-        "localized": localized_metadata(package.manifest.get("localized")),
+        "display_name": _public_display_name(package, root),
+        "localized": _public_localized_metadata(package, root),
         "package_path": str(package.package_path),
         "manifest_path": str(package.manifest_path),
         "manifest_config_path": relative_manifest_path(package, root),

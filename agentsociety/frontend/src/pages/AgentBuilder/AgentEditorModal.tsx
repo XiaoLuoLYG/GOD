@@ -720,7 +720,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
 
     useEffect(() => {
         if (!open) return;
-        const values = initialValues || form.getFieldsValue();
+        const values = initialValues || form.getFieldsValue(true);
         const profile = safeParseObject(values.profile_json || '{}', {});
         const kwargs = safeParseObject(values.kwargs_json || '{}', {});
         const studio = asRecord(profile.agent_studio);
@@ -911,6 +911,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         const role = labelForChoice(groupById.get('identity_role'), selectedChoices.identity_role || '');
         const core = labelForChoice(groupById.get('personality_core'), selectedChoices.personality_core || '');
         const form = labelForChoice(groupById.get('appearance_form'), selectedChoices.appearance_form || '');
+        const visibleCharacterAsset = characterAsset || assetFromProfile(profileForView);
         return (
             <div className={`agent-studio-preview-card ${compact ? 'compact' : ''}`}>
                 <div className="agent-studio-preview-header">
@@ -921,10 +922,10 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                     {characterGenerating && <Tag color="blue">{copy('generatingCharacter')}</Tag>}
                 </div>
                 <div className="agent-studio-preview-body">
-                    {characterAsset ? (
+                    {visibleCharacterAsset ? (
                         <img
                             className="agent-studio-sprite-preview"
-                            src={characterAsset.preview_data_url || absoluteAssetUrl(characterAsset.image_url)}
+                            src={visibleCharacterAsset.preview_data_url || absoluteAssetUrl(visibleCharacterAsset.image_url)}
                             alt={copy('characterAlt')}
                         />
                     ) : (
@@ -944,7 +945,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                             {selectedLocationLabel && <Tag color="green">{selectedLocationLabel}</Tag>}
                         </Space>
                         <Text type="secondary">
-                            {characterAsset ? copy('spriteReady', { file: characterAsset.filename }) : copy('previewEmpty')}
+                            {visibleCharacterAsset ? copy('spriteReady', { file: visibleCharacterAsset.filename }) : copy('previewEmpty')}
                         </Text>
                     </div>
                 </div>
