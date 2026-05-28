@@ -18,8 +18,8 @@
   <a href="#-features">Features</a> ·
   <a href="#%EF%B8%8F-how-it-works">How it works</a> ·
   <a href="#-built-in-experiments">Built-in Experiments</a> ·
-  <a href="docs/site/">Scenarios</a> ·
-  <a href="docs/developer/">Developer Docs</a> ·
+  <a href="https://xiaoluolyg.github.io/GOD/">Scenarios</a> ·
+  <a href="https://xiaoluolyg.github.io/GOD/developer/">Developer Docs</a> ·
   <a href="#-updates">Updates</a> ·
   <a href="#%EF%B8%8F-roadmap">Roadmap</a> ·
   <a href="CONTRIBUTING.md">Contributing</a> ·
