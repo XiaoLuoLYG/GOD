@@ -7,6 +7,9 @@ import json
 from pathlib import Path
 import sqlite3
 
+from agentsociety2.backend.services import map_generation
+from PIL import Image
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _ENV_PATH = _REPO_ROOT / "custom" / "envs" / "pixel_town_social_env.py"
 _SPEC = importlib.util.spec_from_file_location("pixel_town_social_env", _ENV_PATH)
@@ -14,6 +17,10 @@ assert _SPEC is not None and _SPEC.loader is not None
 _MODULE = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_MODULE)
 PixelTownSocialEnv = _MODULE.PixelTownSocialEnv
+
+
+def _map_image_bytes() -> bytes:
+    return map_generation.encode_png_bytes(Image.new("RGB", (896, 640), (28, 38, 52)))
 
 
 def _write_map_package(tmp_path: Path, *, unreachable: bool = False) -> Path:
@@ -220,6 +227,31 @@ def test_pixel_town_unreachable_move_does_not_change_position(tmp_path: Path) ->
         assert json.loads(observed["movement_segment_json"]) == [{"x": 0, "y": 0}]
         assert observed["movement_path_index"] == 0
         assert observed["movement_path_length"] == 1
+
+    asyncio.run(scenario())
+
+
+def test_pixel_town_can_move_between_map_studio_generated_locations(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        package_path = tmp_path / "generated_moon_base"
+        map_generation._write_package(
+            package_path,
+            prompt="Moon base with a tall Cybertron tower",
+            map_id="generated_moon_base",
+            raw_image=_map_image_bytes(),
+            warnings=[],
+        )
+        env = PixelTownSocialEnv(
+            agent_id_name_pairs=[[1, "阿莉"]],
+            initial_locations={"1": "central_tower"},
+            map_manifest_path=str(package_path / "map.yaml"),
+            movement_tiles_per_second=8,
+        )
+
+        move = await env.move_agent(1, "landing_pad")
+
+        assert move["ok"] is True
+        assert move["path_length"] > 1
 
     asyncio.run(scenario())
 

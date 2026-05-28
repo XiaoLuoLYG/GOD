@@ -111,7 +111,23 @@ type BrushMode = 'anchor' | 'walkable' | 'blocked';
 const fetchJson = async <T,>(url: string, options?: RequestInit): Promise<T> => {
     const response = await fetchCustom(url, options);
     if (!response.ok) {
-        throw new Error(await response.text());
+        const text = await response.text();
+        try {
+            const payload = JSON.parse(text);
+            const detail = payload?.detail;
+            if (typeof detail === 'string') {
+                throw new Error(detail);
+            }
+            if (detail && typeof detail === 'object' && typeof detail.message === 'string') {
+                throw new Error(detail.message);
+            }
+            throw new Error(JSON.stringify(detail ?? payload));
+        } catch (error) {
+            if (error instanceof SyntaxError) {
+                throw new Error(text);
+            }
+            throw error;
+        }
     }
     return response.json();
 };
@@ -157,6 +173,8 @@ export default function MapStudioPage() {
     const [imageConfigLoading, setImageConfigLoading] = useState(true);
     const [imageConfig, setImageConfig] = useState<ImageConfigForm>(DEFAULT_IMAGE_CONFIG);
     const [imageConfigStatus, setImageConfigStatus] = useState({ configured: false, value: '' });
+    const [imageConfigExpanded, setImageConfigExpanded] = useState(false);
+    const [generationError, setGenerationError] = useState('');
     const [published, setPublished] = useState<PublishResponse | null>(null);
     const [publishMapId, setPublishMapId] = useState('');
     const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -171,6 +189,9 @@ export default function MapStudioPage() {
     const applyImageStatus = (status: SetupStatus, syncVisibleFields: boolean) => {
         const config = status.image_model_config || {};
         const apiKey = config.IMAGE_GEN_API_KEY;
+        if (syncVisibleFields && !apiKey?.configured) {
+            setImageConfigExpanded(true);
+        }
         setImageConfigStatus({
             configured: Boolean(apiKey?.configured),
             value: apiKey?.value || '',
@@ -265,16 +286,28 @@ export default function MapStudioPage() {
 
     const collisionKey = (x: number, y: number) => `${x}:${y}`;
 
+    const collisionBaseStats = useMemo(() => {
+        const values = draft?.collision_data || [];
+        const savedBlocked = values.filter((value) => Boolean(value)).length;
+        const total = values.length;
+        return {
+            savedBlocked,
+            savedWalkable: total - savedBlocked,
+            showSavedWalkableOverlay: savedBlocked > total / 2,
+        };
+    }, [draft?.collision_data]);
+
     const committedCollision = useMemo(() => {
         const cells = new Map<string, boolean>();
         draft?.collision_data?.forEach((value, index) => {
-            if (!value) return;
+            const shouldShow = collisionBaseStats.showSavedWalkableOverlay ? !value : Boolean(value);
+            if (!shouldShow) return;
             const x = index % MAP_WIDTH;
             const y = Math.floor(index / MAP_WIDTH);
-            cells.set(collisionKey(x, y), true);
+            cells.set(collisionKey(x, y), !collisionBaseStats.showSavedWalkableOverlay);
         });
         return cells;
-    }, [draft?.collision_data]);
+    }, [collisionBaseStats.showSavedWalkableOverlay, draft?.collision_data]);
 
     const pendingCollision = useMemo(() => {
         const cells = new Map<string, boolean>();
@@ -332,11 +365,12 @@ export default function MapStudioPage() {
     const collisionStats = useMemo(() => {
         const pendingBlocked = collisionEdits.filter((edit) => edit.blocked).length;
         return {
-            savedBlocked: committedCollision.size,
+            savedBlocked: collisionBaseStats.savedBlocked,
+            savedWalkable: collisionBaseStats.savedWalkable,
             pendingBlocked,
             pendingWalkable: collisionEdits.length - pendingBlocked,
         };
-    }, [collisionEdits, committedCollision.size]);
+    }, [collisionBaseStats.savedBlocked, collisionBaseStats.savedWalkable, collisionEdits]);
 
     const undoCollisionStroke = () => {
         setCollisionStrokes((items) => {
@@ -352,6 +386,7 @@ export default function MapStudioPage() {
             return;
         }
         setGenerating(true);
+        setGenerationError('');
         setPublished(null);
         try {
             let next: MapDraft;
@@ -380,7 +415,8 @@ export default function MapStudioPage() {
             void loadImageStatus(true);
             messageApi.success(copy('messages.generated'));
         } catch (error) {
-            messageApi.error(toErrorText(error));
+            setGenerationError(toErrorText(error));
+            messageApi.error(copy('messages.generateFailed'));
         } finally {
             setGenerating(false);
         }
@@ -447,6 +483,7 @@ export default function MapStudioPage() {
     const regenerateImage = async () => {
         if (!draft) return;
         setGenerating(true);
+        setGenerationError('');
         try {
             const next = await fetchJson<MapDraft>(`/api/v1/god/map-studio/drafts/${encodeURIComponent(draft.draft_id)}/regenerate-image`, {
                 method: 'POST',
@@ -460,7 +497,8 @@ export default function MapStudioPage() {
             void loadImageStatus(true);
             messageApi.success(copy('messages.regenerated'));
         } catch (error) {
-            messageApi.error(toErrorText(error));
+            setGenerationError(toErrorText(error));
+            messageApi.error(copy('messages.generateFailed'));
         } finally {
             setGenerating(false);
         }
@@ -487,10 +525,14 @@ export default function MapStudioPage() {
         {
             title: copy('calibrate.location'),
             dataIndex: 'name',
+            width: 128,
+            ellipsis: true,
             render: (_, record) => (
                 <Button
+                    className="map-studio-location-button"
                     type={record.id === selectedLocation?.id ? 'primary' : 'text'}
                     size="small"
+                    title={localizeName(record, language)}
                     onClick={() => setSelectedLocationId(record.id)}
                 >
                     {localizeName(record, language)}
@@ -499,9 +541,11 @@ export default function MapStudioPage() {
         },
         {
             title: copy('calibrate.anchor'),
+            width: 142,
             render: (_, record) => (
-                <Space.Compact>
+                <Space.Compact size="small">
                     <InputNumber
+                        className="map-studio-anchor-input"
                         min={0}
                         max={MAP_WIDTH - 1}
                         value={record.anchor_tile.x}
@@ -510,6 +554,7 @@ export default function MapStudioPage() {
                         })}
                     />
                     <InputNumber
+                        className="map-studio-anchor-input"
                         min={0}
                         max={MAP_HEIGHT - 1}
                         value={record.anchor_tile.y}
@@ -523,40 +568,57 @@ export default function MapStudioPage() {
         {
             title: copy('calibrate.type'),
             dataIndex: 'scene_type',
+            width: 82,
             render: (value) => <Tag>{value || copy('calibrate.publicType')}</Tag>,
         },
     ];
 
-    const renderCollisionHelp = () => (
-        <div data-testid="collision-help">
-            <Alert
-                className="map-studio-collision-help"
-                type="info"
-                showIcon
-                message={copy('calibrate.collisionHelpTitle')}
-                description={(
-                    <div className="map-studio-collision-help-body">
-                        <Text>{copy('calibrate.collisionHelpDescription')}</Text>
-                        <div className="map-studio-legend">
-                            <span className="map-studio-legend-item">
-                                <span className="map-studio-legend-swatch saved-blocked" />
-                                {copy('calibrate.legendSavedBlocked')}
-                            </span>
-                            <span className="map-studio-legend-item">
-                                <span className="map-studio-legend-swatch pending-blocked" />
-                                {copy('calibrate.legendPendingBlocked')}
-                            </span>
-                            <span className="map-studio-legend-item">
-                                <span className="map-studio-legend-swatch pending-walkable" />
-                                {copy('calibrate.legendPendingWalkable')}
-                            </span>
+    const renderCollisionHelp = () => {
+        const hasSavedBlockedOverlay = overlayCells.some((cell) => !cell.pending && cell.blocked);
+        const hasSavedWalkableOverlay = overlayCells.some((cell) => !cell.pending && !cell.blocked);
+        const descriptionKey = hasSavedWalkableOverlay && !hasSavedBlockedOverlay
+            ? 'calibrate.collisionHelpRoadDescription'
+            : hasSavedBlockedOverlay
+                ? 'calibrate.collisionHelpDescription'
+                : 'calibrate.collisionHelpEmptyDescription';
+        return (
+            <div data-testid="collision-help">
+                <Alert
+                    className="map-studio-collision-help"
+                    type="info"
+                    showIcon
+                    message={copy('calibrate.collisionHelpTitle')}
+                    description={(
+                        <div className="map-studio-collision-help-body">
+                            <Text>{copy(descriptionKey)}</Text>
+                            <div className="map-studio-legend">
+                                {hasSavedBlockedOverlay && (
+                                    <span className="map-studio-legend-item">
+                                        <span className="map-studio-legend-swatch saved-blocked" />
+                                        {copy('calibrate.legendSavedBlocked')}
+                                    </span>
+                                )}
+                                {hasSavedWalkableOverlay && (
+                                    <span className="map-studio-legend-item">
+                                        <span className="map-studio-legend-swatch saved-walkable" />
+                                        {copy('calibrate.legendSavedWalkable')}
+                                    </span>
+                                )}
+                                <span className="map-studio-legend-item">
+                                    <span className="map-studio-legend-swatch pending-blocked" />
+                                    {copy('calibrate.legendPendingBlocked')}
+                                </span>
+                                <span className="map-studio-legend-item">
+                                    <span className="map-studio-legend-swatch pending-walkable" />
+                                    {copy('calibrate.legendPendingWalkable')}
+                                </span>
+                            </div>
                         </div>
-                        <Text type="secondary">{copy('calibrate.collisionRule')}</Text>
-                    </div>
-                )}
-            />
-        </div>
-    );
+                    )}
+                />
+            </div>
+        );
+    };
 
     return (
         <div className="map-studio-page">
@@ -670,7 +732,7 @@ export default function MapStudioPage() {
                             <Form layout="vertical">
                                 <Form.Item label={copy('generate.worldPrompt')}>
                                     <Input.TextArea
-                                        rows={5}
+                                        rows={3}
                                         value={prompt}
                                         onChange={(event) => setPrompt(event.target.value)}
                                     />
@@ -685,8 +747,13 @@ export default function MapStudioPage() {
                                 >
                                     <Button icon={<CloudUploadOutlined />}>{copy('generate.referenceImage')}</Button>
                                 </Upload>
-                                <div className="map-studio-image-config" data-testid="map-image-config">
-                                    <div className="map-studio-panel-heading">
+                                <details
+                                    className="map-studio-image-config"
+                                    data-testid="map-image-config"
+                                    open={imageConfigExpanded || (!imageConfigLoading && !imageConfigStatus.configured)}
+                                    onToggle={(event) => setImageConfigExpanded(event.currentTarget.open)}
+                                >
+                                    <summary className="map-studio-image-config-summary">
                                         <Space size={8}>
                                             <KeyOutlined />
                                             <Text strong>{copy('imageConfig.title')}</Text>
@@ -698,58 +765,60 @@ export default function MapStudioPage() {
                                         ) : (
                                             <Tag color="orange">{copy('imageConfig.notConfigured')}</Tag>
                                         )}
+                                    </summary>
+                                    <div className="map-studio-image-config-body">
+                                        <Alert
+                                            className="map-studio-status-alert"
+                                            type={imageConfigStatus.configured ? 'success' : 'warning'}
+                                            showIcon
+                                            message={
+                                                imageConfigStatus.configured
+                                                    ? copy('imageConfig.readyMessage')
+                                                    : copy('imageConfig.missingMessage')
+                                            }
+                                            description={
+                                                imageConfigStatus.configured
+                                                    ? copy('imageConfig.readyDescription')
+                                                    : copy('imageConfig.missingDescription')
+                                            }
+                                        />
+                                        <div className="map-studio-field-grid image-config">
+                                            <Form.Item label="IMAGE_GEN_PROVIDER">
+                                                <Select
+                                                    value={imageConfig.image_provider}
+                                                    onChange={(value) => setImageConfig((current) => ({ ...current, image_provider: value }))}
+                                                    options={[{ value: 'openai', label: 'openai' }]}
+                                                />
+                                            </Form.Item>
+                                            <Form.Item label="IMAGE_GEN_API_BASE">
+                                                <Input
+                                                    value={imageConfig.image_api_base}
+                                                    onChange={(event) => setImageConfig((current) => ({ ...current, image_api_base: event.target.value }))}
+                                                />
+                                            </Form.Item>
+                                            <Form.Item label="IMAGE_GEN_MODEL_NAME">
+                                                <Input
+                                                    value={imageConfig.image_model}
+                                                    onChange={(event) => setImageConfig((current) => ({ ...current, image_model: event.target.value }))}
+                                                />
+                                            </Form.Item>
+                                            <Form.Item label="IMAGE_GEN_API_KEY">
+                                                <Input.Password
+                                                    value={imageConfig.image_api_key}
+                                                    onChange={(event) => setImageConfig((current) => ({ ...current, image_api_key: event.target.value }))}
+                                                    placeholder={imageConfigStatus.configured ? copy('imageConfig.keepExistingKey') : copy('imageConfig.apiKeyPlaceholder')}
+                                                    autoComplete="off"
+                                                />
+                                            </Form.Item>
+                                        </div>
+                                        <Space wrap>
+                                            <Button icon={<SaveOutlined />} loading={imageConfigSaving} onClick={saveImageConfig}>
+                                                {copy('imageConfig.save')}
+                                            </Button>
+                                            <Text type="secondary">{copy('imageConfig.localEnvNote')}</Text>
+                                        </Space>
                                     </div>
-                                    <Alert
-                                        className="map-studio-status-alert"
-                                        type={imageConfigStatus.configured ? 'success' : 'warning'}
-                                        showIcon
-                                        message={
-                                            imageConfigStatus.configured
-                                                ? copy('imageConfig.readyMessage')
-                                                : copy('imageConfig.missingMessage')
-                                        }
-                                        description={
-                                            imageConfigStatus.configured
-                                                ? copy('imageConfig.readyDescription')
-                                                : copy('imageConfig.missingDescription')
-                                        }
-                                    />
-                                    <div className="map-studio-field-grid image-config">
-                                        <Form.Item label="IMAGE_GEN_PROVIDER">
-                                            <Select
-                                                value={imageConfig.image_provider}
-                                                onChange={(value) => setImageConfig((current) => ({ ...current, image_provider: value }))}
-                                                options={[{ value: 'openai', label: 'openai' }]}
-                                            />
-                                        </Form.Item>
-                                        <Form.Item label="IMAGE_GEN_API_BASE">
-                                            <Input
-                                                value={imageConfig.image_api_base}
-                                                onChange={(event) => setImageConfig((current) => ({ ...current, image_api_base: event.target.value }))}
-                                            />
-                                        </Form.Item>
-                                        <Form.Item label="IMAGE_GEN_MODEL_NAME">
-                                            <Input
-                                                value={imageConfig.image_model}
-                                                onChange={(event) => setImageConfig((current) => ({ ...current, image_model: event.target.value }))}
-                                            />
-                                        </Form.Item>
-                                        <Form.Item label="IMAGE_GEN_API_KEY">
-                                            <Input.Password
-                                                value={imageConfig.image_api_key}
-                                                onChange={(event) => setImageConfig((current) => ({ ...current, image_api_key: event.target.value }))}
-                                                placeholder={imageConfigStatus.configured ? copy('imageConfig.keepExistingKey') : copy('imageConfig.apiKeyPlaceholder')}
-                                                autoComplete="off"
-                                            />
-                                        </Form.Item>
-                                    </div>
-                                    <Space wrap>
-                                        <Button icon={<SaveOutlined />} loading={imageConfigSaving} onClick={saveImageConfig}>
-                                            {copy('imageConfig.save')}
-                                        </Button>
-                                        <Text type="secondary">{copy('imageConfig.localEnvNote')}</Text>
-                                    </Space>
-                                </div>
+                                </details>
                             </Form>
                             <Space wrap className="map-studio-actions">
                                 <Button type="primary" icon={<RocketOutlined />} loading={generating} onClick={submitDraft}>
@@ -759,6 +828,17 @@ export default function MapStudioPage() {
                                     {copy('generate.regenerate')}
                                 </Button>
                             </Space>
+                            {generationError && (
+                                <Alert
+                                    className="map-studio-status-alert"
+                                    type="warning"
+                                    showIcon
+                                    closable
+                                    onClose={() => setGenerationError('')}
+                                    message={copy('generate.failureTitle')}
+                                    description={generationError}
+                                />
+                            )}
                             {draft?.style_reference_used === 'god_default' && (
                                 <Alert
                                     className="map-studio-status-alert"
@@ -776,67 +856,73 @@ export default function MapStudioPage() {
                         )}
 
                         {draft && (
-                            <>
-                                <Card className="map-studio-card" title={<Space><EditOutlined />{copy('calibrate.title')}</Space>}>
-                                    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                            <Card
+                                className="map-studio-card map-studio-workflow-card"
+                                title={(
+                                    <Space>
+                                        <EditOutlined />
+                                        {copy('calibrate.title')} / {copy('validate.title')}
+                                    </Space>
+                                )}
+                            >
+                                <div className="map-studio-workflow-stack">
+                                    <Segmented
+                                        block
+                                        value={brushMode}
+                                        onChange={(value) => setBrushMode(value as BrushMode)}
+                                        options={[
+                                            { label: copy('calibrate.anchor'), value: 'anchor', icon: <AimOutlined /> },
+                                            { label: copy('calibrate.walkable'), value: 'walkable', icon: <CheckCircleOutlined /> },
+                                            { label: copy('calibrate.blocked'), value: 'blocked', icon: <BlockOutlined /> },
+                                        ]}
+                                    />
+                                    {renderCollisionHelp()}
+                                    <div className="map-studio-workflow-controls">
                                         <Segmented
-                                            block
-                                            value={brushMode}
-                                            onChange={(value) => setBrushMode(value as BrushMode)}
-                                            options={[
-                                                { label: copy('calibrate.anchor'), value: 'anchor', icon: <AimOutlined /> },
-                                                { label: copy('calibrate.walkable'), value: 'walkable', icon: <CheckCircleOutlined /> },
-                                                { label: copy('calibrate.blocked'), value: 'blocked', icon: <BlockOutlined /> },
-                                            ]}
+                                            value={brushSize}
+                                            onChange={(value) => setBrushSize(Number(value))}
+                                            options={[1, 3, 5].map((size) => ({
+                                                label: copy('calibrate.brushSize', { size }),
+                                                value: size,
+                                            }))}
                                         />
-                                        {renderCollisionHelp()}
-                                        <Space wrap>
-                                            <Segmented
-                                                value={brushSize}
-                                                onChange={(value) => setBrushSize(Number(value))}
-                                                options={[1, 3, 5].map((size) => ({
-                                                    label: copy('calibrate.brushSize', { size }),
-                                                    value: size,
-                                                }))}
-                                            />
-                                            <Button
-                                                onClick={() => setShowCollisionOverlay((value) => !value)}
-                                            >
-                                                {copy(showCollisionOverlay ? 'calibrate.hideCollision' : 'calibrate.showCollision')}
-                                            </Button>
-                                            <Button disabled={!collisionStrokes.length} onClick={undoCollisionStroke}>
-                                                {copy('calibrate.undo')}
-                                            </Button>
-                                            <Button
-                                                disabled={!collisionEdits.length}
-                                                onClick={() => {
-                                                    setCollisionEdits([]);
-                                                    setCollisionStrokes([]);
-                                                }}
-                                            >
-                                                {copy('calibrate.clearPending')}
-                                            </Button>
-                                        </Space>
-                                        <Table
-                                            rowKey="id"
-                                            size="small"
-                                            pagination={{ pageSize: 5 }}
-                                            dataSource={draft.locations}
-                                            columns={columns}
-                                        />
-                                        <Space wrap>
-                                            <Button loading={saving} onClick={() => saveCalibration()}>
-                                                {copy('calibrate.saveAndValidate')}
-                                            </Button>
+                                        <Button onClick={() => setShowCollisionOverlay((value) => !value)}>
+                                            {copy(showCollisionOverlay ? 'calibrate.hideCollision' : 'calibrate.showCollision')}
+                                        </Button>
+                                        <Button disabled={!collisionStrokes.length} onClick={undoCollisionStroke}>
+                                            {copy('calibrate.undo')}
+                                        </Button>
+                                        <Button
+                                            disabled={!collisionEdits.length}
+                                            onClick={() => {
+                                                setCollisionEdits([]);
+                                                setCollisionStrokes([]);
+                                            }}
+                                        >
+                                            {copy('calibrate.clearPending')}
+                                        </Button>
+                                    </div>
+                                    <Table
+                                        className="map-studio-location-table"
+                                        rowKey="id"
+                                        size="small"
+                                        pagination={draft.locations.length > 5 ? { pageSize: 5, size: 'small' } : false}
+                                        dataSource={draft.locations}
+                                        columns={columns}
+                                        tableLayout="fixed"
+                                    />
+                                    <div className="map-studio-calibration-footer">
+                                        <Button loading={saving} onClick={() => saveCalibration()}>
+                                            {copy('calibrate.saveAndValidate')}
+                                        </Button>
+                                        <div className="map-studio-stat-tags">
                                             <Tag color="red">{copy('calibrate.savedBlocked', { count: collisionStats.savedBlocked })}</Tag>
+                                            <Tag color="green">{copy('calibrate.savedWalkable', { count: collisionStats.savedWalkable })}</Tag>
                                             <Tag color="orange">{copy('calibrate.pendingBlocked', { count: collisionStats.pendingBlocked })}</Tag>
                                             <Tag color="green">{copy('calibrate.pendingWalkable', { count: collisionStats.pendingWalkable })}</Tag>
-                                        </Space>
-                                    </Space>
-                                </Card>
-
-                                <Card className="map-studio-card" title={<Space><CheckCircleOutlined />{copy('validate.title')}</Space>}>
-                                    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                                        </div>
+                                    </div>
+                                    <div className="map-studio-validation-panel">
                                         {draft.warnings.map((warning) => (
                                             <Alert key={warning} type="warning" showIcon message={warning} />
                                         ))}
@@ -850,27 +936,29 @@ export default function MapStudioPage() {
                                                     : draft.validation.errors.join(' ')
                                             }
                                         />
-                                        <Input
-                                            addonBefore={copy('validate.mapId')}
-                                            value={publishMapId}
-                                            onChange={(event) => setPublishMapId(event.target.value)}
-                                        />
-                                        <Space wrap>
-                                            <Button loading={saving} onClick={validateDraft}>
-                                                {copy('validate.validate')}
-                                            </Button>
-                                            <Tooltip title={draft.validation.ok ? '' : copy('validate.publishDisabled')}>
-                                                <Button
-                                                    type="primary"
-                                                    icon={<CheckCircleOutlined />}
-                                                    loading={publishing}
-                                                    disabled={!draft.validation.ok}
-                                                    onClick={publishDraft}
-                                                >
-                                                    {copy('validate.publish')}
+                                        <div className="map-studio-validation-actions">
+                                            <Input
+                                                addonBefore={copy('validate.mapId')}
+                                                value={publishMapId}
+                                                onChange={(event) => setPublishMapId(event.target.value)}
+                                            />
+                                            <Space wrap>
+                                                <Button loading={saving} onClick={validateDraft}>
+                                                    {copy('validate.validate')}
                                                 </Button>
-                                            </Tooltip>
-                                        </Space>
+                                                <Tooltip title={draft.validation.ok ? '' : copy('validate.publishDisabled')}>
+                                                    <Button
+                                                        type="primary"
+                                                        icon={<CheckCircleOutlined />}
+                                                        loading={publishing}
+                                                        disabled={!draft.validation.ok}
+                                                        onClick={publishDraft}
+                                                    >
+                                                        {copy('validate.publish')}
+                                                    </Button>
+                                                </Tooltip>
+                                            </Space>
+                                        </div>
                                         {published && (
                                             <Alert
                                                 type="success"
@@ -888,9 +976,9 @@ export default function MapStudioPage() {
                                                 )}
                                             />
                                         )}
-                                    </Space>
-                                </Card>
-                            </>
+                                    </div>
+                                </div>
+                            </Card>
                         )}
                     </div>
                 </div>

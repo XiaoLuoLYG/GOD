@@ -30,6 +30,7 @@ MAP_HEIGHT = 100
 TILE_SIZE = 32
 FULL_MAP_SIZE = (MAP_WIDTH * TILE_SIZE, MAP_HEIGHT * TILE_SIZE)
 PREVIEW_SIZE = (896, 640)
+Tile = tuple[int, int]
 IMAGE_MODEL_DEFAULTS = {
     "IMAGE_GEN_API_BASE": "https://api.openai.com/v1",
     "IMAGE_GEN_MODEL_NAME": "gpt-image-1.5",
@@ -96,6 +97,32 @@ def _write_collision_data(package_path: Path, collision_data: list[int]) -> None
             layer["data"] = [int(value or 0) for value in collision_data]
             break
     map_path.write_text(json.dumps(tiled_map, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _normalized_collision_edits(edits: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    cells: dict[Tile, dict[str, Any]] = {}
+    for edit in edits or []:
+        try:
+            x = int(edit["x"])
+            y = int(edit["y"])
+            blocked = bool(edit["blocked"])
+        except Exception:
+            continue
+        if 0 <= x < MAP_WIDTH and 0 <= y < MAP_HEIGHT:
+            cells[(x, y)] = {"x": x, "y": y, "blocked": blocked}
+    return list(cells.values())
+
+
+def _collision_overrides_from_state(state: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = state.get("collision_overrides")
+    return _normalized_collision_edits(raw if isinstance(raw, list) else [])
+
+
+def _merge_collision_overrides(
+    existing: list[dict[str, Any]],
+    edits: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    return _normalized_collision_edits([*existing, *(edits or [])])
 
 
 def sanitize_map_id(value: str, fallback: str = "generated_map") -> str:
@@ -216,42 +243,208 @@ def _semantic_interactions(locations: list[dict[str, Any]]) -> list[dict[str, An
     return interactions
 
 
-def _collision_data(locations: list[dict[str, Any]]) -> list[int]:
-    data = [0] * (MAP_WIDTH * MAP_HEIGHT)
-    for y in range(MAP_HEIGHT):
-        for x in range(MAP_WIDTH):
-            if x in (0, MAP_WIDTH - 1) or y in (0, MAP_HEIGHT - 1):
-                data[y * MAP_WIDTH + x] = 1
+def _bounds_tuple(location: dict[str, Any]) -> tuple[int, int, int, int] | None:
+    bounds = location.get("bounds") or {}
+    try:
+        bx = int(bounds["x"])
+        by = int(bounds["y"])
+        bw = int(bounds["w"])
+        bh = int(bounds["h"])
+    except Exception:
+        return None
+    if bw <= 0 or bh <= 0:
+        return None
+    return bx, by, bw, bh
+
+
+def _anchor_tile(location: dict[str, Any]) -> Tile | None:
+    anchor = location.get("anchor_tile") or {}
+    try:
+        return int(anchor["x"]), int(anchor["y"])
+    except Exception:
+        return None
+
+
+def _clamp_nav_tile(tile: Tile) -> Tile:
+    return (
+        max(1, min(MAP_WIDTH - 2, int(tile[0]))),
+        max(1, min(MAP_HEIGHT - 2, int(tile[1]))),
+    )
+
+
+def _contains_tile(bounds: tuple[int, int, int, int], tile: Tile) -> bool:
+    bx, by, bw, bh = bounds
+    x, y = tile
+    return bx <= x < bx + bw and by <= y < by + bh
+
+
+def _entry_tile_for_bounds(anchor: Tile, bounds: tuple[int, int, int, int]) -> Tile:
+    bx, by, bw, bh = bounds
+    ax, ay = anchor
+    center = (MAP_WIDTH // 2, MAP_HEIGHT // 2)
+    candidates = [
+        _clamp_nav_tile((bx - 1, max(by, min(by + bh - 1, ay)))),
+        _clamp_nav_tile((bx + bw, max(by, min(by + bh - 1, ay)))),
+        _clamp_nav_tile((max(bx, min(bx + bw - 1, ax)), by - 1)),
+        _clamp_nav_tile((max(bx, min(bx + bw - 1, ax)), by + bh)),
+    ]
+    return min(candidates, key=lambda item: abs(item[0] - center[0]) + abs(item[1] - center[1]))
+
+
+def _navigation_anchor(location: dict[str, Any]) -> Tile | None:
+    anchor = _anchor_tile(location)
+    if anchor is None:
+        return None
+    bounds = _bounds_tuple(location)
+    if bounds is not None and _contains_tile(bounds, anchor):
+        return _entry_tile_for_bounds(anchor, bounds)
+    return _clamp_nav_tile(anchor)
+
+
+def _locations_with_navigation_anchors(locations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
     for location in locations:
-        bounds = location.get("bounds") or {}
-        anchor = location.get("anchor_tile") or {}
-        try:
-            bx, by, bw, bh = int(bounds["x"]), int(bounds["y"]), int(bounds["w"]), int(bounds["h"])
-            ax, ay = int(anchor["x"]), int(anchor["y"])
-        except Exception:
+        if not isinstance(location, dict):
             continue
-        for y in range(max(1, by), min(MAP_HEIGHT - 1, by + bh)):
-            for x in range(max(1, bx), min(MAP_WIDTH - 1, bx + bw)):
-                if abs(x - ax) + abs(y - ay) > 2:
-                    data[y * MAP_WIDTH + x] = 1
-        for x, y in ((ax, ay), (ax + 1, ay), (ax - 1, ay), (ax, ay + 1), (ax, ay - 1)):
-            if 0 <= x < MAP_WIDTH and 0 <= y < MAP_HEIGHT:
+        item = dict(location)
+        anchor = _navigation_anchor(item)
+        if anchor is not None:
+            item["anchor_tile"] = {"x": anchor[0], "y": anchor[1]}
+        normalized.append(item)
+    return normalized
+
+
+def _carve_walkable(data: list[int], tile: Tile, radius: int = 1) -> None:
+    cx, cy = _clamp_nav_tile(tile)
+    for y in range(cy - radius, cy + radius + 1):
+        for x in range(cx - radius, cx + radius + 1):
+            if 0 < x < MAP_WIDTH - 1 and 0 < y < MAP_HEIGHT - 1:
                 data[y * MAP_WIDTH + x] = 0
+
+
+def _carve_corridor(data: list[int], start: Tile, goal: Tile, radius: int = 1) -> None:
+    sx, sy = _clamp_nav_tile(start)
+    gx, gy = _clamp_nav_tile(goal)
+    step_x = 1 if gx >= sx else -1
+    for x in range(sx, gx + step_x, step_x):
+        _carve_walkable(data, (x, sy), radius)
+    step_y = 1 if gy >= sy else -1
+    for y in range(sy, gy + step_y, step_y):
+        _carve_walkable(data, (gx, y), radius)
+
+
+def _collision_data(locations: list[dict[str, Any]]) -> list[int]:
+    data = [1] * (MAP_WIDTH * MAP_HEIGHT)
+    anchors = [
+        anchor
+        for location in locations
+        if isinstance(location, dict)
+        for anchor in [_navigation_anchor(location)]
+        if anchor is not None
+    ]
+    if not anchors:
+        return data
+    hub = _clamp_nav_tile((MAP_WIDTH // 2, MAP_HEIGHT // 2))
+    _carve_walkable(data, hub, radius=2)
+    for anchor in anchors:
+        _carve_walkable(data, anchor, radius=1)
+        _carve_corridor(data, anchor, hub, radius=1)
     return data
+
+
+def _has_collision_route(data: list[int], start: Tile, goal: Tile) -> bool:
+    start = _clamp_nav_tile(start)
+    goal = _clamp_nav_tile(goal)
+    if data[start[1] * MAP_WIDTH + start[0]] != 0 or data[goal[1] * MAP_WIDTH + goal[0]] != 0:
+        return False
+    frontier = [start]
+    seen = {start}
+    while frontier:
+        x, y = frontier.pop(0)
+        if (x, y) == goal:
+            return True
+        for neighbor in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            nx, ny = neighbor
+            if not (0 <= nx < MAP_WIDTH and 0 <= ny < MAP_HEIGHT):
+                continue
+            if neighbor in seen or data[ny * MAP_WIDTH + nx] != 0:
+                continue
+            seen.add(neighbor)
+            frontier.append(neighbor)
+    return False
+
+
+def _collision_base_with_connectivity(
+    locations: list[dict[str, Any]],
+    base_data: list[int] | None = None,
+) -> list[int]:
+    data = (
+        [int(value or 0) for value in base_data]
+        if isinstance(base_data, list) and len(base_data) == MAP_WIDTH * MAP_HEIGHT
+        else _collision_data(locations)
+    )
+    anchors = [
+        anchor
+        for location in locations
+        if isinstance(location, dict)
+        for anchor in [_navigation_anchor(location)]
+        if anchor is not None
+    ]
+    if not anchors:
+        return data
+    hub = anchors[0]
+    _carve_walkable(data, hub, radius=1)
+    for anchor in anchors:
+        _carve_walkable(data, anchor, radius=1)
+        if not _has_collision_route(data, hub, anchor):
+            _carve_corridor(data, hub, anchor, radius=1)
+    return data
+
+
+def _generated_collision_data(
+    locations: list[dict[str, Any]],
+    edits: list[dict[str, Any]] | None = None,
+    base_data: list[int] | None = None,
+) -> list[int]:
+    return _apply_collision_edits(
+        _collision_base_with_connectivity(locations, base_data),
+        _normalized_collision_edits(edits),
+    )
+
+
+def _sync_package_collision_data(
+    package_path: Path,
+    manifest: dict[str, Any],
+    overrides: list[dict[str, Any]],
+    base_data: list[int] | None = None,
+) -> list[int]:
+    locations = [
+        item
+        for item in manifest.get("locations", []) or []
+        if isinstance(item, dict)
+    ]
+    collision_base_data = _collision_base_with_connectivity(locations, base_data)
+    _write_collision_data(package_path, _apply_collision_edits(collision_base_data, overrides))
+    return collision_base_data
 
 
 def _apply_collision_edits(data: list[int], edits: list[dict[str, Any]]) -> list[int]:
     next_data = list(data)
-    for edit in edits:
-        try:
-            x = int(edit["x"])
-            y = int(edit["y"])
-            blocked = bool(edit["blocked"])
-        except Exception:
-            continue
-        if 0 <= x < MAP_WIDTH and 0 <= y < MAP_HEIGHT:
-            next_data[y * MAP_WIDTH + x] = 1 if blocked else 0
+    for edit in _normalized_collision_edits(edits):
+        x = int(edit["x"])
+        y = int(edit["y"])
+        blocked = bool(edit["blocked"])
+        next_data[y * MAP_WIDTH + x] = 1 if blocked else 0
     return next_data
+
+
+def _sanitize_model_error(text: str, api_key: str) -> str:
+    sanitized = str(text or "")
+    if api_key:
+        sanitized = sanitized.replace(api_key, "[redacted-api-key]")
+        if len(api_key) > 12:
+            sanitized = sanitized.replace(api_key[:8], "[redacted-api-key]")
+    return re.sub(r"sk-[A-Za-z0-9_\-*.]{8,}", "[redacted-api-key]", sanitized)
 
 
 def _open_image(raw: bytes) -> Image.Image:
@@ -520,10 +713,10 @@ def _write_package(package_path: Path, *, prompt: str, map_id: str, raw_image: b
     preview.thumbnail(PREVIEW_SIZE, Image.Resampling.LANCZOS)
     (package_path / "visuals" / "preview.png").write_bytes(encode_png_bytes(preview.convert("RGB")))
 
-    locations = _semantic_locations(prompt)
+    locations = _locations_with_navigation_anchors(_semantic_locations(prompt))
     _write_location_assets(package_path, full_map, locations)
     manifest = _manifest(prompt, map_id, locations)
-    collision_data = _collision_data(locations)
+    collision_data = _generated_collision_data(locations)
     (package_path / "visuals" / "map.json").write_text(
         json.dumps(_tiled_map(collision_data), indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
@@ -599,8 +792,9 @@ def _state_from_package(package_path: Path, *, prompt: str, warnings: list[str])
         "locations": manifest.get("locations") or [],
         "interactions": manifest.get("interactions") or [],
         "validation": validation.as_dict(),
-        "warnings": list(warnings) + list(validation.warnings),
+        "warnings": list(dict.fromkeys([*warnings, *validation.warnings])),
         "collision_data": _collision_data_from_package(package_path),
+        "collision_overrides": [],
         "style_reference_used": "none",
     }
     return state
@@ -627,6 +821,7 @@ def load_draft(*, root: Path, draft_id: str) -> dict[str, Any]:
     state["status"] = "ready" if validation.ok else "needs_fix"
     state["warnings"] = list(dict.fromkeys([*state.get("warnings", []), *validation.warnings]))
     state["collision_data"] = _collision_data_from_package(package_path)
+    state["collision_overrides"] = _collision_overrides_from_state(state)
     state["style_reference_used"] = str(state.get("style_reference_used") or "none")
     return state
 
@@ -657,7 +852,9 @@ def patch_draft(
             if location_id not in by_id:
                 order.append(location_id)
             by_id[location_id] = location
-        manifest["locations"] = [by_id[location_id] for location_id in order if location_id in by_id]
+        manifest["locations"] = _locations_with_navigation_anchors([
+            by_id[location_id] for location_id in order if location_id in by_id
+        ])
     if interactions is not None:
         existing_interactions = [
             item for item in manifest.get("interactions", [])
@@ -677,16 +874,17 @@ def patch_draft(
             for interaction_id in interaction_order
             if interaction_id in by_interaction_id
         ]
+    if locations is None:
+        manifest["locations"] = _locations_with_navigation_anchors([
+            item for item in manifest.get("locations", []) or [] if isinstance(item, dict)
+        ])
     manifest_path.write_text(yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
-    if collision_edits:
-        map_path = package_path / "visuals" / "map.json"
-        tiled_map = json.loads(map_path.read_text(encoding="utf-8"))
-        for layer in tiled_map.get("layers", []) or []:
-            if layer.get("name") == "Collisions" and isinstance(layer.get("data"), list):
-                layer["data"] = _apply_collision_edits(layer["data"], collision_edits)
-                break
-        map_path.write_text(json.dumps(tiled_map, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    collision_overrides = _merge_collision_overrides(
+        _collision_overrides_from_state(state),
+        collision_edits,
+    )
+    _sync_package_collision_data(package_path, manifest, collision_overrides)
 
     next_state = _state_from_package(
         package_path,
@@ -696,6 +894,7 @@ def patch_draft(
     next_state["draft_id"] = draft_id
     next_state["style_reference_used"] = str(state.get("style_reference_used") or "none")
     next_state["collision_data"] = _collision_data_from_package(package_path)
+    next_state["collision_overrides"] = collision_overrides
     _write_state(package_path, next_state)
     return next_state
 
@@ -716,7 +915,7 @@ async def regenerate_image(
         for key in ("locations", "interactions", "default_location_order", "spawn_points")
         if key in current_manifest
     }
-    preserved_collision_data = _collision_data_from_package(package_path)
+    collision_overrides = _collision_overrides_from_state(state)
     resolved_reference_bytes, resolved_reference_filename, resolved_reference_content_type, style_reference_used = (
         _resolve_style_reference(
             root,
@@ -732,32 +931,40 @@ async def regenerate_image(
         reference_filename=resolved_reference_filename,
         reference_content_type=resolved_reference_content_type,
     )
+    warnings = [str(item) for item in state.get("warnings", [])]
     next_state = _write_package(
         package_path,
         prompt=str(state.get("prompt") or ""),
         map_id=str(state.get("map_id") or draft_id),
         raw_image=raw_image,
-        warnings=[str(item) for item in state.get("warnings", [])],
+        warnings=warnings,
     )
     if preserved_manifest_fields:
         next_manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
         next_manifest.update(preserved_manifest_fields)
+        if isinstance(next_manifest.get("locations"), list):
+            next_manifest["locations"] = _locations_with_navigation_anchors([
+                item for item in next_manifest.get("locations", []) if isinstance(item, dict)
+            ])
         manifest_path.write_text(yaml.safe_dump(next_manifest, allow_unicode=True, sort_keys=False), encoding="utf-8")
-        preserved_locations = preserved_manifest_fields.get("locations")
+        preserved_locations = next_manifest.get("locations")
         if isinstance(preserved_locations, list):
             asset_root = package_path / "location_assets"
             shutil.rmtree(asset_root, ignore_errors=True)
             full_map = Image.open(package_path / "visuals" / "map_assets" / "generated_full_map_tileset.png").convert("RGB")
             _write_location_assets(package_path, full_map, preserved_locations)
-    if preserved_collision_data:
-        _write_collision_data(package_path, preserved_collision_data)
+        _sync_package_collision_data(package_path, next_manifest, collision_overrides)
+    else:
+        next_manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+        _sync_package_collision_data(package_path, next_manifest, collision_overrides)
     next_state = _state_from_package(
         package_path,
         prompt=str(state.get("prompt") or ""),
-        warnings=[str(item) for item in state.get("warnings", [])],
+        warnings=warnings,
     )
     next_state["draft_id"] = draft_id
     next_state["style_reference_used"] = "local_placeholder" if uses_local_placeholder else style_reference_used
+    next_state["collision_overrides"] = collision_overrides
     _write_state(package_path, next_state)
     return next_state
 

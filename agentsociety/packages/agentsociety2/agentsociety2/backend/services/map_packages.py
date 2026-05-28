@@ -113,6 +113,39 @@ def _load_structured(path: Path) -> dict[str, Any]:
     return data
 
 
+def _is_generated_manifest_path(manifest_path: Path) -> bool:
+    return GENERATED_MAPS_DIRNAME in manifest_path.resolve().parts
+
+
+def _generated_route_location_ids(manifest: dict[str, Any], location_ids: set[str]) -> list[str]:
+    raw_order = manifest.get("default_location_order")
+    if isinstance(raw_order, list):
+        ordered = [str(item) for item in raw_order if str(item).strip()]
+        if ordered:
+            return ordered
+    spawn_points = manifest.get("spawn_points")
+    if isinstance(spawn_points, list):
+        ordered = [
+            str(item.get("location_id"))
+            for item in spawn_points
+            if isinstance(item, dict) and str(item.get("location_id") or "").strip()
+        ]
+        if ordered:
+            return list(dict.fromkeys(ordered))
+    locations = manifest.get("locations")
+    if isinstance(locations, list):
+        ordered = [
+            str(item.get("id"))
+            for item in locations
+            if isinstance(item, dict)
+            and str(item.get("id") or "").strip()
+            and str(item.get("id")) in location_ids
+        ]
+        if ordered:
+            return ordered
+    return sorted(location_ids)
+
+
 def _has_walkable_route(
     start: tuple[int, int],
     goal: tuple[int, int],
@@ -274,6 +307,7 @@ def validate_manifest_path(manifest_path: Path) -> MapValidation:
         manifest = _load_structured(manifest_path)
     except Exception as exc:
         return MapValidation(False, (f"manifest could not be read: {exc}",), ())
+    is_generated_package = _is_generated_manifest_path(manifest_path)
 
     for key in ("map_id", "display_name", "tile_size", "tiled_map_path", "locations"):
         if key not in manifest or manifest.get(key) in (None, ""):
@@ -364,7 +398,11 @@ def validate_manifest_path(manifest_path: Path) -> MapValidation:
         if x < 0 or y < 0 or x >= width or y >= height:
             errors.append(f"location {location_id} anchor out of bounds: ({x}, {y})")
         elif collisions and (x, y) not in walkable:
-            warnings.append(f"location {location_id} anchor is not walkable: ({x}, {y})")
+            message = f"location {location_id} anchor is not walkable: ({x}, {y})"
+            if is_generated_package:
+                errors.append(f"generated map {message}")
+            else:
+                warnings.append(message)
         else:
             location_anchors[location_id] = (x, y)
         visual_asset = str(item.get("visual_asset") or "").strip()
@@ -385,6 +423,17 @@ def validate_manifest_path(manifest_path: Path) -> MapValidation:
                 errors.append(f"required route {start_id}->{goal_id} references unknown location")
             elif not _has_walkable_route(start, goal, walkable, width, height):
                 errors.append(f"required route {start_id}->{goal_id} is not reachable")
+        if is_generated_package:
+            route_ids = _generated_route_location_ids(manifest, location_ids)
+            if len(route_ids) > 1:
+                start_id = route_ids[0]
+                start = location_anchors.get(start_id)
+                for goal_id in route_ids[1:]:
+                    goal = location_anchors.get(goal_id)
+                    if start is None or goal is None:
+                        errors.append(f"generated route {start_id}->{goal_id} references unknown location")
+                    elif not _has_walkable_route(start, goal, walkable, width, height):
+                        errors.append(f"generated route {start_id}->{goal_id} is not reachable")
 
     interactions = manifest.get("interactions") or []
     if not isinstance(interactions, list):

@@ -5,56 +5,89 @@
 }
 
 .map-studio-shell {
-    width: min(1320px, calc(100vw - 32px));
+    width: min(1680px, calc(100vw - 28px));
     margin: 0 auto;
-    padding: 28px 0 48px;
+    padding: 10px 0 12px;
 }
 
 .map-studio-header {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 20px;
-    margin-bottom: 18px;
+    margin-bottom: 12px;
+}
+
+.map-studio-header h2.ant-typography {
+    margin: 0 0 4px;
+    font-size: 28px;
+    line-height: 1.2;
 }
 
 .map-studio-layout {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
-    gap: 16px;
+    grid-template-columns: minmax(600px, 1fr) minmax(440px, 500px);
+    gap: 14px;
     align-items: start;
+}
+
+.map-studio-canvas-panel {
+    min-width: 0;
 }
 
 .map-studio-card {
     border-radius: 8px;
     border: 1px solid #e5e7eb;
-    box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
+    box-shadow: 0 10px 26px rgba(15, 23, 42, 0.05);
+}
+
+.map-studio-card .ant-card-head {
+    min-height: 42px;
+    padding: 0 14px;
+}
+
+.map-studio-card .ant-card-body {
+    padding: 12px 14px;
+}
+
+.map-studio-card .ant-form-item {
+    margin-bottom: 12px;
 }
 
 .map-studio-side {
     display: grid;
-    gap: 14px;
+    gap: 12px;
     align-content: start;
+    min-width: 0;
 }
 
 .map-studio-actions {
-    margin-top: 14px;
+    margin-top: 10px;
 }
 
 .map-studio-image-config {
-    margin-top: 16px;
-    padding: 14px;
+    margin-top: 10px;
     border: 1px solid #dbeafe;
     border-radius: 8px;
     background: #f8fbff;
+    overflow: hidden;
 }
 
-.map-studio-panel-heading {
+.map-studio-image-config-summary {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    margin-bottom: 10px;
+    padding: 10px 12px;
+    cursor: pointer;
+}
+
+.map-studio-image-config-summary::marker {
+    color: #64748b;
+}
+
+.map-studio-image-config-body {
+    padding: 0 12px 12px;
 }
 
 .map-studio-field-grid {
@@ -73,14 +106,14 @@
 }
 
 .map-studio-status-alert {
-    margin-top: 14px;
+    margin-top: 10px;
 }
 
 .map-studio-canvas {
     position: relative;
     width: 100%;
     aspect-ratio: 14 / 10;
-    max-height: min(70vh, 640px);
+    max-height: min(62vh, 600px);
     overflow: hidden;
     border-radius: 8px;
     background: #111827;
@@ -159,7 +192,7 @@
 }
 
 .map-studio-empty {
-    min-height: 420px;
+    min-height: 360px;
     display: grid;
     place-items: center;
     gap: 12px;
@@ -178,9 +211,23 @@
     color: #334155;
 }
 
+.map-studio-collision-help.ant-alert {
+    padding: 8px 10px;
+}
+
+.map-studio-collision-help .ant-alert-message {
+    margin-bottom: 2px;
+    font-size: 13px;
+}
+
+.map-studio-collision-help .ant-alert-description {
+    font-size: 12px;
+    line-height: 1.35;
+}
+
 .map-studio-collision-help-body {
     display: grid;
-    gap: 8px;
+    gap: 5px;
 }
 
 .map-studio-legend {
@@ -193,7 +240,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: 11px;
     color: #334155;
 }
 
@@ -207,6 +254,11 @@
 .map-studio-legend-swatch.saved-blocked {
     background: rgba(220, 38, 38, 0.34);
     border-color: rgba(185, 28, 28, 0.72);
+}
+
+.map-studio-legend-swatch.saved-walkable {
+    background: rgba(16, 185, 129, 0.38);
+    border-color: rgba(4, 120, 87, 0.78);
 }
 
 .map-studio-legend-swatch.pending-blocked {
@@ -229,7 +281,119 @@
     border-radius: 8px;
 }
 
-@media (max-width: 1320px) {
+.map-studio-workflow-stack {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+}
+
+.map-studio-workflow-card,
+.map-studio-workflow-card .ant-card-body {
+    overflow: hidden;
+}
+
+.map-studio-workflow-controls,
+.map-studio-calibration-footer,
+.map-studio-stat-tags {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.map-studio-calibration-footer {
+    justify-content: space-between;
+}
+
+.map-studio-stat-tags {
+    gap: 6px;
+}
+
+.map-studio-stat-tags .ant-tag {
+    max-width: 100%;
+    white-space: normal;
+}
+
+.map-studio-location-table {
+    min-width: 0;
+}
+
+.map-studio-location-table .ant-table {
+    overflow: hidden;
+}
+
+.map-studio-location-table .ant-table-cell {
+    padding: 6px 8px !important;
+}
+
+.map-studio-location-table .ant-pagination {
+    margin: 8px 0 0 !important;
+}
+
+.map-studio-location-button {
+    max-width: 108px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.map-studio-anchor-input {
+    width: 64px;
+}
+
+.map-studio-validation-panel {
+    display: grid;
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid #eef2f7;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+}
+
+.map-studio-validation-panel > *,
+.map-studio-validation-panel .ant-alert,
+.map-studio-validation-panel .ant-input-group-wrapper {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.map-studio-validation-panel .ant-alert {
+    overflow: hidden;
+}
+
+.map-studio-validation-panel .ant-alert-content {
+    min-width: 0;
+}
+
+.map-studio-validation-panel .ant-alert-message,
+.map-studio-validation-panel .ant-alert-description {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.map-studio-validation-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+}
+
+.map-studio-validation-actions .ant-input-wrapper,
+.map-studio-validation-actions .ant-input,
+.map-studio-validation-actions .ant-space {
+    min-width: 0;
+}
+
+.map-studio-validation-actions .ant-space {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+@media (max-width: 1180px) {
     .map-studio-shell {
         width: min(100vw - 20px, 1440px);
         padding-top: 18px;
@@ -243,9 +407,20 @@
         grid-template-columns: 1fr;
     }
 
+    .map-studio-canvas-panel {
+        position: static;
+    }
+
     .map-studio-field-grid,
     .map-studio-field-grid.image-config {
         grid-template-columns: 1fr;
     }
 
+    .map-studio-validation-actions {
+        grid-template-columns: 1fr;
+    }
+
+    .map-studio-validation-actions .ant-space {
+        justify-content: flex-start;
+    }
 }

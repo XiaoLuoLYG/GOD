@@ -1,10 +1,13 @@
 import json
 from functools import partial
+import heapq
 from pathlib import Path
 
 import anyio
+import pytest
 import yaml
 from fastapi import FastAPI
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
@@ -23,9 +26,6 @@ def _configure_tmp_god(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("GOD_ENV_FILE", str(tmp_path / ".env"))
     monkeypatch.setenv("LIVE_WORKSPACE_PATH", str(tmp_path / "quick_experiments"))
     for key in (
-        "GOD_LLM_API_KEY",
-        "GOD_LLM_API_BASE",
-        "GOD_LLM_MODEL",
         "GOD_EXPERIMENT",
         "GOD_EXPERIMENT_RUN",
         "GOD_MAP_ID",
@@ -92,6 +92,40 @@ def _map_image_bytes() -> bytes:
     draw.rectangle((0, 300, 896, 350), fill=(188, 198, 210))
     draw.rectangle((420, 0, 470, 640), fill=(188, 198, 210))
     return map_generation.encode_png_bytes(image)
+
+
+def _walkable_tiles(collision_data: list[int]) -> set[tuple[int, int]]:
+    return {
+        (index % map_generation.MAP_WIDTH, index // map_generation.MAP_WIDTH)
+        for index, value in enumerate(collision_data)
+        if int(value or 0) == 0
+    }
+
+
+def _has_route(
+    start: tuple[int, int],
+    goal: tuple[int, int],
+    walkable: set[tuple[int, int]],
+) -> bool:
+    if start not in walkable or goal not in walkable:
+        return False
+    frontier: list[tuple[int, tuple[int, int]]] = [(0, start)]
+    cost_so_far: dict[tuple[int, int], int] = {start: 0}
+    while frontier:
+        _, current = heapq.heappop(frontier)
+        if current == goal:
+            return True
+        x, y = current
+        for neighbor in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            if neighbor not in walkable:
+                continue
+            next_cost = cost_so_far[current] + 1
+            if next_cost >= cost_so_far.get(neighbor, 10**9):
+                continue
+            cost_so_far[neighbor] = next_cost
+            priority = next_cost + abs(goal[0] - neighbor[0]) + abs(goal[1] - neighbor[1])
+            heapq.heappush(frontier, (priority, neighbor))
+    return False
 
 
 def test_map_studio_draft_patch_publish_and_setup_visibility(monkeypatch, tmp_path):
@@ -224,6 +258,38 @@ def test_map_studio_reports_local_placeholder_without_image_key(monkeypatch, tmp
 
     assert created.style_reference_used == "local_placeholder"
     assert any("local placeholder" in warning for warning in created.warnings)
+
+
+def test_map_studio_reports_image_model_failure_without_placeholder_draft(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    _write_default_map_root(tmp_path)
+
+    async def failing_image(**_kwargs):
+        raise HTTPException(
+            status_code=502,
+            detail="Image model request failed: Billing hard limit has been reached.",
+        )
+
+    monkeypatch.setattr(map_generation, "generate_map_image", failing_image)
+
+    with pytest.raises(HTTPException) as exc_info:
+        anyio.run(
+            map_studio.create_draft,
+            MapDraftCreateRequest(
+                prompt="Moon base with paths",
+                image_config={
+                    "image_api_key": "sk-test",
+                    "image_api_base": "https://api.openai.com/v1",
+                    "image_model": "gpt-image-1.5",
+                    "image_provider": "openai",
+                },
+            ),
+        )
+
+    assert exc_info.value.status_code == 502
+    assert "Billing hard limit" in str(exc_info.value.detail)
+    assert not list((tmp_path / "agentsociety" / "custom" / "generated_maps" / "_drafts").glob("*"))
+    assert not (tmp_path / ".env").exists()
 
 
 def test_map_studio_saves_image_config_from_create_after_success(monkeypatch, tmp_path):
@@ -386,3 +452,76 @@ def test_map_studio_create_route_returns_style_and_collision_fields(monkeypatch,
     payload = response.json()
     assert payload["style_reference_used"] == "local_placeholder"
     assert len(payload["collision_data"]) == map_generation.MAP_WIDTH * map_generation.MAP_HEIGHT
+
+
+def test_map_studio_generated_collision_layer_connects_all_locations(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    _write_default_map_root(tmp_path)
+
+    async def fake_image(**_kwargs):
+        return _map_image_bytes()
+
+    monkeypatch.setattr(map_generation, "generate_map_image", fake_image)
+
+    created = anyio.run(
+        map_studio.create_draft,
+        MapDraftCreateRequest(prompt="Moon base with a tall Cybertron tower"),
+    )
+
+    walkable = _walkable_tiles(created.collision_data)
+    anchors = {
+        location.id: (location.anchor_tile["x"], location.anchor_tile["y"])
+        for location in created.locations
+    }
+    hub_id = created.locations[0].id
+    for location_id, tile in anchors.items():
+        assert tile in walkable
+        assert _has_route(anchors[hub_id], tile, walkable), location_id
+
+
+def test_map_studio_recomputes_roads_while_preserving_manual_collision_overrides(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    _write_default_map_root(tmp_path)
+
+    async def fake_image(**_kwargs):
+        return _map_image_bytes()
+
+    monkeypatch.setattr(map_generation, "generate_map_image", fake_image)
+    created = anyio.run(
+        map_studio.create_draft,
+        MapDraftCreateRequest(prompt="Moon base with paths"),
+    )
+    first_location = created.locations[0].model_copy(deep=True)
+    first_location.anchor_tile = {"x": 12, "y": 9}
+
+    patched = anyio.run(
+        map_studio.patch_draft,
+        created.draft_id,
+        MapDraftPatchRequest(
+            locations=[first_location],
+            collision_edits=[CollisionEdit(x=2, y=2, blocked=False)],
+        ),
+    )
+
+    walkable = _walkable_tiles(patched.collision_data)
+    anchors = {
+        location.id: (location.anchor_tile["x"], location.anchor_tile["y"])
+        for location in patched.locations
+    }
+    assert patched.collision_data[2 * map_generation.MAP_WIDTH + 2] == 0
+    assert _has_route(anchors[patched.locations[0].id], anchors[patched.locations[1].id], walkable)
+
+    regenerated = anyio.run(map_studio.regenerate_image, created.draft_id)
+
+    regenerated_walkable = _walkable_tiles(regenerated.collision_data)
+    regenerated_anchors = {
+        location.id: (location.anchor_tile["x"], location.anchor_tile["y"])
+        for location in regenerated.locations
+    }
+    assert regenerated.locations[0].anchor_tile == patched.locations[0].anchor_tile
+    assert regenerated.collision_data[2 * map_generation.MAP_WIDTH + 2] == 0
+    assert _has_route(
+        regenerated_anchors[regenerated.locations[0].id],
+        regenerated_anchors[regenerated.locations[1].id],
+        regenerated_walkable,
+    )

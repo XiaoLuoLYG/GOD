@@ -219,3 +219,78 @@ def test_generated_map_packages_are_discovered_without_drafts(tmp_path: Path) ->
     assert {"the_ville", "moon_tower"} <= set(by_id)
     assert "draft_map" not in by_id
     assert by_id["moon_tower"].validation.ok is True
+
+
+def test_generated_map_validation_rejects_isolated_location_anchors(tmp_path: Path) -> None:
+    package = tmp_path / "agentsociety" / "custom" / "generated_maps" / "isolated_world"
+    (package / "visuals" / "tiles").mkdir(parents=True)
+    (package / "characters").mkdir()
+    (package / "visuals" / "tiles" / "ground.png").write_bytes(b"png")
+    (package / "characters" / "Resident.png").write_bytes(b"png")
+    collisions = [1] * 25
+    collisions[1 * 5 + 1] = 0
+    collisions[3 * 5 + 3] = 0
+    (package / "visuals" / "map.json").write_text(
+        json.dumps(
+            {
+                "type": "map",
+                "orientation": "orthogonal",
+                "width": 5,
+                "height": 5,
+                "tilewidth": 32,
+                "tileheight": 32,
+                "tilesets": [
+                    {
+                        "firstgid": 1,
+                        "name": "ground",
+                        "image": "tiles/ground.png",
+                        "tilewidth": 32,
+                        "tileheight": 32,
+                        "tilecount": 1,
+                        "columns": 1,
+                    }
+                ],
+                "layers": [
+                    {"name": "Ground", "type": "tilelayer", "width": 5, "height": 5, "data": [1] * 25},
+                    {"name": "Collisions", "type": "tilelayer", "width": 5, "height": 5, "data": collisions},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (package / "map.yaml").write_text(
+        "\n".join(
+            [
+                "schema_version: 1",
+                "map_id: isolated_world",
+                "display_name: Isolated World",
+                "tiled_map_path: visuals/map.json",
+                "tile_size: 32",
+                "character_root: characters",
+                "default_location_order: [alpha, beta]",
+                "locations:",
+                "- id: alpha",
+                "  name: Alpha",
+                "  anchor_tile: {x: 1, y: 1}",
+                "  interaction_ids: [wait_alpha]",
+                "- id: beta",
+                "  name: Beta",
+                "  anchor_tile: {x: 3, y: 3}",
+                "  interaction_ids: [wait_beta]",
+                "interactions:",
+                "- id: wait_alpha",
+                "  name: Wait Alpha",
+                "  allowed_location_ids: [alpha]",
+                "- id: wait_beta",
+                "  name: Wait Beta",
+                "  allowed_location_ids: [beta]",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    validation = map_packages.validate_manifest_path(package / "map.yaml")
+
+    assert validation.ok is False
+    assert any("generated route alpha->beta is not reachable" in message for message in validation.errors)
