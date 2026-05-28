@@ -1,0 +1,4 @@
+sphinx>=8.2.3
+furo>=2024.8.6
+myst-parser>=4.0.0
+linkify-it-py>=2.0.3

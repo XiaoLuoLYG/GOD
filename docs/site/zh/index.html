@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GOD - Govern, Observe, Direct</title>
+    <meta name="description" content="通过场景和实验探索可操作的 agent society。">
+    <link rel="stylesheet" href="../assets/site.css">
+  </head>
+  <body data-asset-prefix="../" data-detail-base="experiments/">
+    <header class="site-header">
+      <nav class="nav" aria-label="主导航">
+        <a class="brand" href="index.html"><img src="../assets/logo_no_bg.png" alt="">GOD</a>
+        <div class="nav-links">
+          <a data-nav href="index.html">使用场景</a>
+          <a data-nav href="experiments/index.html">实验展厅</a>
+          <a data-nav href="start.html">开始使用</a>
+          <a href="../index.html">English</a>
+          <a href="https://github.com/XiaoLuoLYG/GOD">GitHub</a>
+        </div>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero-grid">
+          <div>
+            <p class="eyebrow">Govern · Observe · Direct</p>
+            <h1>运行一个可以被你触碰的小世界。</h1>
+            <p class="lede">GOD 把 agent society simulation 变成 live scenario：观察日常生活，向任意居民提问，干预下一步，再回放变化。</p>
+            <div class="actions">
+              <a class="button" href="experiments/index.html">查看实验</a>
+              <a class="button secondary" href="start.html">本地启动</a>
+            </div>
+          </div>
+          <figure class="hero-shot">
+            <img src="../assets/screenshots/00-hero.png" alt="GOD 控制台预览">
+            <figcaption>实时控制台、配置向导、地图、居民和操作员命令。</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="section" id="use-cases">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">使用场景</p>
+            <h2>你可以用一座 agent 小镇做什么？</h2>
+          </div>
+          <p>GOD 面向普通人也能理解的场景：日常生活、公共事件、定向提问和可见干预。</p>
+        </div>
+        <div class="use-case-grid">
+          <article class="use-case">
+            <h3>观察日常生活</h3>
+            <p>从基线小镇开始，看日程、社交关系、差事和细小冲突如何逐步展开。</p>
+          </article>
+          <article class="use-case">
+            <h3>测试公共事件</h3>
+            <p>注入校园通知或地方事件，观察谁注意、谁聚集、谁发问、谁忽略。</p>
+          </article>
+          <article class="use-case">
+            <h3>向任何人提问</h3>
+            <p>在 live run 中向单个居民、群组或全镇提问，不用离开地图。</p>
+          </article>
+          <article class="use-case">
+            <h3>实时干预</h3>
+            <p>给下一步写入指令，运行后在 replay 中比较社会涟漪。</p>
+          </article>
+          <article class="use-case">
+            <h3>创建世界</h3>
+            <p>用浏览器向导起草场景、生成 agent、编辑 steps 并启动。</p>
+          </article>
+          <article class="use-case">
+            <h3>扩展人物和地图</h3>
+            <p>通过 Agent Studio 加居民，通过 Map Studio 发布新的本地地图。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section band" id="experiments">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">当前实验</p>
+            <h2>从仓库里已经存在的真实场景开始。</h2>
+          </div>
+          <p>每个实验都是可复现目录，包含地图、角色、配置和操作说明。之后新增实验只需要继续补卡片。</p>
+        </div>
+        <div class="experiment-grid" data-experiment-grid></div>
+      </section>
+
+      <section class="section">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">体验路径</p>
+            <h2>先观察，精准提问，再改变下一步。</h2>
+          </div>
+        </div>
+        <div class="steps">
+          <div class="step"><strong>1.</strong> 选择或创建一个实验。</div>
+          <div class="step"><strong>2.</strong> 观察地图和居民状态更新。</div>
+          <div class="step"><strong>3.</strong> 从命令栏 ask 或 intervene。</div>
+          <div class="step"><strong>4.</strong> 按 step 回放干预效果。</div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        <span>GOD · Govern, Observe, Direct</span>
+        <span><a href="https://github.com/XiaoLuoLYG/GOD">GitHub</a> · <a href="https://github.com/XiaoLuoLYG/GOD/tree/main/docs/developer">开发者文档源码</a></span>
+      </div>
+    </footer>
+    <script src="../data/experiments.js"></script>
+    <script src="../assets/site.js"></script>
+  </body>
+</html>

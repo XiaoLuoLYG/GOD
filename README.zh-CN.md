@@ -18,6 +18,8 @@
   <a href="#-核心能力">核心能力</a> ·
   <a href="#%EF%B8%8F-架构">架构</a> ·
   <a href="#-内置实验">内置实验</a> ·
+  <a href="docs/site/zh/">使用场景</a> ·
+  <a href="docs/developer/zh/">开发者文档</a> ·
   <a href="#-更新">更新</a> ·
   <a href="#%EF%B8%8F-roadmap">Roadmap</a> ·
   <a href="CONTRIBUTING.zh-CN.md">参与开发</a> ·

@@ -73,6 +73,9 @@ jobs:
               pathlib.Path("docs/MAP_PACKAGES.md"),
               pathlib.Path("docs/MAP_PACKAGES.zh-CN.md"),
           ]
+          public_docs.extend(sorted(pathlib.Path("docs/developer").rglob("*.rst")))
+          public_docs.extend(sorted(pathlib.Path("docs/developer").rglob("*.md")))
+          public_docs.extend(sorted(pathlib.Path("docs/site").rglob("*.html")))
 
           failures = []
           for md_path in public_docs:
@@ -82,6 +85,7 @@ jobs:
               targets = []
               targets.extend(re.findall(r"<img[^>]+src=[\"']([^\"']+)[\"']", text, flags=re.I))
               targets.extend(re.findall(r"!\[[^\]]*\]\(([^)]+)\)", text))
+              targets.extend(re.findall(r"\.\. image::\s+([^\s]+)", text))
               for raw_target in targets:
                   target = raw_target.strip().split("#", 1)[0].split("?", 1)[0]
                   if not target or re.match(r"^[a-z][a-z0-9+.-]*:", target, flags=re.I):
