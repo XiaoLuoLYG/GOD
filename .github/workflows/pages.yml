@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy promo site
+    name: Build and deploy public pages
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -25,13 +25,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install developer docs dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r docs/developer/requirements.txt
+
+      - name: Build public pages
+        run: |
+          set -euo pipefail
+          mkdir -p _site
+          cp -R docs/site/. _site/
+          sphinx-build -W -b html docs/developer _site/developer
+
       - name: Configure Pages
         uses: actions/configure-pages@v6
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: docs/site
+          path: _site
 
       - name: Deploy to GitHub Pages
         id: deployment
