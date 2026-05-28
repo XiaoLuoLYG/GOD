@@ -18,6 +18,7 @@
   <a href="#-features">Features</a> ·
   <a href="#%EF%B8%8F-how-it-works">How it works</a> ·
   <a href="#-built-in-experiments">Built-in Experiments</a> ·
+  <a href="#-updates">Updates</a> ·
   <a href="#%EF%B8%8F-roadmap">Roadmap</a> ·
   <a href="CONTRIBUTING.md">Contributing</a> ·
   <a href="README.zh-CN.md">🌏 中文</a>
@@ -104,7 +105,10 @@ Full walkthrough: **[Quickstart →](QUICKSTART.md)**
 | 🎬 | **Replay control** | Scrub a live or recorded run by step. Pause, jump, auto-play. |
 | 💬 | **Targeted ask** | Send a natural-language question to one agent, a group, or the whole town. |
 | 🎛️ | **Real-time intervention** | Inject instructions into the *next* step — the agents read them on their next turn. |
+| ⌨️ | **Command composer** | Type `/ask` or `/intervene`, use `@Name #id` completions, and send operator commands without leaving the map. |
 | 🪄 | **No-code setup wizard** | Browser-based: configure model + scenario, let GOD generate agents and steps, edit, then launch. |
+| 🧬 | **Agent Studio** | Add or edit residents through a map-aware wizard for seed, identity, appearance, personality, routine, and review. |
+| 🧭 | **Map Studio** | Generate or upload a map draft, calibrate locations and collisions, validate it, then publish it as a local map package. |
 | 🧼 | **One-command reset** | Wipe replay data and seed a clean society without leaving the terminal. |
 | 🗺️ | **Pixel town world** | A live tiled map: locations, actions, messages, statuses — every step replay-friendly. |
 | 🧱 | **Single current experiment** | `.env` stores local model/port settings; `.god/current_experiment.json` stores the one active experiment. |
@@ -242,25 +246,41 @@ uv run python scripts/validate_map_package.py custom/maps/<map_id>
 
 The setup wizard will list valid packages without code changes. v1 supports Tiled JSON maps with PNG tilesets and a `Collisions` layer where `0` means walkable. The PKU campus package now ships in the repository at `agentsociety/custom/maps/pku/`. See [docs/MAP_PACKAGES.md](docs/MAP_PACKAGES.md) for the full package contract.
 
+## 🗓️ Updates
+
+Supported feature updates:
+
+- **2026-05-22 · Runtime localization · [#26](https://github.com/XiaoLuoLYG/GOD/pull/26)** — replay, setup, map metadata, locations, actions, statuses, emotions, group labels, and system event templates now switch cleanly between English and Chinese while preserving free-form agent content.
+- **2026-05-23 · Control Room command UI · [#27](https://github.com/XiaoLuoLYG/GOD/pull/27)** — PixelReplay now uses a full-height map with a right-side rail, Summary/Chat/Residents/Live Console tabs, and a map-embedded `/ask` + `/intervene` command composer with mention completion.
+- **2026-05-24 · Agent Studio wizard · [#28](https://github.com/XiaoLuoLYG/GOD/pull/28)** — Agent Builder and Setup drafts share a map-bound Studio flow for seed, identity, appearance, personality, daily setup, review, and structured agent metadata.
+- **2026-05-25 · Strict sprite pipeline · [#29](https://github.com/XiaoLuoLYG/GOD/pull/29)** — Agent Studio can generate validated map-compatible sprites, preserve existing profile text, enforce clean IDs/config sync, and keep generated `Generated_Agent_*.png` files local by default.
+- **2026-05-26 · Agent runtime wiring · [#30](https://github.com/XiaoLuoLYG/GOD/pull/30)** — Agents now use the sames skill runtime consistently across AgentBuilder, setup drafts, imports, applies, and default experiment configs.
+- **2026-05-27 · Map Studio · [#31](https://github.com/XiaoLuoLYG/GOD/pull/31)** — GOD now includes a Map Studio for generating or uploading local map drafts, configuring image generation, calibrating anchors/collisions, validating packages, publishing them, and returning to Setup with the new `map_id` selected.
+
 ## 🛣️ Roadmap
 
 ### ✅ Completed
 
 - [x] 🗺️ **Pluggable map packages** — drop a folder under `agentsociety/custom/maps/<map_id>/`, refresh the wizard, and a new world is selectable. Auto-discovered, validated, hot-swappable. See [`docs/MAP_PACKAGES.md`](docs/MAP_PACKAGES.md).
 - [x] 🏫 **PKU campus map** — the PKU map package is bundled as a first-class map alongside The Ville.
-- [x] 🪄 **No-code setup wizard** — a browser flow that turns a blank machine into a live society, with model setup, built-in experiment choice, and custom experiment publishing.
+- [x] 🪄 **No-code setup wizard** — browser flow for model setup, built-in experiment choice, custom experiment generation/editing, and launch.
 - [x] 🧪 **Scripted experiments** — reproducible experiments ship as plain folders under `quick_experiments/<hypothesis>/<experiment>/`; choosing or publishing one makes it the current experiment.
+- [x] 🎮 **Control Room command rail** — replay controls, resident roster, live console, targeted Ask, and Intervene now live in one map-first operator surface.
+- [x] 🧬 **Agent Studio v1** — map-aware add/edit flow with structured profile metadata, ID validation, setup integration, and sprite generation support.
+- [x] 🧭 **Map Studio v1** — prompt/reference-image map draft generation, anchor and collision calibration, package validation, publishing, and Setup handoff.
+- [x] 🌏 **Bilingual runtime UI** — English/Chinese UI and runtime-owned labels for setup, replay, maps, statuses, actions, and system events.
+- [x] 🔌 **Agent skill-runtime path** — the shipped JiuwenClaw agent adapter now uses the AgentSociety skill runtime as the canonical execution path.
 
 ### 🛣️ Not Yet Done
 
 - [ ] 🤖 **Pluggable agent runtimes** — swap LLM runtimes and persona templates as cleanly as we now swap maps.
-- [ ] 🧪 **Multi-experiment orchestration** — run experiments, control groups, and repeats side-by-side.
+- [ ] 🧪 **Multi-experiment orchestration** — run experiments, control groups, repeats, and ablations side-by-side.
 - [ ] 🗺️ **Live map generation** — maps that evolve with events, repairs, blockages, and crowds.
-- [ ] 🌦️ **Event-responsive worlds** — weather, accidents, festivals, rumors, shortages.
-- [ ] 🌐 **Large-scale simulation** — AgentSociety batching, sharded runs, sampled replay.
-- [ ] 📊 **Experiment evaluation** — cross-run metrics, behavior diffs, intervention analysis.
+- [ ] 🌦️ **Event-responsive worlds** — weather, accidents, festivals, rumors, shortages, repairs, blockages, and crowds that change agent behavior over time.
+- [ ] 🌐 **Large-scale simulation** — AgentSociety batching, sharded runs, sampled replay, and performance-minded replay summaries.
+- [ ] 📊 **Experiment evaluation** — cross-run metrics, behavior diffs, intervention effect analysis.
 - [ ] 📝 **Operator workflow** — per-step notes, tags, bookmarks, key-event summaries.
-- [ ] 🌍 **Hosted demo & scenario sharing** — public demo, experiment and map templates.
+- [ ] 🌍 **Hosted demo & scenario sharing** — public demo, experiment/map templates, and one-click import/export for community scenarios.
 
 Have an idea? [Open an issue or PR](#-contributing).
 

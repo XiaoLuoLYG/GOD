@@ -18,6 +18,7 @@
   <a href="#-核心能力">核心能力</a> ·
   <a href="#%EF%B8%8F-架构">架构</a> ·
   <a href="#-内置实验">内置实验</a> ·
+  <a href="#-更新">更新</a> ·
   <a href="#%EF%B8%8F-roadmap">Roadmap</a> ·
   <a href="CONTRIBUTING.zh-CN.md">参与开发</a> ·
   <a href="README.md">🌏 English</a>
@@ -103,7 +104,10 @@ http://127.0.0.1:5174/pixel-replay/god_town/1
 | 🎬 | **Replay 控制** | 按 step 拖动、暂停、跳转、自动推进，live 或 replay 都行。 |
 | 💬 | **定向提问** | 用自然语言向某个 Agent、某组人或全镇提问。 |
 | 🎛️ | **实时干预** | 给即将执行的 step 注入指令，Agent 下一回合就读得到。 |
+| ⌨️ | **命令输入器** | 在地图上直接输入 `/ask` 或 `/intervene`，用 `@Name #id` 自动补全目标。 |
 | 🪄 | **零代码配置向导** | 浏览器里配置模型 + 剧本，让 GOD 生成 Agent 和 step，编辑后启动。 |
+| 🧬 | **Agent Studio** | 用地图感知的向导新增 / 编辑居民：seed、身份、外貌、性格、日程、review 一步步完成。 |
+| 🧭 | **地图工作台** | 生成或上传地图草稿，校准地点与碰撞层，校验后发布为本地地图包。 |
 | 🧼 | **一键重开** | 一条命令清掉 replay 数据，孵化一座干净的小镇。 |
 | 🗺️ | **像素小镇世界** | 地点、动作、消息、状态都是结构化、replay 友好的。 |
 | 🧱 | **唯一当前实验** | `.env` 只保存模型、API、端口等本机配置；`.god/current_experiment.json` 保存唯一 active 实验。 |
@@ -241,25 +245,40 @@ uv run python scripts/validate_map_package.py custom/maps/<map_id>
 
 配置向导会自动列出所有合法的地图包，完全不用改代码。v1 支持带 PNG tileset 的 Tiled JSON 地图，并要求一个 `Collisions` 层（`0` 表示可走）。PKU 校园地图包现在已经随仓库发布，路径是 `agentsociety/custom/maps/pku/`。完整契约见 [docs/MAP_PACKAGES.zh-CN.md](docs/MAP_PACKAGES.zh-CN.md)。
 
+## 🗓️ 更新
+
+最近的功能更新：
+
+- **2026-05-22 · 运行时本地化 · [#26](https://github.com/XiaoLuoLYG/GOD/pull/26)** —— replay、setup、地图元数据、地点、动作、状态、情绪、群组名和系统事件模板支持 English / 中文切换，同时保留 Agent 自由文本原样。
+- **2026-05-23 · 控制台命令 UI · [#27](https://github.com/XiaoLuoLYG/GOD/pull/27)** —— PixelReplay 改为全高地图 + 右侧 rail，加入 Summary / Chat / Residents / Live Console 标签页，以及地图内 `/ask`、`/intervene` 命令输入器和 mention 自动补全。
+- **2026-05-24 · Agent Studio 向导 · [#28](https://github.com/XiaoLuoLYG/GOD/pull/28)** —— Agent Builder 和 Setup 草稿共用地图绑定的 Studio 流程，覆盖 seed、身份、外貌、性格、日程、review 和结构化 agent metadata。
+- **2026-05-25 · 严格 sprite 管线 · [#29](https://github.com/XiaoLuoLYG/GOD/pull/29)** —— Agent Studio 可以生成经过校验、适配地图的角色 sprite，保留旧 profile 文本，校验 ID / config 同步，并默认把 `Generated_Agent_*.png` 留在本地。
+- **2026-05-26 · Agent runtime 统一 · [#30](https://github.com/XiaoLuoLYG/GOD/pull/30)** —— Agent 在 AgentBuilder、setup 草稿、导入、应用和默认实验配置中走统一的 skill runtime。
+- **2026-05-27 · 地图工作台 · [#31](https://github.com/XiaoLuoLYG/GOD/pull/31)** —— GOD 新增 Map Studio：生成或上传本地地图草稿，配置图片生成，校准地点锚点 / 碰撞层，校验地图包，发布后带着新的 `map_id` 回到 Setup。
+
 ## 🛣️ Roadmap
 
 ### ✅ 已完成
 
 - [x] 🗺️ **可拔插地图包** —— 把一个文件夹丢到 `agentsociety/custom/maps/<map_id>/`，刷新向导即出现新世界。自动发现、自动校验、热插拔。详见 [`docs/MAP_PACKAGES.zh-CN.md`](docs/MAP_PACKAGES.zh-CN.md)。
 - [x] 🏫 **PKU 校园地图** —— PKU 地图包已经作为一等地图随仓库发布，和 The Ville 一起可选。
-- [x] 🪄 **零代码配置向导** —— 浏览器流程：模型配置、内置实验选择、自建实验发布，一台空机器到活生生的小镇。
+- [x] 🪄 **零代码配置向导** —— 浏览器流程：模型配置、内置实验选择、自建实验生成 / 编辑 / 发布，一台空机器到真实的小镇。
 - [x] 🧪 **可复现实验** —— 实验以普通文件夹形式发布，位于 `quick_experiments/<hypothesis>/<experiment>/`。选择或发布一个实验后，它就会成为 current。
+- [x] 🎮 **控制台命令 rail** —— replay 控制、居民列表、Live Console、定向 Ask 和 Intervene 都合并在一个地图优先的操作界面里。
+- [x] 🧬 **Agent Studio v1** —— 地图感知的新增 / 编辑 Agent 流程，包含结构化 profile metadata、ID 校验、Setup 集成和 sprite 生成支持。
+- [x] 🧭 **Map Studio v1** —— prompt / 参考图生成地图草稿，锚点与碰撞层校准，地图包校验、发布，以及返回 Setup 的 handoff。
+- [x] 🌏 **双语运行时 UI** —— setup、replay、地图、状态、动作和系统事件中的产品侧文本支持 English / 中文。
 
 ### 🛣️ 未完成 / 进行中
 
 - [ ] 🤖 **可拔插 Agent 运行时** —— 让 LLM runtime 和 persona 模板能像地图一样干净地替换。
-- [ ] 🧪 **多实验编排** —— 在同一个控制台里跑多个实验、对照组和重复试验。
+- [ ] 🧪 **多实验编排** —— 在同一个控制台里跑实验、对照组、重复试验和 ablation。
 - [ ] 🗺️ **实时地图生成** —— 地图随事件、修缮、阻塞、人群动态演化。
 - [ ] 🌦️ **事件响应世界** —— 天气、事故、节日、谣言、供应短缺。
-- [ ] 🌐 **大规模仿真** —— 接入 AgentSociety 的批量 Agent、分片运行、采样 replay。
-- [ ] 📊 **实验评估** —— 跨实验指标、行为差异、干预效果分析。
-- [ ] 📝 **操作员工作流** —— 每个 step 的笔记、标签、书签、关键事件摘要。
-- [ ] 🌍 **公开 Demo & 场景分享** —— 托管 demo、实验和地图模板。
+- [ ] 🌐 **大规模仿真** —— 接入 AgentSociety 的批量 Agent、分片运行、采样 replay 和性能友好的 replay 摘要。
+- [ ] 📊 **实验评估** —— 跨实验指标、行为差异、干预效果分析和可分享报告。
+- [ ] 📝 **操作员工作流** —— 每个 step 的笔记、标签、书签、保存命令宏和关键事件摘要。
+- [ ] 🌍 **公开 Demo & 场景分享** —— 托管 demo、实验 / 地图模板，以及社区场景的一键导入导出。
 
 有想法？欢迎来 [issue 和 PR](#-参与开发) 聊。
 
