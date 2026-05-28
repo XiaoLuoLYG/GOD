@@ -25,12 +25,13 @@ source_suffix = {
 
 master_doc = "index"
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
-templates_path = ["_templates"]
+DOCS_DIR = Path(__file__).resolve().parent
+templates_path = ["_templates"] if (DOCS_DIR / "_templates").exists() else []
 
 html_theme = "furo"
 html_title = "GOD Developer Docs"
 html_short_title = "GOD Docs"
-html_static_path = ["_static"]
+html_static_path = ["_static"] if (DOCS_DIR / "_static").exists() else []
 
 html_theme_options = {
     "navigation_with_keys": True,
