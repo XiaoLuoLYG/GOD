@@ -72,6 +72,8 @@ cd GOD
 ./scripts/god.sh start
 ```
 
+Windows PowerShell: from the repo root, run `.\scripts\god.cmd start`.
+
 That's it. On first run, the script installs everything, opens a **browser-based setup wizard**, and waits for you. No `.env` editing, no command-line flags, no glue scripts.
 
 <p align="center">
@@ -163,6 +165,8 @@ GOD is intentionally local-first: the control room, backend, runtime bridge, exp
 ./scripts/god.sh tail       # follow logs
 ./scripts/god.sh open       # open the frontend pages in the default browser
 ```
+
+On Windows, replace `./scripts/god.sh` with `.\scripts\god.cmd`.
 
 ## 🧪 Built-in Experiments
 

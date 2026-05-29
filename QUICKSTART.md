@@ -10,10 +10,8 @@ The shortest path from a clean machine to the setup wizard and then a live GOD c
 
 You will need:
 
-- Python 3.11+
-- Node.js & `npm`
-- [`uv`](https://docs.astral.sh/uv/)
-- `screen` (recommended; keeps local services running cleanly)
+- macOS/Linux: Python 3.11+, Node.js & `npm`, [`uv`](https://docs.astral.sh/uv/), and `screen`
+- Windows: PowerShell 5.1+ and `winget`; the startup script installs missing Git, Node.js LTS/npm, and `uv`
 
 macOS:
 
@@ -21,11 +19,7 @@ macOS:
 brew install python node uv screen
 ```
 
-Sanity check:
-
-```bash
-python3 --version && npm --version && uv --version
-```
+If `git clone` is not available on Windows yet, install Git first with `winget install --id Git.Git -e --accept-package-agreements --accept-source-agreements` or download the repository ZIP.
 
 ## 2. Clone
 
@@ -36,8 +30,16 @@ cd GOD
 
 ## 3. Start
 
+macOS/Linux:
+
 ```bash
 ./scripts/god.sh start
+```
+
+Windows PowerShell:
+
+```powershell
+.\scripts\god.cmd start
 ```
 
 `start` is the normal one-command path. It is idempotent, so running it again reuses services that are already up.
@@ -125,3 +127,5 @@ Use `new-run` when the UI shows old replay data or you want a fresh live session
 ./scripts/god.sh tail      # follow logs
 ./scripts/god.sh open      # open the frontend pages in the browser
 ```
+
+On Windows, replace `./scripts/god.sh` with `.\scripts\god.cmd`.

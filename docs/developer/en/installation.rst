@@ -6,10 +6,8 @@ Prerequisites
 
 GOD currently expects:
 
-- Python 3.11 or newer.
-- Node.js and ``npm``.
-- ``uv`` for Python dependency management.
-- ``screen`` on macOS/Linux so local services can stay attached cleanly.
+- macOS/Linux: Python 3.11 or newer, Node.js and ``npm``, ``uv``, and ``screen``.
+- Windows: PowerShell 5.1+ and ``winget``. The PowerShell entrypoint auto-installs missing Git, Node.js LTS/npm, and ``uv``; ``uv`` supplies the managed Python runtime.
 
 On macOS:
 
@@ -35,6 +33,12 @@ The recommended install path is the same as the start path:
 .. code-block:: bash
 
    ./scripts/god.sh start
+
+On Windows PowerShell, use:
+
+.. code-block:: powershell
+
+   .\scripts\god.cmd start
 
 On first run, the script creates ``.env`` from ``.env.example``, installs backend/runtime/frontend dependencies, opens the setup wizard, and waits for model configuration.
 

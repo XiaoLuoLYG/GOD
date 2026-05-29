@@ -6,10 +6,8 @@
 
 GOD 当前需要：
 
-- Python 3.11 或更新版本。
-- Node.js 和 ``npm``。
-- ``uv`` 用于 Python 依赖管理。
-- macOS/Linux 推荐安装 ``screen``，方便本地服务稳定运行。
+- macOS/Linux：Python 3.11 或更新版本、Node.js 和 ``npm``、``uv``，以及 ``screen``。
+- Windows：PowerShell 5.1+ 和 ``winget``。PowerShell 入口会自动补齐缺失的 Git、Node.js LTS/npm 与 ``uv``；Python 运行时由 ``uv`` 管理。
 
 macOS:
 
@@ -35,6 +33,12 @@ macOS:
 .. code-block:: bash
 
    ./scripts/god.sh start
+
+Windows PowerShell 使用：
+
+.. code-block:: powershell
+
+   .\scripts\god.cmd start
 
 首次运行时，脚本会从 ``.env.example`` 创建 ``.env``，安装后端/runtime/前端依赖，打开 setup wizard，并等待你配置模型。
 

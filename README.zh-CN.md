@@ -72,6 +72,8 @@ cd GOD
 ./scripts/god.sh start
 ```
 
+Windows PowerShell：进入仓库根目录后运行 `.\scripts\god.cmd start`。
+
 就这么简单。首次启动会自动装好依赖，打开 **浏览器中的实验配置向导**，然后等你完成。不用改 `.env`、不用命令行参数、不用胶水脚本。
 
 <p align="center">
@@ -162,6 +164,8 @@ GOD 是 local-first：控制台、后端、runtime bridge、实验文件和 repl
 ./scripts/god.sh tail       # 跟随日志
 ./scripts/god.sh open       # 在浏览器里打开前端页面
 ```
+
+Windows 下把 `./scripts/god.sh` 替换成 `.\scripts\god.cmd` 即可。
 
 ## 🧪 内置实验
 

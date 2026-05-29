@@ -10,10 +10,8 @@
 
 需要安装：
 
-- Python 3.11+
-- Node.js 与 `npm`
-- [`uv`](https://docs.astral.sh/uv/)
-- `screen`（推荐，让本地服务稳定跑在后台）
+- macOS/Linux：Python 3.11+、Node.js 与 `npm`、[`uv`](https://docs.astral.sh/uv/) 和 `screen`
+- Windows：PowerShell 5.1+ 和 `winget`；启动脚本会补齐缺失的 Git、Node.js LTS/npm 与 `uv`
 
 macOS：
 
@@ -21,11 +19,7 @@ macOS：
 brew install python node uv screen
 ```
 
-确认环境：
-
-```bash
-python3 --version && npm --version && uv --version
-```
+Windows 如果还不能执行 `git clone`，先运行 `winget install --id Git.Git -e --accept-package-agreements --accept-source-agreements` 安装 Git，或直接下载仓库 ZIP。
 
 ## 2. 克隆
 
@@ -36,8 +30,16 @@ cd GOD
 
 ## 3. 启动
 
+macOS/Linux：
+
 ```bash
 ./scripts/god.sh start
+```
+
+Windows PowerShell：
+
+```powershell
+.\scripts\god.cmd start
 ```
 
 `start` 是日常使用的一键入口；它可以重复执行，已经运行的服务会被复用。
@@ -125,3 +127,5 @@ http://127.0.0.1:5174/pixel-replay/god_town/1
 ./scripts/god.sh tail      # 跟随日志
 ./scripts/god.sh open      # 在浏览器里打开前端页面
 ```
+
+Windows 下把 `./scripts/god.sh` 替换成 `.\scripts\god.cmd` 即可。
