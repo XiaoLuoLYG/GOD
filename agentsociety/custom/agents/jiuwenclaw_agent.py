@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
 import re
 import time
 import uuid
@@ -25,6 +27,9 @@ from agentsociety2.agent.skills.runtime import AgentSkillRuntime
 DEFAULT_JIUWENCLAW_WS_URL = "ws://127.0.0.1:18092"
 DEFAULT_CHANNEL_ID = "agentsociety"
 DEFAULT_MODE = "agent.plan"
+DEFAULT_JIUWENCLAW_REQUEST_CONCURRENCY = 24
+JIUWENCLAW_REQUEST_CONCURRENCY_ENV = "AGENTSOCIETY_JIUWENCLAW_REQUEST_CONCURRENCY"
+logger = logging.getLogger(__name__)
 DEFAULT_COMMON_SKILLS = [
     "routine.daily",
     "social.reply",
@@ -193,7 +198,34 @@ def _contains_latin_text_outside_terms(value: Any, allowed_terms: list[str]) -> 
 class JiuwenClawAgent(AgentBase):
     """AgentSociety2 AgentBase adapter for a running JiuwenClaw AgentServer."""
 
-    _request_lock: ClassVar[asyncio.Lock] = asyncio.Lock()
+    _request_semaphore: ClassVar[asyncio.Semaphore | None] = None
+    _request_semaphore_limit: ClassVar[int | None] = None
+    _request_semaphore_loop: ClassVar[asyncio.AbstractEventLoop | None] = None
+
+    @classmethod
+    def _request_concurrency_limit(cls) -> int:
+        raw_value = os.getenv(JIUWENCLAW_REQUEST_CONCURRENCY_ENV, "").strip()
+        if not raw_value:
+            return DEFAULT_JIUWENCLAW_REQUEST_CONCURRENCY
+        try:
+            value = int(raw_value)
+        except ValueError:
+            return DEFAULT_JIUWENCLAW_REQUEST_CONCURRENCY
+        return max(1, value)
+
+    @classmethod
+    def _request_semaphore_for_current_loop(cls) -> tuple[asyncio.Semaphore, int]:
+        limit = cls._request_concurrency_limit()
+        loop = asyncio.get_running_loop()
+        if (
+            cls._request_semaphore is None
+            or cls._request_semaphore_limit != limit
+            or cls._request_semaphore_loop is not loop
+        ):
+            cls._request_semaphore = asyncio.Semaphore(limit)
+            cls._request_semaphore_limit = limit
+            cls._request_semaphore_loop = loop
+        return cls._request_semaphore, limit
 
     def __init__(
         self,
@@ -1631,19 +1663,41 @@ Initialization example:
             },
         }
 
-        async with self._request_lock:
-            async with self._ws_lock:
-                await self._ensure_connected()
-                await self._ws.send(json.dumps(payload, ensure_ascii=False))
-                try:
-                    response = await asyncio.wait_for(
-                        self._receive_matching_response(request_id),
-                        timeout=self._request_timeout,
-                    )
-                except Exception:
-                    await self._reset_websocket()
-                    raise
-        return self._extract_response_content(response)
+        request_started_at = time.perf_counter()
+        queue_ms = 0.0
+        status = "error"
+        semaphore, concurrency_limit = self._request_semaphore_for_current_loop()
+        try:
+            async with semaphore:
+                queue_ms = (time.perf_counter() - request_started_at) * 1000
+                async with self._ws_lock:
+                    await self._ensure_connected()
+                    await self._ws.send(json.dumps(payload, ensure_ascii=False))
+                    try:
+                        response = await asyncio.wait_for(
+                            self._receive_matching_response(request_id),
+                            timeout=self._request_timeout,
+                        )
+                    except Exception:
+                        await self._reset_websocket()
+                        raise
+                content = self._extract_response_content(response)
+                status = "success"
+                return content
+        finally:
+            total_ms = (time.perf_counter() - request_started_at) * 1000
+            logger.info(
+                "[JiuwenClawAgent] request timing: agent_id=%s request_id=%s "
+                "status=%s queue_ms=%.1f total_ms=%.1f prompt_chars=%s "
+                "concurrency_limit=%s",
+                self.id,
+                request_id,
+                status,
+                queue_ms,
+                total_ms,
+                len(prompt),
+                concurrency_limit,
+            )
 
     async def _ensure_connected(self) -> None:
         if self._ws is not None:

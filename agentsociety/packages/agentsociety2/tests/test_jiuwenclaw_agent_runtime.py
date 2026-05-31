@@ -1,3 +1,4 @@
+import asyncio
 import importlib.util
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +24,19 @@ class _Env:
 
 class _NoRunDirEnv:
     env_modules: list = []
+
+
+class _DummyWebSocket:
+    async def send(self, _payload: str) -> None:
+        return None
+
+
+async def _prepare_agent_for_timed_request(agent, receive_response):
+    async def ensure_connected():
+        agent._ws = _DummyWebSocket()
+
+    agent._ensure_connected = ensure_connected
+    agent._receive_matching_response = receive_response
 
 
 def test_jiuwenclaw_agent_forces_skill_runtime_when_legacy_false(tmp_path):
@@ -114,3 +128,77 @@ def test_jiuwenclaw_agent_accepts_mounted_skill_ids_from_config():
         "class.learn",
         "info.research",
     ]
+
+
+def test_jiuwenclaw_request_concurrency_allows_overlapping_agents(monkeypatch):
+    monkeypatch.setenv("AGENTSOCIETY_JIUWENCLAW_REQUEST_CONCURRENCY", "2")
+    JiuwenClawAgent = _load_jiuwenclaw_agent_class()
+    agents = [
+        JiuwenClawAgent(id=1, name="Agent 1", profile={"name": "Agent 1"}),
+        JiuwenClawAgent(id=2, name="Agent 2", profile={"name": "Agent 2"}),
+    ]
+    active_requests = 0
+    max_active_requests = 0
+
+    async def receive_response(_request_id):
+        nonlocal active_requests, max_active_requests
+        active_requests += 1
+        max_active_requests = max(max_active_requests, active_requests)
+        await anyio.sleep(0.05)
+        active_requests -= 1
+        return {"body": {"result": {"content": "ok"}}}
+
+    async def run_case():
+        for agent in agents:
+            await _prepare_agent_for_timed_request(agent, receive_response)
+
+        results = await asyncio.gather(
+            *(agent._send_jiuwenclaw_request("prompt") for agent in agents)
+        )
+
+        assert results == ["ok", "ok"]
+        assert max_active_requests == 2
+
+    anyio.run(run_case)
+
+
+def test_jiuwenclaw_request_concurrency_can_be_limited_to_one(monkeypatch):
+    monkeypatch.setenv("AGENTSOCIETY_JIUWENCLAW_REQUEST_CONCURRENCY", "1")
+    JiuwenClawAgent = _load_jiuwenclaw_agent_class()
+    agents = [
+        JiuwenClawAgent(id=1, name="Agent 1", profile={"name": "Agent 1"}),
+        JiuwenClawAgent(id=2, name="Agent 2", profile={"name": "Agent 2"}),
+    ]
+    active_requests = 0
+    max_active_requests = 0
+
+    async def receive_response(_request_id):
+        nonlocal active_requests, max_active_requests
+        active_requests += 1
+        max_active_requests = max(max_active_requests, active_requests)
+        await anyio.sleep(0.05)
+        active_requests -= 1
+        return {"body": {"result": {"content": "ok"}}}
+
+    async def run_case():
+        for agent in agents:
+            await _prepare_agent_for_timed_request(agent, receive_response)
+
+        results = await asyncio.gather(
+            *(agent._send_jiuwenclaw_request("prompt") for agent in agents)
+        )
+
+        assert results == ["ok", "ok"]
+        assert max_active_requests == 1
+
+    anyio.run(run_case)
+
+
+def test_jiuwenclaw_request_concurrency_invalid_env_falls_back_to_default(monkeypatch):
+    JiuwenClawAgent = _load_jiuwenclaw_agent_class()
+
+    monkeypatch.setenv("AGENTSOCIETY_JIUWENCLAW_REQUEST_CONCURRENCY", "not-an-int")
+    assert JiuwenClawAgent._request_concurrency_limit() == 24
+
+    monkeypatch.setenv("AGENTSOCIETY_JIUWENCLAW_REQUEST_CONCURRENCY", "0")
+    assert JiuwenClawAgent._request_concurrency_limit() == 1
