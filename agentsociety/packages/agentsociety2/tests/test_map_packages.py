@@ -168,6 +168,22 @@ def test_empty_character_root_warning_uses_role_image_language(tmp_path: Path) -
     assert all("sprite" not in message.lower() for message in validation.warnings)
 
 
+def test_map_package_without_character_root_is_valid_for_agent_pack_decoupling(tmp_path: Path) -> None:
+    package = _write_package(tmp_path / "agentsociety")
+    (package / "characters" / "Resident.png").unlink()
+    (package / "characters").rmdir()
+    manifest = package / "map.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("character_root: characters\n", ""),
+        encoding="utf-8",
+    )
+
+    validation = map_packages.validate_manifest_path(manifest)
+
+    assert validation.ok is True
+    assert all("character_root" not in message for message in validation.warnings)
+
+
 def test_missing_map_id_falls_back_to_default(tmp_path: Path) -> None:
     agentsociety_root = tmp_path / "agentsociety"
     package = _write_package(agentsociety_root)

@@ -240,8 +240,8 @@ const cloneDraft = (draft: DraftPayload): DraftPayload => JSON.parse(JSON.string
 const BASICS_STORAGE_KEY = 'god.setup.basics';
 
 const defaultBasicsZh: BasicsForm = {
-    title: '斯坦福监狱实验适配模拟',
-    background: '请生成一个安全、边界清晰的社会角色压力模拟：参与者被分配为管理者、观察者、普通参与者等角色，重点观察权力、规则、协作和情绪变化，不允许羞辱、伤害或强迫行为。',
+    title: 'Virtual Eden Civic Morning',
+    background: '请生成一个明亮、边界清晰的虚拟小镇晨间协作实验：居民、店主、学生和协调员围绕公共通知、日常任务和互助事件行动，重点观察信息传播、协作和情绪变化。',
     agent_count: 10,
     map_id: 'the_ville',
     language: 'zh',
@@ -253,8 +253,8 @@ const defaultBasicsZh: BasicsForm = {
 };
 
 const defaultBasicsEn: BasicsForm = {
-    title: 'Stanford Prison Adaptation',
-    background: 'Generate a safe, bounded social role-pressure simulation. Participants are assigned roles such as coordinators, observers, and ordinary participants. Focus on power, rules, cooperation, and emotional changes without humiliation, harm, threats, or coercion.',
+    title: 'Virtual Eden Civic Morning',
+    background: 'Generate a bright, bounded virtual-town civic morning. Residents, shopkeepers, students, and coordinators respond to public notices, daily tasks, and mutual-aid events. Focus on information flow, cooperation, and emotional changes.',
     agent_count: 10,
     map_id: 'the_ville',
     language: 'en',

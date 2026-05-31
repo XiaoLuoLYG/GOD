@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PKU Public Situation Replay - GOD</title>
+    <meta name="description" content="Watch the public PKU Public Situation replay archive.">
+    <link rel="stylesheet" href="../../assets/site.css?v=20260531f">
+  </head>
+  <body class="replay-page" data-site-root="../../" data-replay-slug="pku-public-situation" data-data-root="../../public-data/replays/pku-public-situation/">
+    <header class="site-header">
+      <nav class="nav" aria-label="Main navigation">
+        <a class="brand" href="../../index.html"><img src="../../assets/logo_no_bg.png" alt="">GOD</a>
+        <div class="nav-links">
+          <a data-nav href="../../replays/">Replays</a>
+          <a data-nav href="../../map-packs/">Map Packs</a>
+          <a data-nav href="../../agent-packs/">Agent Packs</a>
+          <a data-nav href="../../experiments/">Experiments</a>
+          <a class="nav-cta" href="https://github.com/XiaoLuoLYG/GOD">GitHub</a>
+        </div>
+      </nav>
+    </header>
+
+    <main data-replay-viewer>
+      <section class="replay-hero">
+        <p class="mini-label" data-replay-kicker>Replay</p>
+        <h1 data-replay-title>PKU Public Situation</h1>
+        <p class="hero-line" data-replay-summary>Loading replay...</p>
+      </section>
+
+      <section class="replay-shell">
+        <div class="replay-stage">
+          <div class="map-toolbar">
+            <strong data-map-title>Map</strong>
+            <span class="status-pill" data-replay-status>Loading</span>
+          </div>
+          <div class="map-wrap">
+            <canvas data-map-canvas width="1200" height="800"></canvas>
+          </div>
+          <div class="timeline-controls">
+            <button class="button button--small" type="button" data-play-toggle>Play</button>
+            <input type="range" min="0" max="0" value="0" data-step-range aria-label="Replay step">
+            <strong data-step-label>Step 0</strong>
+          </div>
+        </div>
+
+        <aside class="replay-panel">
+          <div class="panel-section">
+            <h2>Downloads</h2>
+            <div class="download-list" data-download-list></div>
+          </div>
+          <div class="panel-section">
+            <h2>Agents</h2>
+            <div class="agent-list" data-agent-list></div>
+          </div>
+          <div class="panel-section">
+            <h2>Operator Trace</h2>
+            <div class="command-list" data-command-list></div>
+          </div>
+        </aside>
+      </section>
+    </main>
+
+    <script src="../../assets/replay-viewer.js?v=20260531b"></script>
+  </body>
+</html>

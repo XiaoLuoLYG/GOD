@@ -11,6 +11,7 @@ import {
     Popconfirm,
     Radio,
     Row,
+    Select,
     Space,
     Table,
     Tag,
@@ -73,6 +74,38 @@ type ImportPreview = {
     valid_count: number;
     invalid_count: number;
 };
+
+type AgentPackSprite = {
+    path: string;
+    name?: string;
+    frame_width?: number;
+    frame_height?: number;
+};
+
+type AgentPackAgent = {
+    id: string;
+    name: string;
+    profile?: Record<string, any>;
+    runtime?: {
+        agent_type?: string;
+        kwargs?: Record<string, any>;
+    };
+    sprite?: AgentPackSprite;
+};
+
+type AgentPackSummary = {
+    pack_id: string;
+    display_name: string;
+    scope: 'global' | 'map';
+    map_id?: string | null;
+    agents: AgentPackAgent[];
+};
+
+const agentPackSelectionKey = (pack: AgentPackSummary) => JSON.stringify({
+    scope: pack.scope,
+    map_id: pack.map_id || null,
+    pack_id: pack.pack_id,
+});
 
 type AgentBuilderPanelProps = {
     initialWorkspacePath?: string;
@@ -162,6 +195,10 @@ const getAgentName = (agent: AgentRecord) => {
 const getEnvModule = (config: InitConfigPayload | null) => config?.env_modules?.[0];
 
 const stringValue = (value: unknown) => String(value || '').trim();
+
+const basename = (value: string) => value.split('/').filter(Boolean).pop() || value;
+
+const stem = (value: string) => basename(value).replace(/\.[^.]+$/, '');
 
 const storableCharacterAsset = (value: unknown): UnknownRecord | undefined => {
     if (!isRecord(value)) return undefined;
@@ -420,6 +457,11 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
     const [importContent, setImportContent] = useState('');
     const [importMode, setImportMode] = useState<'append' | 'replace'>('append');
     const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
+    const [agentPackModalOpen, setAgentPackModalOpen] = useState(false);
+    const [agentPacks, setAgentPacks] = useState<AgentPackSummary[]>([]);
+    const [agentPacksLoading, setAgentPacksLoading] = useState(false);
+    const [selectedAgentPackId, setSelectedAgentPackId] = useState<string>();
+    const [agentPackImportMode, setAgentPackImportMode] = useState<'append' | 'replace'>('append');
     const [form] = Form.useForm<AgentFormValues>();
 
     const agents = config?.agents ?? EMPTY_AGENTS;
@@ -432,6 +474,14 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
         persona: t('agentBuilder.defaults.persona'),
         goal: t('agentBuilder.defaults.goal'),
     }), [t]);
+    const agentPackOptions = useMemo(() => agentPacks.map((pack) => ({
+        value: agentPackSelectionKey(pack),
+        label: `${pack.display_name || pack.pack_id} · ${pack.agents.length} · ${pack.scope === 'map' ? mapId : 'global'}`,
+    })), [agentPacks, mapId]);
+    const selectedAgentPack = useMemo(
+        () => agentPacks.find((pack) => agentPackSelectionKey(pack) === selectedAgentPackId),
+        [agentPacks, selectedAgentPackId],
+    );
 
     const endpointBase = `/api/v1/experiment-configs/${encodeURIComponent(hypothesisId)}/${encodeURIComponent(experimentId)}`;
     const query = `workspace_path=${encodeURIComponent(workspacePath)}`;
@@ -496,6 +546,40 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
         // Auto-load is only intended for the initial embedded mount.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [autoLoad]);
+
+    useEffect(() => {
+        if (!agentPackModalOpen || !config) return;
+        let cancelled = false;
+        setAgentPacksLoading(true);
+        fetchCustom(`/api/v1/god/agent-packs?map_id=${encodeURIComponent(mapId)}`)
+            .then(async (response) => {
+                if (!response.ok) throw new Error(await response.text());
+                return response.json();
+            })
+            .then((payload) => {
+                if (cancelled) return;
+                const packs = Array.isArray(payload.agent_packs) ? payload.agent_packs : [];
+                setAgentPacks(packs);
+                setSelectedAgentPackId((current) => (
+                    current && packs.some((pack: AgentPackSummary) => agentPackSelectionKey(pack) === current)
+                        ? current
+                        : packs[0] ? agentPackSelectionKey(packs[0]) : undefined
+                ));
+            })
+            .catch((error) => {
+                if (!cancelled) {
+                    setAgentPacks([]);
+                    setSelectedAgentPackId(undefined);
+                    message.warning(t('agentBuilder.import.agentPackLoadFailed', { error: error instanceof Error ? error.message : String(error) }));
+                }
+            })
+            .finally(() => {
+                if (!cancelled) setAgentPacksLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [agentPackModalOpen, config, mapId, t]);
 
     const persistConfig = async (targetConfig: InitConfigPayload | null = config) => {
         if (!targetConfig) return false;
@@ -594,6 +678,119 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
             };
         });
         return { ...baseConfig, agents: nextAgents, env_modules: envModules };
+    };
+
+    const agentPackAssetUrl = (pack: AgentPackSummary, sprite: AgentPackSprite) => {
+        const mapParam = pack.scope === 'map' && pack.map_id
+            ? `?map_id=${encodeURIComponent(pack.map_id)}`
+            : '';
+        return `/api/v1/god/agent-packs/${encodeURIComponent(pack.pack_id)}/assets/${sprite.path}${mapParam}`;
+    };
+
+    const buildAgentFromPack = (
+        pack: AgentPackSummary,
+        packAgent: AgentPackAgent,
+        nextId: number,
+    ): { agent: AgentRecord; initialLocation: string } => {
+        const profile = { ...(packAgent.profile || {}) };
+        const knownLocations = new Set(mapLocations.map((location) => location.id));
+        const routine = asRecord(profile.routine);
+        const rawInitialLocation = stringValue(routine.initial_location);
+        const initialLocation = knownLocations.has(rawInitialLocation)
+            ? rawInitialLocation
+            : mapLocations[0]?.id || 'park';
+        profile.routine = {
+            ...routine,
+            initial_location: initialLocation,
+        };
+        profile.name = stringValue(profile.name || packAgent.name) || `Agent ${nextId}`;
+        profile.agent_pack = {
+            pack_id: pack.pack_id,
+            agent_id: packAgent.id,
+            scope: pack.scope,
+            map_id: pack.map_id || undefined,
+        };
+        if (packAgent.sprite?.path) {
+            const filename = basename(packAgent.sprite.path);
+            const spriteName = packAgent.sprite.name || stem(filename);
+            const source = {
+                agent_pack: pack.pack_id,
+                scope: pack.scope,
+                map_id: pack.map_id || undefined,
+            };
+            profile.appearance = {
+                ...asRecord(profile.appearance),
+                character_asset: {
+                    sprite_name: spriteName,
+                    filename,
+                    image_url: agentPackAssetUrl(pack, packAgent.sprite),
+                    frame_width: Number(packAgent.sprite.frame_width || 32),
+                    frame_height: Number(packAgent.sprite.frame_height || 32),
+                    source,
+                },
+                character_sprite: spriteName,
+                character_sprite_filename: filename,
+                character_sprite_source: source,
+            };
+        }
+        const runtime = asRecord(packAgent.runtime);
+        const runtimeKwargs = { ...asRecord(runtime.kwargs) };
+        delete runtimeKwargs.id;
+        delete runtimeKwargs.name;
+        delete runtimeKwargs.profile;
+        const agent = normalizeJiuwenRuntimeAgent({
+            agent_id: nextId,
+            agent_type: stringValue(runtime.agent_type) || findDefaultAgentType(agentClasses),
+            kwargs: {
+                ...runtimeKwargs,
+                id: nextId,
+                name: String(profile.name),
+                profile: normalizeStudioProfile(profile, mapId, initialLocation),
+            },
+        });
+        return { agent, initialLocation };
+    };
+
+    const importSelectedAgentPack = async () => {
+        if (!config || !selectedAgentPack) {
+            message.warning(t('agentBuilder.import.agentPackRequired'));
+            return;
+        }
+        const startId = agentPackImportMode === 'replace'
+            ? 1
+            : (agents.length ? Math.max(...agents.map((agent) => agent.agent_id)) + 1 : 1);
+        const imported = selectedAgentPack.agents.map((packAgent, index) => (
+            buildAgentFromPack(selectedAgentPack, packAgent, startId + index)
+        ));
+        const importedAgents = imported.map((item) => item.agent);
+        const nextAgents = agentPackImportMode === 'replace'
+            ? importedAgents
+            : [...agents, ...importedAgents];
+        const importedLocations = Object.fromEntries(
+            imported.map((item) => [String(item.agent.agent_id), item.initialLocation])
+        );
+        const baseConfig = syncEnvForAgents(config, nextAgents);
+        const nextConfig = {
+            ...baseConfig,
+            env_modules: baseConfig.env_modules.map((module, index) => index === 0 ? {
+                ...module,
+                kwargs: {
+                    ...module.kwargs,
+                    initial_locations: {
+                        ...asRecord(module.kwargs.initial_locations),
+                        ...importedLocations,
+                    },
+                },
+            } : module),
+        };
+        if (autoSaveOnAgentSave) {
+            if (!(await persistConfig(nextConfig))) return;
+            await onSaved?.();
+        } else {
+            setConfig(nextConfig);
+        }
+        setAgentPackModalOpen(false);
+        message.success(t('agentBuilder.messages.imported', { count: importedAgents.length }));
     };
 
     const upsertAgent = async (agent: AgentRecord, meta?: AgentEditorSaveMeta) => {
@@ -830,6 +1027,9 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                         <Button icon={<ImportOutlined />} onClick={() => setImportModalOpen(true)} disabled={!config}>
                             {t('agentBuilder.actions.batchImport')}
                         </Button>
+                        <Button icon={<ImportOutlined />} onClick={() => setAgentPackModalOpen(true)} disabled={!config}>
+                            {t('agentBuilder.actions.importAgentPack')}
+                        </Button>
                         <Tag>{t('agentBuilder.messages.agentCount', { count: agents.length })}</Tag>
                     </Space>
 
@@ -939,6 +1139,36 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                             )}
                         />
                     )}
+                </Space>
+            </Modal>
+
+            <Modal
+                title={t('agentBuilder.import.agentPackTitle')}
+                open={agentPackModalOpen}
+                onCancel={() => setAgentPackModalOpen(false)}
+                footer={[
+                    <Button key="cancel" onClick={() => setAgentPackModalOpen(false)}>{t('agentBuilder.actions.cancel')}</Button>,
+                    <Button key="import" type="primary" disabled={!selectedAgentPack} onClick={importSelectedAgentPack}>
+                        {t('agentBuilder.actions.importAgentPack')}
+                    </Button>,
+                ]}
+                destroyOnHidden
+            >
+                <Space direction="vertical" style={{ width: '100%' }} size={12}>
+                    <Alert type="info" showIcon message={t('agentBuilder.import.agentPackHelp')} />
+                    <Select
+                        loading={agentPacksLoading}
+                        value={selectedAgentPackId}
+                        onChange={setSelectedAgentPackId}
+                        options={agentPackOptions}
+                        placeholder={agentPackOptions.length ? t('agentBuilder.import.agentPackPlaceholder') : t('agentBuilder.import.agentPackEmpty')}
+                        showSearch
+                        optionFilterProp="label"
+                    />
+                    <Radio.Group value={agentPackImportMode} onChange={(event) => setAgentPackImportMode(event.target.value)}>
+                        <Radio.Button value="append">{t('agentBuilder.import.append')}</Radio.Button>
+                        <Radio.Button value="replace">{t('agentBuilder.import.replace')}</Radio.Button>
+                    </Radio.Group>
                 </Space>
             </Modal>
         </>

@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from PIL import Image, UnidentifiedImageError
 
 from agentsociety2.config import extract_json
+from agentsociety2.backend.services import agent_packs as agent_pack_service
 from agentsociety2.backend.services.map_packages import (
     DEFAULT_MAP_ID,
     MapPackage,
@@ -271,6 +272,13 @@ class AgentStudioGenerateResponse(BaseModel):
 class CompleteRoleVisualsRequest(BaseModel):
     draft: dict[str, Any]
     image_config: dict[str, Any] = Field(default_factory=dict)
+
+
+class SaveAgentPackRequest(BaseModel):
+    pack_id: str
+    display_name: str | None = None
+    agent: dict[str, Any]
+    initial_location: str | None = None
 
 
 class CompleteRoleVisualResult(BaseModel):
@@ -1000,7 +1008,11 @@ def _agent_studio_response(request: AgentStudioGenerateRequest) -> AgentStudioGe
     )
 
 
-def _agent_studio_character_root(package: MapPackage) -> Path:
+def _agent_studio_draft_character_root() -> Path:
+    return agent_pack_service.draft_character_root(_map_service_root())
+
+
+def _map_character_root(package: MapPackage) -> Path:
     raw = str(package.manifest.get("character_root") or "characters").strip() or "characters"
     root = safe_resolve(package.manifest_path.parent, raw, package.package_path)
     root.mkdir(parents=True, exist_ok=True)
@@ -1008,7 +1020,7 @@ def _agent_studio_character_root(package: MapPackage) -> Path:
 
 
 def _character_asset_url(map_id: str, filename: str) -> str:
-    return f"/api/v1/god/setup/agent-studio/characters/{quote(map_id)}/{quote(filename)}"
+    return f"/api/v1/god/setup/agent-studio/draft-characters/{quote(filename)}"
 
 
 def _sanitize_model_error(text: str, api_key: str) -> str:
@@ -1211,7 +1223,7 @@ async def _generate_agent_sprite_asset(
 ) -> AgentStudioCharacterAsset:
     resolved_config = _resolve_image_config(image_config)
     package = _load_map_package(map_id)
-    root = _agent_studio_character_root(package)
+    root = _agent_studio_draft_character_root()
 
     api_key = resolved_config["IMAGE_GEN_API_KEY"].strip()
     api_base = resolved_config.get("IMAGE_GEN_API_BASE", IMAGE_ENV_DEFAULTS["IMAGE_GEN_API_BASE"]).strip()
@@ -2120,18 +2132,44 @@ async def generate_agent_studio_character(
     )
 
 
+@router.get("/agent-studio/draft-characters/{character_name}")
+async def get_agent_studio_draft_character_asset(
+    character_name: str,
+) -> FileResponse:
+    root = _agent_studio_draft_character_root()
+    safe_name = Path(character_name).name
+    for candidate in (root / safe_name, root / f"{safe_name}.png"):
+        if candidate.exists() and candidate.is_file():
+            return FileResponse(candidate)
+    raise HTTPException(status_code=404, detail=f"Draft character asset not found: {character_name}")
+
+
 @router.get("/agent-studio/characters/{map_id}/{character_name}")
 async def get_agent_studio_character_asset(
     map_id: str,
     character_name: str,
 ) -> FileResponse:
     package = _load_map_package(map_id)
-    root = _agent_studio_character_root(package)
+    root = _map_character_root(package)
     safe_name = Path(character_name).name
     for candidate in (root / safe_name, root / f"{safe_name}.png"):
         if candidate.exists() and candidate.is_file():
             return FileResponse(candidate)
     raise HTTPException(status_code=404, detail=f"Character asset not found: {character_name}")
+
+
+@router.post("/agent-studio/save-agent-pack")
+async def save_agent_studio_agent_pack(request: SaveAgentPackRequest) -> dict[str, Any]:
+    pack = agent_pack_service.save_agent_pack_from_agent(
+        root=_map_service_root(),
+        pack_id=request.pack_id,
+        display_name=request.display_name or request.pack_id,
+        agent=request.agent,
+        initial_location=request.initial_location,
+    )
+    if not pack.validation.ok:
+        raise HTTPException(status_code=400, detail=pack.validation.as_dict())
+    return agent_pack_service.agent_pack_summary(pack)
 
 
 @router.post("/agent-studio/complete-role-visuals", response_model=CompleteRoleVisualsResponse)
