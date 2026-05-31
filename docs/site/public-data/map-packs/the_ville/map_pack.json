@@ -1,0 +1,1595 @@
+{
+  "schema_version": 1,
+  "pack_id": "the_ville",
+  "map_id": "the_ville",
+  "display_name": "维尔小镇像素地图",
+  "localized": {
+    "en": {
+      "display_name": "The Ville Pixel Map"
+    },
+    "zh": {
+      "display_name": "维尔小镇像素地图"
+    }
+  },
+  "tile_size": 32,
+  "width": 140,
+  "height": 100,
+  "tiled_map_url": "tiled-map.json",
+  "preview_url": null,
+  "map_url": "map.json",
+  "locations": [
+    {
+      "id": "home",
+      "name": "家",
+      "aliases": [
+        "home",
+        "house",
+        "apartment",
+        "住所",
+        "Isabella Rodriguez's apartment"
+      ],
+      "localized": {
+        "en": {
+          "name": "Home"
+        },
+        "zh": {
+          "name": "家"
+        }
+      },
+      "anchor_tile": {
+        "x": 77,
+        "y": 15
+      },
+      "scene_type": "home",
+      "bounds": {
+        "x": 71,
+        "y": 13,
+        "w": 14,
+        "h": 6
+      },
+      "interaction_ids": [
+        "cook_meal",
+        "eat_at_home",
+        "sleep_at_home",
+        "relax_at_home",
+        "tidy_home",
+        "read_at_home",
+        "work_from_home",
+        "video_call_family",
+        "water_plants"
+      ],
+      "visual_asset_url": null
+    },
+    {
+      "id": "school",
+      "name": "学校教室",
+      "aliases": [
+        "school",
+        "classroom",
+        "教室",
+        "Oak Hill College"
+      ],
+      "localized": {
+        "en": {
+          "name": "School Classroom"
+        },
+        "zh": {
+          "name": "学校教室"
+        }
+      },
+      "anchor_tile": {
+        "x": 111,
+        "y": 24
+      },
+      "scene_type": "school",
+      "bounds": {
+        "x": 108,
+        "y": 19,
+        "w": 8,
+        "h": 11
+      },
+      "interaction_ids": [
+        "attend_class",
+        "teach_class",
+        "study_after_class",
+        "prepare_lesson",
+        "grade_homework",
+        "hold_office_hours",
+        "school_meeting"
+      ],
+      "visual_asset_url": null
+    },
+    {
+      "id": "library",
+      "name": "学校图书馆",
+      "aliases": [
+        "library",
+        "图书馆",
+        "Oak Hill College library"
+      ],
+      "localized": {
+        "en": {
+          "name": "School Library"
+        },
+        "zh": {
+          "name": "学校图书馆"
+        }
+      },
+      "anchor_tile": {
+        "x": 122,
+        "y": 24
+      },
+      "scene_type": "library",
+      "bounds": {
+        "x": 118,
+        "y": 19,
+        "w": 7,
+        "h": 11
+      },
+      "interaction_ids": [
+        "read_book",
+        "study_library",
+        "research_topic",
+        "borrow_book",
+        "return_book",
+        "quiet_work"
+      ],
+      "visual_asset_url": null
+    },
+    {
+      "id": "cafe",
+      "name": "霍布斯咖啡馆",
+      "aliases": [
+        "cafe",
+        "café",
+        "coffee shop",
+        "咖啡馆",
+        "Hobbs Cafe"
+      ],
+      "localized": {
+        "en": {
+          "name": "Hobbs Cafe"
+        },
+        "zh": {
+          "name": "霍布斯咖啡馆"
+        }
+      },
+      "anchor_tile": {
+        "x": 77,
+        "y": 22
+      },
+      "scene_type": "cafe",
+      "bounds": {
+        "x": 72,
+        "y": 19,
+        "w": 12,
+        "h": 8
+      },
+      "interaction_ids": [
+        "eat_light_meal",
+        "chat_over_coffee",
+        "work_cafe_shift",
+        "order_coffee",
+        "take_takeaway",
+        "casual_meetup",
+        "tidy_cafe"
+      ],
+      "visual_asset_url": null
+    },
+    {
+      "id": "park",
+      "name": "约翰逊公园",
+      "aliases": [
+        "park",
+        "小公园",
+        "公园",
+        "Johnson Park"
+      ],
+      "localized": {
+        "en": {
+          "name": "Johnson Park"
+        },
+        "zh": {
+          "name": "约翰逊公园"
+        }
+      },
+      "anchor_tile": {
+        "x": 28,
+        "y": 46
+      },
+      "scene_type": "park",
+      "bounds": {
+        "x": 21,
+        "y": 41,
+        "w": 15,
+        "h": 11
+      },
+      "interaction_ids": [
+        "take_walk",
+        "meet_friend",
+        "rest_on_bench",
+        "coordinate_group",
+        "morning_exercise",
+        "bird_watch",
+        "picnic",
+        "public_announcement"
+      ],
+      "visual_asset_url": null
+    },
+    {
+      "id": "supply_store",
+      "name": "哈维橡树供给店",
+      "aliases": [
+        "supply store",
+        "supply_store",
+        "hardware store",
+        "供给店",
+        "物资店",
+        "Harvey Oak Supply Store"
+      ],
+      "localized": {
+        "en": {
+          "name": "Harvey Oak Supply Store"
+        },
+        "zh": {
+          "name": "哈维橡树供给店"
+        }
+      },
+      "anchor_tile": {
+        "x": 63,
+        "y": 48
+      },
+      "scene_type": "supply_store",
+      "bounds": {
+        "x": 57,
+        "y": 42,
+        "w": 14,
+        "h": 12
+      },
+      "interaction_ids": [
+        "inspect_supplies",
+        "prepare_kit",
+        "repair_tools",
+        "restock_shelves",
+        "customer_service",
+        "lend_tools"
+      ],
+      "visual_asset_url": null
+    },
+    {
+      "id": "market",
+      "name": "柳树市场",
+      "aliases": [
+        "market",
+        "shop",
+        "store",
+        "grocery",
+        "商店",
+        "市场",
+        "The Willows Market and Pharmacy"
+      ],
+      "localized": {
+        "en": {
+          "name": "The Willows Market"
+        },
+        "zh": {
+          "name": "柳树市场"
+        }
+      },
+      "anchor_tile": {
+        "x": 84,
+        "y": 47
+      },
+      "scene_type": "market",
+      "bounds": {
+        "x": 75,
+        "y": 42,
+        "w": 19,
+        "h": 12
+      },
+      "interaction_ids": [
+        "buy_food",
+        "work_shop_shift",
+        "restock_vegetables",
+        "haggle_price",
+        "deliver_order",
+        "chat_with_regular"
+      ],
+      "visual_asset_url": null
+    },
+    {
+      "id": "pharmacy",
+      "name": "柳树药房",
+      "aliases": [
+        "pharmacy",
+        "药房",
+        "药店",
+        "medicine shelf",
+        "The Willows Pharmacy"
+      ],
+      "localized": {
+        "en": {
+          "name": "The Willows Pharmacy"
+        },
+        "zh": {
+          "name": "柳树药房"
+        }
+      },
+      "anchor_tile": {
+        "x": 76,
+        "y": 47
+      },
+      "scene_type": "pharmacy",
+      "bounds": {
+        "x": 75,
+        "y": 42,
+        "w": 19,
+        "h": 12
+      },
+      "interaction_ids": [
+        "buy_medicine",
+        "pharmacy_consultation",
+        "refill_prescription",
+        "blood_pressure_check",
+        "organize_medicine_shelf",
+        "home_visit_prep"
+      ],
+      "visual_asset_url": null
+    },
+    {
+      "id": "pub",
+      "name": "玫瑰王冠酒馆",
+      "aliases": [
+        "pub",
+        "bar",
+        "tavern",
+        "酒馆",
+        "The Rose and Crown Pub"
+      ],
+      "localized": {
+        "en": {
+          "name": "The Rose and Crown Pub"
+        },
+        "zh": {
+          "name": "玫瑰王冠酒馆"
+        }
+      },
+      "anchor_tile": {
+        "x": 57,
+        "y": 23
+      },
+      "scene_type": "pub",
+      "bounds": {
+        "x": 53,
+        "y": 20,
+        "w": 10,
+        "h": 7
+      },
+      "interaction_ids": [
+        "socialize_at_pub",
+        "eat_pub_meal",
+        "watch_match",
+        "evening_chat",
+        "host_event"
+      ],
+      "visual_asset_url": null
+    },
+    {
+      "id": "dorm",
+      "name": "橡树山学院宿舍",
+      "aliases": [
+        "dorm",
+        "dormitory",
+        "college dorm",
+        "宿舍",
+        "Dorm for Oak Hill College"
+      ],
+      "localized": {
+        "en": {
+          "name": "Oak Hill College Dormitory"
+        },
+        "zh": {
+          "name": "橡树山学院宿舍"
+        }
+      },
+      "anchor_tile": {
+        "x": 119,
+        "y": 46
+      },
+      "scene_type": "dorm",
+      "bounds": {
+        "x": 105,
+        "y": 31,
+        "w": 29,
+        "h": 32
+      },
+      "interaction_ids": [
+        "rest_at_dorm",
+        "eat_at_dorm",
+        "study_in_dorm",
+        "common_room_hangout",
+        "video_call_home"
+      ],
+      "visual_asset_url": null
+    }
+  ],
+  "interactions": [
+    {
+      "id": "cook_meal",
+      "name": "做饭",
+      "description": "在家准备一顿普通饭菜。",
+      "localized": {
+        "en": {
+          "name": "Cook Meal",
+          "description": "Prepare a simple meal at home."
+        },
+        "zh": {
+          "name": "做饭",
+          "description": "在家准备一顿普通饭菜。"
+        }
+      },
+      "allowed_location_ids": [
+        "home"
+      ]
+    },
+    {
+      "id": "eat_at_home",
+      "name": "在家吃饭",
+      "description": "在家吃饭并恢复日常节奏。",
+      "localized": {
+        "en": {
+          "name": "Eat at Home",
+          "description": "Eat at home and return to the daily rhythm."
+        },
+        "zh": {
+          "name": "在家吃饭",
+          "description": "在家吃饭并恢复日常节奏。"
+        }
+      },
+      "allowed_location_ids": [
+        "home"
+      ]
+    },
+    {
+      "id": "sleep_at_home",
+      "name": "睡觉",
+      "description": "在家睡觉或午休。",
+      "localized": {
+        "en": {
+          "name": "Sleep",
+          "description": "Sleep at home or take a short nap."
+        },
+        "zh": {
+          "name": "睡觉",
+          "description": "在家睡觉或午休。"
+        }
+      },
+      "allowed_location_ids": [
+        "home"
+      ]
+    },
+    {
+      "id": "relax_at_home",
+      "name": "居家休息",
+      "description": "在家休息、整理物品或做轻松活动。",
+      "localized": {
+        "en": {
+          "name": "Relax at Home",
+          "description": "Rest, organize belongings, or do a light activity at home."
+        },
+        "zh": {
+          "name": "居家休息",
+          "description": "在家休息、整理物品或做轻松活动。"
+        }
+      },
+      "allowed_location_ids": [
+        "home"
+      ]
+    },
+    {
+      "id": "attend_class",
+      "name": "上课",
+      "description": "作为学生在 Oak Hill College 教室上课。",
+      "localized": {
+        "en": {
+          "name": "Attend Class",
+          "description": "Attend class as a student in an Oak Hill College classroom."
+        },
+        "zh": {
+          "name": "上课",
+          "description": "作为学生在 Oak Hill College 教室上课。"
+        }
+      },
+      "allowed_location_ids": [
+        "school"
+      ]
+    },
+    {
+      "id": "teach_class",
+      "name": "教书",
+      "description": "作为老师在 Oak Hill College 教室教课。",
+      "localized": {
+        "en": {
+          "name": "Teach Class",
+          "description": "Teach a class in an Oak Hill College classroom."
+        },
+        "zh": {
+          "name": "教书",
+          "description": "作为老师在 Oak Hill College 教室教课。"
+        }
+      },
+      "allowed_location_ids": [
+        "school"
+      ]
+    },
+    {
+      "id": "study_after_class",
+      "name": "课后学习",
+      "description": "在学校复习、备课或完成作业。",
+      "localized": {
+        "en": {
+          "name": "Study After Class",
+          "description": "Review, prepare lessons, or finish homework at school."
+        },
+        "zh": {
+          "name": "课后学习",
+          "description": "在学校复习、备课或完成作业。"
+        }
+      },
+      "allowed_location_ids": [
+        "school"
+      ]
+    },
+    {
+      "id": "read_book",
+      "name": "阅读",
+      "description": "在学校图书馆阅读。",
+      "localized": {
+        "en": {
+          "name": "Read",
+          "description": "Read in the school library."
+        },
+        "zh": {
+          "name": "阅读",
+          "description": "在学校图书馆阅读。"
+        }
+      },
+      "allowed_location_ids": [
+        "library"
+      ]
+    },
+    {
+      "id": "study_library",
+      "name": "图书馆学习",
+      "description": "在学校图书馆安静学习。",
+      "localized": {
+        "en": {
+          "name": "Library Study",
+          "description": "Study quietly in the school library."
+        },
+        "zh": {
+          "name": "图书馆学习",
+          "description": "在学校图书馆安静学习。"
+        }
+      },
+      "allowed_location_ids": [
+        "library"
+      ]
+    },
+    {
+      "id": "eat_light_meal",
+      "name": "简餐",
+      "description": "在 Hobbs Cafe 吃一顿简餐。",
+      "localized": {
+        "en": {
+          "name": "Light Meal",
+          "description": "Have a simple meal at Hobbs Cafe."
+        },
+        "zh": {
+          "name": "简餐",
+          "description": "在 Hobbs Cafe 吃一顿简餐。"
+        }
+      },
+      "allowed_location_ids": [
+        "cafe"
+      ]
+    },
+    {
+      "id": "chat_over_coffee",
+      "name": "咖啡聊天",
+      "description": "在 Hobbs Cafe 和朋友聊天。",
+      "localized": {
+        "en": {
+          "name": "Coffee Chat",
+          "description": "Chat with a friend at Hobbs Cafe."
+        },
+        "zh": {
+          "name": "咖啡聊天",
+          "description": "在 Hobbs Cafe 和朋友聊天。"
+        }
+      },
+      "allowed_location_ids": [
+        "cafe"
+      ]
+    },
+    {
+      "id": "work_cafe_shift",
+      "name": "咖啡馆值班",
+      "description": "在 Hobbs Cafe 柜台工作。",
+      "localized": {
+        "en": {
+          "name": "Cafe Shift",
+          "description": "Work behind the counter at Hobbs Cafe."
+        },
+        "zh": {
+          "name": "咖啡馆值班",
+          "description": "在 Hobbs Cafe 柜台工作。"
+        }
+      },
+      "allowed_location_ids": [
+        "cafe"
+      ]
+    },
+    {
+      "id": "take_walk",
+      "name": "散步",
+      "description": "在 Johnson Park 散步。",
+      "localized": {
+        "en": {
+          "name": "Take a Walk",
+          "description": "Take a walk in Johnson Park."
+        },
+        "zh": {
+          "name": "散步",
+          "description": "在 Johnson Park 散步。"
+        }
+      },
+      "allowed_location_ids": [
+        "park"
+      ]
+    },
+    {
+      "id": "meet_friend",
+      "name": "见朋友",
+      "description": "在 Johnson Park 和朋友见面交流。",
+      "localized": {
+        "en": {
+          "name": "Meet a Friend",
+          "description": "Meet and talk with a friend in Johnson Park."
+        },
+        "zh": {
+          "name": "见朋友",
+          "description": "在 Johnson Park 和朋友见面交流。"
+        }
+      },
+      "allowed_location_ids": [
+        "park"
+      ]
+    },
+    {
+      "id": "rest_on_bench",
+      "name": "长椅休息",
+      "description": "在 Johnson Park 长椅上短暂休息。",
+      "localized": {
+        "en": {
+          "name": "Rest on a Bench",
+          "description": "Rest briefly on a bench in Johnson Park."
+        },
+        "zh": {
+          "name": "长椅休息",
+          "description": "在 Johnson Park 长椅上短暂休息。"
+        }
+      },
+      "allowed_location_ids": [
+        "park"
+      ]
+    },
+    {
+      "id": "coordinate_group",
+      "name": "公园碰头",
+      "description": "在 Johnson Park 汇合并协调下一步活动。",
+      "localized": {
+        "en": {
+          "name": "Park Meetup",
+          "description": "Meet in Johnson Park and coordinate the next activity."
+        },
+        "zh": {
+          "name": "公园碰头",
+          "description": "在 Johnson Park 汇合并协调下一步活动。"
+        }
+      },
+      "allowed_location_ids": [
+        "park"
+      ]
+    },
+    {
+      "id": "inspect_supplies",
+      "name": "清点货架",
+      "description": "在 Harvey Oak Supply Store 查看工具和生活物资。",
+      "localized": {
+        "en": {
+          "name": "Inspect Supplies",
+          "description": "Check tools and household supplies at Harvey Oak Supply Store."
+        },
+        "zh": {
+          "name": "清点货架",
+          "description": "在 Harvey Oak Supply Store 查看工具和生活物资。"
+        }
+      },
+      "allowed_location_ids": [
+        "supply_store"
+      ]
+    },
+    {
+      "id": "prepare_kit",
+      "name": "准备用品",
+      "description": "在 Harvey Oak Supply Store 整理需要带走的用品。",
+      "localized": {
+        "en": {
+          "name": "Prepare Supplies",
+          "description": "Organize supplies to take from Harvey Oak Supply Store."
+        },
+        "zh": {
+          "name": "准备用品",
+          "description": "在 Harvey Oak Supply Store 整理需要带走的用品。"
+        }
+      },
+      "allowed_location_ids": [
+        "supply_store"
+      ]
+    },
+    {
+      "id": "repair_tools",
+      "name": "修理工具",
+      "description": "在 Harvey Oak Supply Store 使用工具进行维修。",
+      "localized": {
+        "en": {
+          "name": "Repair Tools",
+          "description": "Use tools for repairs at Harvey Oak Supply Store."
+        },
+        "zh": {
+          "name": "修理工具",
+          "description": "在 Harvey Oak Supply Store 使用工具进行维修。"
+        }
+      },
+      "allowed_location_ids": [
+        "supply_store"
+      ]
+    },
+    {
+      "id": "buy_food",
+      "name": "买食物",
+      "description": "在 The Willows Market 购买食物或生活用品。",
+      "localized": {
+        "en": {
+          "name": "Buy Food",
+          "description": "Buy food or household goods at The Willows Market."
+        },
+        "zh": {
+          "name": "买食物",
+          "description": "在 The Willows Market 购买食物或生活用品。"
+        }
+      },
+      "allowed_location_ids": [
+        "market"
+      ]
+    },
+    {
+      "id": "work_shop_shift",
+      "name": "店铺值班",
+      "description": "在 The Willows Market 店铺工作。",
+      "localized": {
+        "en": {
+          "name": "Shop Shift",
+          "description": "Work a shop shift at The Willows Market."
+        },
+        "zh": {
+          "name": "店铺值班",
+          "description": "在 The Willows Market 店铺工作。"
+        }
+      },
+      "allowed_location_ids": [
+        "market"
+      ]
+    },
+    {
+      "id": "buy_medicine",
+      "name": "买药",
+      "description": "在 The Willows Pharmacy 购买药品。",
+      "localized": {
+        "en": {
+          "name": "Buy Medicine",
+          "description": "Buy medicine at The Willows Pharmacy."
+        },
+        "zh": {
+          "name": "买药",
+          "description": "在 The Willows Pharmacy 购买药品。"
+        }
+      },
+      "allowed_location_ids": [
+        "pharmacy"
+      ]
+    },
+    {
+      "id": "pharmacy_consultation",
+      "name": "药房咨询",
+      "description": "在 The Willows Pharmacy 咨询药品或健康问题。",
+      "localized": {
+        "en": {
+          "name": "Pharmacy Consultation",
+          "description": "Ask about medicine or health concerns at The Willows Pharmacy."
+        },
+        "zh": {
+          "name": "药房咨询",
+          "description": "在 The Willows Pharmacy 咨询药品或健康问题。"
+        }
+      },
+      "allowed_location_ids": [
+        "pharmacy"
+      ]
+    },
+    {
+      "id": "socialize_at_pub",
+      "name": "酒馆社交",
+      "description": "在 The Rose and Crown Pub 和熟人聊天。",
+      "localized": {
+        "en": {
+          "name": "Pub Socializing",
+          "description": "Chat with acquaintances at The Rose and Crown Pub."
+        },
+        "zh": {
+          "name": "酒馆社交",
+          "description": "在 The Rose and Crown Pub 和熟人聊天。"
+        }
+      },
+      "allowed_location_ids": [
+        "pub"
+      ]
+    },
+    {
+      "id": "eat_pub_meal",
+      "name": "酒馆用餐",
+      "description": "在 The Rose and Crown Pub 吃饭。",
+      "localized": {
+        "en": {
+          "name": "Pub Meal",
+          "description": "Eat a meal at The Rose and Crown Pub."
+        },
+        "zh": {
+          "name": "酒馆用餐",
+          "description": "在 The Rose and Crown Pub 吃饭。"
+        }
+      },
+      "allowed_location_ids": [
+        "pub"
+      ]
+    },
+    {
+      "id": "rest_at_dorm",
+      "name": "宿舍休息",
+      "description": "在 Oak Hill College 宿舍休息。",
+      "localized": {
+        "en": {
+          "name": "Dorm Rest",
+          "description": "Rest at the Oak Hill College dormitory."
+        },
+        "zh": {
+          "name": "宿舍休息",
+          "description": "在 Oak Hill College 宿舍休息。"
+        }
+      },
+      "allowed_location_ids": [
+        "dorm"
+      ]
+    },
+    {
+      "id": "eat_at_dorm",
+      "name": "宿舍用餐",
+      "description": "在 Oak Hill College 宿舍吃饭。",
+      "localized": {
+        "en": {
+          "name": "Dorm Meal",
+          "description": "Eat at the Oak Hill College dormitory."
+        },
+        "zh": {
+          "name": "宿舍用餐",
+          "description": "在 Oak Hill College 宿舍吃饭。"
+        }
+      },
+      "allowed_location_ids": [
+        "dorm"
+      ]
+    },
+    {
+      "id": "tidy_home",
+      "name": "整理家务",
+      "description": "在家收拾房间或整理物品。",
+      "localized": {
+        "en": {
+          "name": "Tidy Home",
+          "description": "Clean the room or organize belongings at home."
+        },
+        "zh": {
+          "name": "整理家务",
+          "description": "在家收拾房间或整理物品。"
+        }
+      },
+      "allowed_location_ids": [
+        "home"
+      ]
+    },
+    {
+      "id": "read_at_home",
+      "name": "在家阅读",
+      "description": "在家中翻一本书或杂志。",
+      "localized": {
+        "en": {
+          "name": "Read at Home",
+          "description": "Read a book or magazine at home."
+        },
+        "zh": {
+          "name": "在家阅读",
+          "description": "在家中翻一本书或杂志。"
+        }
+      },
+      "allowed_location_ids": [
+        "home"
+      ]
+    },
+    {
+      "id": "work_from_home",
+      "name": "居家办公",
+      "description": "在家中远程处理工作。",
+      "localized": {
+        "en": {
+          "name": "Work from Home",
+          "description": "Handle remote work from home."
+        },
+        "zh": {
+          "name": "居家办公",
+          "description": "在家中远程处理工作。"
+        }
+      },
+      "allowed_location_ids": [
+        "home"
+      ]
+    },
+    {
+      "id": "video_call_family",
+      "name": "视频家人",
+      "description": "在家中和家人视频通话。",
+      "localized": {
+        "en": {
+          "name": "Video Call Family",
+          "description": "Have a video call with family at home."
+        },
+        "zh": {
+          "name": "视频家人",
+          "description": "在家中和家人视频通话。"
+        }
+      },
+      "allowed_location_ids": [
+        "home"
+      ]
+    },
+    {
+      "id": "water_plants",
+      "name": "浇花",
+      "description": "在家给花草浇水或修剪。",
+      "localized": {
+        "en": {
+          "name": "Water Plants",
+          "description": "Water or trim plants at home."
+        },
+        "zh": {
+          "name": "浇花",
+          "description": "在家给花草浇水或修剪。"
+        }
+      },
+      "allowed_location_ids": [
+        "home"
+      ]
+    },
+    {
+      "id": "prepare_lesson",
+      "name": "备课",
+      "description": "在学校教室准备课程材料。",
+      "localized": {
+        "en": {
+          "name": "Prepare Lesson",
+          "description": "Prepare course materials in the school classroom."
+        },
+        "zh": {
+          "name": "备课",
+          "description": "在学校教室准备课程材料。"
+        }
+      },
+      "allowed_location_ids": [
+        "school"
+      ]
+    },
+    {
+      "id": "grade_homework",
+      "name": "批改作业",
+      "description": "在学校教室或办公室批改学生作业。",
+      "localized": {
+        "en": {
+          "name": "Grade Homework",
+          "description": "Grade student assignments in the classroom or office."
+        },
+        "zh": {
+          "name": "批改作业",
+          "description": "在学校教室或办公室批改学生作业。"
+        }
+      },
+      "allowed_location_ids": [
+        "school"
+      ]
+    },
+    {
+      "id": "hold_office_hours",
+      "name": "课后答疑",
+      "description": "在学校接待学生答疑或谈话。",
+      "localized": {
+        "en": {
+          "name": "Office Hours",
+          "description": "Receive students for questions or conversation at school."
+        },
+        "zh": {
+          "name": "课后答疑",
+          "description": "在学校接待学生答疑或谈话。"
+        }
+      },
+      "allowed_location_ids": [
+        "school"
+      ]
+    },
+    {
+      "id": "school_meeting",
+      "name": "教研例会",
+      "description": "在学校参加教研或行政例会。",
+      "localized": {
+        "en": {
+          "name": "School Meeting",
+          "description": "Attend a teaching or administrative meeting at school."
+        },
+        "zh": {
+          "name": "教研例会",
+          "description": "在学校参加教研或行政例会。"
+        }
+      },
+      "allowed_location_ids": [
+        "school"
+      ]
+    },
+    {
+      "id": "research_topic",
+      "name": "资料查阅",
+      "description": "在学校图书馆查找资料。",
+      "localized": {
+        "en": {
+          "name": "Research Materials",
+          "description": "Look up research materials in the school library."
+        },
+        "zh": {
+          "name": "资料查阅",
+          "description": "在学校图书馆查找资料。"
+        }
+      },
+      "allowed_location_ids": [
+        "library"
+      ]
+    },
+    {
+      "id": "borrow_book",
+      "name": "借书",
+      "description": "在图书馆办理借书手续。",
+      "localized": {
+        "en": {
+          "name": "Borrow Book",
+          "description": "Borrow a book from the library."
+        },
+        "zh": {
+          "name": "借书",
+          "description": "在图书馆办理借书手续。"
+        }
+      },
+      "allowed_location_ids": [
+        "library"
+      ]
+    },
+    {
+      "id": "return_book",
+      "name": "还书",
+      "description": "在图书馆归还借出的书籍。",
+      "localized": {
+        "en": {
+          "name": "Return Book",
+          "description": "Return a borrowed book to the library."
+        },
+        "zh": {
+          "name": "还书",
+          "description": "在图书馆归还借出的书籍。"
+        }
+      },
+      "allowed_location_ids": [
+        "library"
+      ]
+    },
+    {
+      "id": "quiet_work",
+      "name": "安静办公",
+      "description": "在图书馆安静地进行个人办公。",
+      "localized": {
+        "en": {
+          "name": "Quiet Work",
+          "description": "Work quietly on personal tasks in the library."
+        },
+        "zh": {
+          "name": "安静办公",
+          "description": "在图书馆安静地进行个人办公。"
+        }
+      },
+      "allowed_location_ids": [
+        "library"
+      ]
+    },
+    {
+      "id": "order_coffee",
+      "name": "点咖啡",
+      "description": "在 Hobbs Cafe 点一杯咖啡。",
+      "localized": {
+        "en": {
+          "name": "Order Coffee",
+          "description": "Order a cup of coffee at Hobbs Cafe."
+        },
+        "zh": {
+          "name": "点咖啡",
+          "description": "在 Hobbs Cafe 点一杯咖啡。"
+        }
+      },
+      "allowed_location_ids": [
+        "cafe"
+      ]
+    },
+    {
+      "id": "take_takeaway",
+      "name": "外带",
+      "description": "在 Hobbs Cafe 打包外带饮品或简餐。",
+      "localized": {
+        "en": {
+          "name": "Takeaway",
+          "description": "Pack drinks or a light meal to go from Hobbs Cafe."
+        },
+        "zh": {
+          "name": "外带",
+          "description": "在 Hobbs Cafe 打包外带饮品或简餐。"
+        }
+      },
+      "allowed_location_ids": [
+        "cafe"
+      ]
+    },
+    {
+      "id": "casual_meetup",
+      "name": "随性碰头",
+      "description": "在 Hobbs Cafe 和熟人临时碰个面。",
+      "localized": {
+        "en": {
+          "name": "Casual Meetup",
+          "description": "Meet an acquaintance casually at Hobbs Cafe."
+        },
+        "zh": {
+          "name": "随性碰头",
+          "description": "在 Hobbs Cafe 和熟人临时碰个面。"
+        }
+      },
+      "allowed_location_ids": [
+        "cafe"
+      ]
+    },
+    {
+      "id": "tidy_cafe",
+      "name": "整理咖啡馆",
+      "description": "在 Hobbs Cafe 整理桌椅、补水或清洁吧台。",
+      "localized": {
+        "en": {
+          "name": "Tidy Cafe",
+          "description": "Arrange tables, refill water, or clean the counter at Hobbs Cafe."
+        },
+        "zh": {
+          "name": "整理咖啡馆",
+          "description": "在 Hobbs Cafe 整理桌椅、补水或清洁吧台。"
+        }
+      },
+      "allowed_location_ids": [
+        "cafe"
+      ]
+    },
+    {
+      "id": "morning_exercise",
+      "name": "晨练",
+      "description": "在 Johnson Park 晨练或拉伸。",
+      "localized": {
+        "en": {
+          "name": "Morning Exercise",
+          "description": "Exercise or stretch in Johnson Park."
+        },
+        "zh": {
+          "name": "晨练",
+          "description": "在 Johnson Park 晨练或拉伸。"
+        }
+      },
+      "allowed_location_ids": [
+        "park"
+      ]
+    },
+    {
+      "id": "bird_watch",
+      "name": "观鸟",
+      "description": "在 Johnson Park 安静看树上的鸟。",
+      "localized": {
+        "en": {
+          "name": "Bird Watching",
+          "description": "Quietly watch birds in the trees at Johnson Park."
+        },
+        "zh": {
+          "name": "观鸟",
+          "description": "在 Johnson Park 安静看树上的鸟。"
+        }
+      },
+      "allowed_location_ids": [
+        "park"
+      ]
+    },
+    {
+      "id": "picnic",
+      "name": "简单野餐",
+      "description": "在 Johnson Park 草地上简单野餐或吃便当。",
+      "localized": {
+        "en": {
+          "name": "Simple Picnic",
+          "description": "Have a simple picnic or boxed meal on the grass in Johnson Park."
+        },
+        "zh": {
+          "name": "简单野餐",
+          "description": "在 Johnson Park 草地上简单野餐或吃便当。"
+        }
+      },
+      "allowed_location_ids": [
+        "park"
+      ]
+    },
+    {
+      "id": "public_announcement",
+      "name": "公共播报",
+      "description": "在 Johnson Park 向群组发布公共公告或提醒。",
+      "localized": {
+        "en": {
+          "name": "Public Announcement",
+          "description": "Post a public notice or reminder to the group from Johnson Park."
+        },
+        "zh": {
+          "name": "公共播报",
+          "description": "在 Johnson Park 向群组发布公共公告或提醒。"
+        }
+      },
+      "allowed_location_ids": [
+        "park"
+      ]
+    },
+    {
+      "id": "restock_shelves",
+      "name": "上货",
+      "description": "在 Harvey Oak Supply Store 给货架上货。",
+      "localized": {
+        "en": {
+          "name": "Restock Shelves",
+          "description": "Restock shelves at Harvey Oak Supply Store."
+        },
+        "zh": {
+          "name": "上货",
+          "description": "在 Harvey Oak Supply Store 给货架上货。"
+        }
+      },
+      "allowed_location_ids": [
+        "supply_store"
+      ]
+    },
+    {
+      "id": "customer_service",
+      "name": "顾客接待",
+      "description": "在 Harvey Oak Supply Store 接待来店顾客。",
+      "localized": {
+        "en": {
+          "name": "Customer Service",
+          "description": "Receive customers at Harvey Oak Supply Store."
+        },
+        "zh": {
+          "name": "顾客接待",
+          "description": "在 Harvey Oak Supply Store 接待来店顾客。"
+        }
+      },
+      "allowed_location_ids": [
+        "supply_store"
+      ]
+    },
+    {
+      "id": "lend_tools",
+      "name": "借出工具",
+      "description": "在 Harvey Oak Supply Store 借出工具给熟客或邻居。",
+      "localized": {
+        "en": {
+          "name": "Lend Tools",
+          "description": "Lend tools to regular customers or neighbors at Harvey Oak Supply Store."
+        },
+        "zh": {
+          "name": "借出工具",
+          "description": "在 Harvey Oak Supply Store 借出工具给熟客或邻居。"
+        }
+      },
+      "allowed_location_ids": [
+        "supply_store"
+      ]
+    },
+    {
+      "id": "restock_vegetables",
+      "name": "蔬果补货",
+      "description": "在 The Willows Market 给蔬果摊补货。",
+      "localized": {
+        "en": {
+          "name": "Restock Produce",
+          "description": "Restock the produce stand at The Willows Market."
+        },
+        "zh": {
+          "name": "蔬果补货",
+          "description": "在 The Willows Market 给蔬果摊补货。"
+        }
+      },
+      "allowed_location_ids": [
+        "market"
+      ]
+    },
+    {
+      "id": "haggle_price",
+      "name": "议价",
+      "description": "在 The Willows Market 和顾客议价。",
+      "localized": {
+        "en": {
+          "name": "Haggle Price",
+          "description": "Negotiate prices with customers at The Willows Market."
+        },
+        "zh": {
+          "name": "议价",
+          "description": "在 The Willows Market 和顾客议价。"
+        }
+      },
+      "allowed_location_ids": [
+        "market"
+      ]
+    },
+    {
+      "id": "deliver_order",
+      "name": "送单",
+      "description": "在 The Willows Market 给附近邻居送一单。",
+      "localized": {
+        "en": {
+          "name": "Deliver Order",
+          "description": "Deliver an order to a nearby neighbor from The Willows Market."
+        },
+        "zh": {
+          "name": "送单",
+          "description": "在 The Willows Market 给附近邻居送一单。"
+        }
+      },
+      "allowed_location_ids": [
+        "market"
+      ]
+    },
+    {
+      "id": "chat_with_regular",
+      "name": "和老客闲聊",
+      "description": "在 The Willows Market 和老顾客寒暄。",
+      "localized": {
+        "en": {
+          "name": "Chat with Regulars",
+          "description": "Exchange greetings with regular customers at The Willows Market."
+        },
+        "zh": {
+          "name": "和老客闲聊",
+          "description": "在 The Willows Market 和老顾客寒暄。"
+        }
+      },
+      "allowed_location_ids": [
+        "market"
+      ]
+    },
+    {
+      "id": "refill_prescription",
+      "name": "续方",
+      "description": "在 The Willows Pharmacy 为居民办理处方续方。",
+      "localized": {
+        "en": {
+          "name": "Refill Prescription",
+          "description": "Refill a prescription for a resident at The Willows Pharmacy."
+        },
+        "zh": {
+          "name": "续方",
+          "description": "在 The Willows Pharmacy 为居民办理处方续方。"
+        }
+      },
+      "allowed_location_ids": [
+        "pharmacy"
+      ]
+    },
+    {
+      "id": "blood_pressure_check",
+      "name": "量血压",
+      "description": "在 The Willows Pharmacy 为居民量血压并记录。",
+      "localized": {
+        "en": {
+          "name": "Blood Pressure Check",
+          "description": "Check and record a resident's blood pressure at The Willows Pharmacy."
+        },
+        "zh": {
+          "name": "量血压",
+          "description": "在 The Willows Pharmacy 为居民量血压并记录。"
+        }
+      },
+      "allowed_location_ids": [
+        "pharmacy"
+      ]
+    },
+    {
+      "id": "organize_medicine_shelf",
+      "name": "整理药架",
+      "description": "在 The Willows Pharmacy 整理药品和过期排查。",
+      "localized": {
+        "en": {
+          "name": "Organize Medicine Shelf",
+          "description": "Organize medicines and check expiration dates at The Willows Pharmacy."
+        },
+        "zh": {
+          "name": "整理药架",
+          "description": "在 The Willows Pharmacy 整理药品和过期排查。"
+        }
+      },
+      "allowed_location_ids": [
+        "pharmacy"
+      ]
+    },
+    {
+      "id": "home_visit_prep",
+      "name": "上门准备",
+      "description": "在 The Willows Pharmacy 整理上门随访需要带的用品。",
+      "localized": {
+        "en": {
+          "name": "Home Visit Prep",
+          "description": "Prepare supplies for a home follow-up visit at The Willows Pharmacy."
+        },
+        "zh": {
+          "name": "上门准备",
+          "description": "在 The Willows Pharmacy 整理上门随访需要带的用品。"
+        }
+      },
+      "allowed_location_ids": [
+        "pharmacy"
+      ]
+    },
+    {
+      "id": "watch_match",
+      "name": "看比赛",
+      "description": "在 The Rose and Crown Pub 看一场比赛转播。",
+      "localized": {
+        "en": {
+          "name": "Watch Match",
+          "description": "Watch a sports broadcast at The Rose and Crown Pub."
+        },
+        "zh": {
+          "name": "看比赛",
+          "description": "在 The Rose and Crown Pub 看一场比赛转播。"
+        }
+      },
+      "allowed_location_ids": [
+        "pub"
+      ]
+    },
+    {
+      "id": "evening_chat",
+      "name": "晚间闲聊",
+      "description": "在 The Rose and Crown Pub 和熟人晚间闲聊。",
+      "localized": {
+        "en": {
+          "name": "Evening Chat",
+          "description": "Chat with acquaintances in the evening at The Rose and Crown Pub."
+        },
+        "zh": {
+          "name": "晚间闲聊",
+          "description": "在 The Rose and Crown Pub 和熟人晚间闲聊。"
+        }
+      },
+      "allowed_location_ids": [
+        "pub"
+      ]
+    },
+    {
+      "id": "host_event",
+      "name": "主持小活动",
+      "description": "在 The Rose and Crown Pub 张罗一个小型活动。",
+      "localized": {
+        "en": {
+          "name": "Host Small Event",
+          "description": "Organize a small event at The Rose and Crown Pub."
+        },
+        "zh": {
+          "name": "主持小活动",
+          "description": "在 The Rose and Crown Pub 张罗一个小型活动。"
+        }
+      },
+      "allowed_location_ids": [
+        "pub"
+      ]
+    },
+    {
+      "id": "study_in_dorm",
+      "name": "宿舍自习",
+      "description": "在 Oak Hill College 宿舍安静自习。",
+      "localized": {
+        "en": {
+          "name": "Dorm Study",
+          "description": "Study quietly at the Oak Hill College dormitory."
+        },
+        "zh": {
+          "name": "宿舍自习",
+          "description": "在 Oak Hill College 宿舍安静自习。"
+        }
+      },
+      "allowed_location_ids": [
+        "dorm"
+      ]
+    },
+    {
+      "id": "common_room_hangout",
+      "name": "公共区休闲",
+      "description": "在 Oak Hill College 宿舍公共区和同学休闲。",
+      "localized": {
+        "en": {
+          "name": "Common Room Hangout",
+          "description": "Relax with classmates in the dormitory common room."
+        },
+        "zh": {
+          "name": "公共区休闲",
+          "description": "在 Oak Hill College 宿舍公共区和同学休闲。"
+        }
+      },
+      "allowed_location_ids": [
+        "dorm"
+      ]
+    },
+    {
+      "id": "video_call_home",
+      "name": "视频家里",
+      "description": "在 Oak Hill College 宿舍和家人视频。",
+      "localized": {
+        "en": {
+          "name": "Video Call Home",
+          "description": "Video call family from the Oak Hill College dormitory."
+        },
+        "zh": {
+          "name": "视频家里",
+          "description": "在 Oak Hill College 宿舍和家人视频。"
+        }
+      },
+      "allowed_location_ids": [
+        "dorm"
+      ]
+    }
+  ],
+  "downloads": [
+    {
+      "type": "map",
+      "label": "Map pack",
+      "href": "downloads/the_ville-map-pack.zip"
+    }
+  ]
+}

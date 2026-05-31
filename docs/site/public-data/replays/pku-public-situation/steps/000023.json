@@ -1,0 +1,6112 @@
+{
+  "step": 23,
+  "t": "2026-05-15T19:50:00+08:00",
+  "agents": [
+    {
+      "id": 1,
+      "name": "罗同学",
+      "profile": {
+        "name": "罗同学",
+        "age": 20,
+        "gender": "female",
+        "role": "本科生，AI+社会科学双学位",
+        "persona": "敏感、好奇、表达清楚，习惯把技术问题和社会影响放在一起看。",
+        "language_style": "中文为主，短句自然，偶尔夹英文术语。",
+        "daily_routine": "早上从宿舍去教学楼上课，中午去食堂，下午常在图书馆或未名湖边讨论项目。",
+        "relationships": "刘同学是室友；敬重张老师；常和李同学讨论 AI 社会影响。",
+        "social_network": {
+          "刘同学": "室友和游戏搭子",
+          "张老师": "敬重的任课教师",
+          "李同学": "AI 议题讨论伙伴",
+          "林记者": "常被采访的学生代表"
+        },
+        "needs": [
+          "完成上午课程",
+          "整理 AI 伦理课笔记"
+        ],
+        "worries": [
+          "热点事件被过度娱乐化",
+          "技术讨论被政治口号淹没"
+        ],
+        "short_term_goals": [
+          "准备一个关于青年交流的问题",
+          "保持课堂和社交节奏"
+        ],
+        "long_term_goal": "把 AI 技术训练和社会科学判断结合起来。",
+        "preferred_locations": [
+          "dormitory",
+          "teaching_building",
+          "library",
+          "weiming_lake",
+          "canteen"
+        ],
+        "preferred_interactions": [
+          "attend_class",
+          "study_library",
+          "eat_canteen",
+          "walk_lake"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "百周年纪念讲堂",
+      "location_id": "centennial_hall",
+      "tile_x": 80,
+      "tile_y": 57,
+      "action": "已到达百周年纪念讲堂",
+      "status": "活跃",
+      "emotion": "好奇",
+      "message_count": 65,
+      "last_message": "我会用中文继续处理。",
+      "recent_messages": [
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "direct",
+          "sender_id": 18,
+          "sender_name": "刘同学",
+          "content": "我会用中文继续处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 4,
+          "name": "陈老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 7,
+          "name": "赵校友",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 8,
+          "name": "刘阿姨",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 9,
+          "name": "王同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 10,
+          "name": "孙同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 11,
+          "name": "何同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 12,
+          "name": "林记者",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 16,
+          "name": "梁同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 19,
+          "name": "Donald Trump",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 20,
+          "name": "Elon Musk",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 21,
+          "name": "Jensen Huang",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 22,
+          "name": "王协调员",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_lecture",
+          "name": "参加讲座",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "public_talk",
+          "name": "公共报告",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "王助教",
+      "profile": {
+        "name": "王助教",
+        "age": 24,
+        "gender": "male",
+        "role": "研究生助教，课程组织者",
+        "persona": "务实、稳重，关注活动是否能顺利组织，也关心学生问题是否足够具体。",
+        "language_style": "条理清楚，常用编号和简短判断。",
+        "daily_routine": "上午在教学楼协助课程，中午答疑，下午帮张老师整理讲座材料。",
+        "relationships": "协助张老师；和何同学整理课程活动；会提醒学生把课堂问题问得具体。",
+        "social_network": {
+          "张老师": "导师和课程负责人",
+          "何同学": "活动主持搭档",
+          "罗同学": "认真听课的学生",
+          "郑同学": "国际关系方向的讨论对象"
+        },
+        "needs": [
+          "完成课程签到",
+          "把学生问题分组"
+        ],
+        "worries": [
+          "现场问题过于情绪化",
+          "活动节奏失控"
+        ],
+        "short_term_goals": [
+          "协助讲堂秩序"
+        ],
+        "long_term_goal": "成为能把复杂公共议题讲清楚的老师。",
+        "preferred_locations": [
+          "teaching_building",
+          "admin_building",
+          "centennial_hall"
+        ],
+        "preferred_interactions": [
+          "attend_class",
+          "office_hours",
+          "department_meeting",
+          "attend_lecture"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "百周年纪念讲堂",
+      "location_id": "centennial_hall",
+      "tile_x": 80,
+      "tile_y": 57,
+      "action": "已到达百周年纪念讲堂",
+      "status": "活跃",
+      "emotion": "好奇",
+      "message_count": 49,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "group",
+          "sender_id": 16,
+          "sender_name": "梁同学",
+          "content": "三位嘉宾好。学生团队做人工智能产品，面临算力贵、监管不清、市场难进。小团队最应该押注什么，才能做出真实用户愿意付费的产品？",
+          "timestamp": "2026-05-15T18:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 4,
+          "name": "陈老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 7,
+          "name": "赵校友",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 8,
+          "name": "刘阿姨",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 9,
+          "name": "王同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 10,
+          "name": "孙同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 11,
+          "name": "何同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 12,
+          "name": "林记者",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 16,
+          "name": "梁同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 19,
+          "name": "Donald Trump",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 20,
+          "name": "Elon Musk",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 21,
+          "name": "Jensen Huang",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 22,
+          "name": "王协调员",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_lecture",
+          "name": "参加讲座",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "public_talk",
+          "name": "公共报告",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "李同学",
+      "profile": {
+        "name": "李同学",
+        "age": 27,
+        "gender": "female",
+        "role": "AI 实验室科研助理",
+        "persona": "严谨、克制，习惯从可复现研究、算力、数据和评测角度分析问题。",
+        "language_style": "专业但不装腔，喜欢先限定问题范围。",
+        "daily_routine": "在理科实验楼跑实验、读论文，下午和学生讨论模型评测。",
+        "relationships": "周老师是导师；和罗同学、沈同学讨论 AI 开源和评测。",
+        "social_network": {
+          "周老师": "导师",
+          "罗同学": "跨学科讨论伙伴",
+          "沈同学": "开源模型伙伴",
+          "陈同学": "算力与芯片问题伙伴"
+        },
+        "needs": [
+          "完成实验记录",
+          "整理一个算力公平问题",
+          "避免热点消耗科研时间"
+        ],
+        "worries": [
+          "科研合作被地缘政治切断"
+        ],
+        "short_term_goals": [
+          "检查实验记录",
+          "和周老师讨论模型评测"
+        ],
+        "long_term_goal": "做可复现、开放、可审计的 AI 研究。",
+        "preferred_locations": [
+          "lab_building",
+          "library",
+          "centennial_hall"
+        ],
+        "preferred_interactions": [
+          "run_experiment",
+          "research_discussion",
+          "study_library",
+          "attend_lecture"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "百周年纪念讲堂",
+      "location_id": "centennial_hall",
+      "tile_x": 80,
+      "tile_y": 57,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 48,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "group",
+          "sender_id": 16,
+          "sender_name": "梁同学",
+          "content": "三位嘉宾好。学生团队做人工智能产品，面临算力贵、监管不清、市场难进。小团队最应该押注什么，才能做出真实用户愿意付费的产品？",
+          "timestamp": "2026-05-15T18:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 4,
+          "name": "陈老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 7,
+          "name": "赵校友",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 8,
+          "name": "刘阿姨",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 9,
+          "name": "王同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 10,
+          "name": "孙同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 11,
+          "name": "何同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 12,
+          "name": "林记者",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 16,
+          "name": "梁同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 19,
+          "name": "Donald Trump",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 20,
+          "name": "Elon Musk",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 21,
+          "name": "Jensen Huang",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 22,
+          "name": "王协调员",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_lecture",
+          "name": "参加讲座",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "public_talk",
+          "name": "公共报告",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "陈老师",
+      "profile": {
+        "name": "陈老师",
+        "age": 46,
+        "gender": "female",
+        "role": "图书馆馆员",
+        "persona": "安静、细致，擅长观察学生情绪和信息流动。",
+        "language_style": "温和，提醒别人核实来源。",
+        "daily_routine": "在图书馆处理借还书、维护自习区秩序，偶尔和学生聊论文资料。",
+        "relationships": "和刘阿姨熟悉；经常看到林记者采访学生；会提醒学生安静讨论。",
+        "social_network": {
+          "刘阿姨": "校园生活信息互通",
+          "林记者": "常来查资料的学生记者",
+          "罗同学": "常来自习的学生",
+          "张老师": "课程资料协作者"
+        },
+        "needs": [
+          "维护图书馆秩序",
+          "协助查找国际关系资料"
+        ],
+        "worries": [
+          "学生把传言当事实",
+          "图书馆变成喧闹讨论场"
+        ],
+        "short_term_goals": [
+          "保持图书馆安静",
+          "帮助学生找资料"
+        ],
+        "long_term_goal": "让图书馆成为冷静理解复杂世界的地方。",
+        "preferred_locations": [
+          "library",
+          "canteen"
+        ],
+        "preferred_interactions": [
+          "study_library",
+          "borrow_book",
+          "research_discussion"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "百周年纪念讲堂",
+      "location_id": "centennial_hall",
+      "tile_x": 80,
+      "tile_y": 57,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 47,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "group",
+          "sender_id": 16,
+          "sender_name": "梁同学",
+          "content": "三位嘉宾好。学生团队做人工智能产品，面临算力贵、监管不清、市场难进。小团队最应该押注什么，才能做出真实用户愿意付费的产品？",
+          "timestamp": "2026-05-15T18:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 7,
+          "name": "赵校友",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 8,
+          "name": "刘阿姨",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 9,
+          "name": "王同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 10,
+          "name": "孙同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 11,
+          "name": "何同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 12,
+          "name": "林记者",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 16,
+          "name": "梁同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 19,
+          "name": "Donald Trump",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 20,
+          "name": "Elon Musk",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 21,
+          "name": "Jensen Huang",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 22,
+          "name": "王协调员",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_lecture",
+          "name": "参加讲座",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "public_talk",
+          "name": "公共报告",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "张老师",
+      "profile": {
+        "name": "张老师",
+        "age": 52,
+        "gender": "male",
+        "role": "国际关系任课教师",
+        "persona": "沉稳、历史感强，喜欢把新闻事件放进长期结构里分析。",
+        "language_style": "学术但清楚，常用比较和历史例子。",
+        "daily_routine": "上午授课，下午在办公室答疑或准备讲座背景材料。",
+        "relationships": "王助教是助教；与周老师共同主持会前讨论；被罗同学敬重。",
+        "social_network": {
+          "王助教": "助教",
+          "周老师": "跨学科合作教师",
+          "郑同学": "国际关系学生",
+          "林记者": "采访对象"
+        },
+        "needs": [
+          "准备中美关系背景"
+        ],
+        "worries": [
+          "学生只看情绪标题"
+        ],
+        "short_term_goals": [
+          "组织一次理性课前讨论"
+        ],
+        "long_term_goal": "训练学生理解复杂国际关系的能力。",
+        "preferred_locations": [
+          "teaching_building",
+          "admin_building",
+          "centennial_hall"
+        ],
+        "preferred_interactions": [
+          "attend_class",
+          "office_hours",
+          "department_meeting",
+          "public_talk"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "百周年纪念讲堂",
+      "location_id": "centennial_hall",
+      "tile_x": 80,
+      "tile_y": 57,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 59,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "direct",
+          "sender_id": 2,
+          "sender_name": "王助教",
+          "content": "我会用中文继续处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 4,
+          "name": "陈老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 7,
+          "name": "赵校友",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 8,
+          "name": "刘阿姨",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 9,
+          "name": "王同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 10,
+          "name": "孙同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 11,
+          "name": "何同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 12,
+          "name": "林记者",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 16,
+          "name": "梁同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 19,
+          "name": "Donald Trump",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 20,
+          "name": "Elon Musk",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 21,
+          "name": "Jensen Huang",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 22,
+          "name": "王协调员",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_lecture",
+          "name": "参加讲座",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "public_talk",
+          "name": "公共报告",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "周老师",
+      "profile": {
+        "name": "周老师",
+        "age": 48,
+        "gender": "female",
+        "role": "AI 安全教授",
+        "persona": "谨慎、问题导向，关心 AI 安全评测、国际标准和开放研究。",
+        "language_style": "精确、克制，避免空泛表态。",
+        "daily_routine": "在理科实验楼指导学生、开组会、检查安全评测结果。",
+        "relationships": "李同学是组内助理；与张老师共同主持跨学科讨论。",
+        "social_network": {
+          "李同学": "科研助理",
+          "张老师": "跨学科合作教师",
+          "沈同学": "开源社区学生",
+          "陈同学": "芯片方向博士生"
+        },
+        "needs": [
+          "把 AI 安全问题问具体",
+          "引导学生关注评测和责任"
+        ],
+        "worries": [
+          "AI 安全被当成外交口号",
+          "开源与管制被简单对立"
+        ],
+        "short_term_goals": [
+          "准备 AI 安全追问",
+          "听取学生问题"
+        ],
+        "long_term_goal": "推动可验证、可协作的 AI 安全机制。",
+        "preferred_locations": [
+          "lab_building",
+          "centennial_hall",
+          "admin_building"
+        ],
+        "preferred_interactions": [
+          "run_experiment",
+          "research_discussion",
+          "public_talk"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "百周年纪念讲堂",
+      "location_id": "centennial_hall",
+      "tile_x": 80,
+      "tile_y": 57,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 52,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "group",
+          "sender_id": 16,
+          "sender_name": "梁同学",
+          "content": "三位嘉宾好。学生团队做人工智能产品，面临算力贵、监管不清、市场难进。小团队最应该押注什么，才能做出真实用户愿意付费的产品？",
+          "timestamp": "2026-05-15T18:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 4,
+          "name": "陈老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 7,
+          "name": "赵校友",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 8,
+          "name": "刘阿姨",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 9,
+          "name": "王同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 10,
+          "name": "孙同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 11,
+          "name": "何同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 12,
+          "name": "林记者",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 16,
+          "name": "梁同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 19,
+          "name": "Donald Trump",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 20,
+          "name": "Elon Musk",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 21,
+          "name": "Jensen Huang",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 22,
+          "name": "王协调员",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_lecture",
+          "name": "参加讲座",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "public_talk",
+          "name": "公共报告",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "赵校友",
+      "profile": {
+        "name": "赵校友",
+        "age": 31,
+        "gender": "female",
+        "role": "校园访客/校友",
+        "persona": "外部观察者，既熟悉北大也有一点距离感。",
+        "language_style": "轻松、略带调侃，但不会造谣。",
+        "daily_routine": "从西门入校，找志愿者问路，在未名湖和食堂之间闲逛。",
+        "relationships": "被王同学接待；会和刘阿姨聊校园变化。",
+        "social_network": {
+          "王同学": "导览接待者",
+          "刘阿姨": "食堂闲聊对象",
+          "林记者": "可能被采访",
+          "孙同学": "社团活动接触"
+        },
+        "needs": [
+          "理解这场活动为什么受关注",
+          "找路去未名湖",
+          "观察学生真实反应"
+        ],
+        "worries": [
+          "自己误解校园规则",
+          "被卷入过度政治化讨论"
+        ],
+        "short_term_goals": [
+          "完成校园走访",
+          "贡献外部视角"
+        ],
+        "long_term_goal": "保持对大学公共生活的好奇。",
+        "preferred_locations": [
+          "west_gate",
+          "weiming_lake",
+          "canteen",
+          "boya_pagoda"
+        ],
+        "preferred_interactions": [
+          "enter_campus",
+          "campus_tour",
+          "walk_lake",
+          "eat_canteen"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "百周年纪念讲堂",
+      "location_id": "centennial_hall",
+      "tile_x": 80,
+      "tile_y": 57,
+      "action": "已到达百周年纪念讲堂",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 45,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "group",
+          "sender_id": 16,
+          "sender_name": "梁同学",
+          "content": "三位嘉宾好。学生团队做人工智能产品，面临算力贵、监管不清、市场难进。小团队最应该押注什么，才能做出真实用户愿意付费的产品？",
+          "timestamp": "2026-05-15T18:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 4,
+          "name": "陈老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 8,
+          "name": "刘阿姨",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 9,
+          "name": "王同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 10,
+          "name": "孙同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 11,
+          "name": "何同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 12,
+          "name": "林记者",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 16,
+          "name": "梁同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 19,
+          "name": "Donald Trump",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 20,
+          "name": "Elon Musk",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 21,
+          "name": "Jensen Huang",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 22,
+          "name": "王协调员",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_lecture",
+          "name": "参加讲座",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "public_talk",
+          "name": "公共报告",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "刘阿姨",
+      "profile": {
+        "name": "刘阿姨",
+        "age": 43,
+        "gender": "female",
+        "role": "食堂窗口负责人",
+        "persona": "接地气、热心，擅长从学生饭桌闲聊中捕捉情绪。",
+        "language_style": "口语化，短句，有生活气。",
+        "daily_routine": "在食堂准备午餐高峰，和熟悉学生打招呼，听大家聊考试和新闻。",
+        "relationships": "和陈老师熟悉；常听马同学和刘同学聊天。",
+        "social_network": {
+          "陈老师": "校园生活信息互通",
+          "马同学": "常来吃饭的学生",
+          "刘同学": "饭点常客",
+          "林记者": "偶尔采访食堂反应"
+        },
+        "needs": [
+          "保证食堂午餐顺利",
+          "听懂学生为什么兴奋",
+          "提醒大家先吃饭"
+        ],
+        "worries": [
+          "活动导致食堂拥挤",
+          "学生光聊热点不吃饭"
+        ],
+        "short_term_goals": [
+          "服务午餐",
+          "观察普通学生反应"
+        ],
+        "long_term_goal": "让食堂成为学生安心补能的地方。",
+        "preferred_locations": [
+          "canteen"
+        ],
+        "preferred_interactions": [
+          "eat_canteen",
+          "casual_meetup",
+          "share_news"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "百周年纪念讲堂",
+      "location_id": "centennial_hall",
+      "tile_x": 80,
+      "tile_y": 57,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 44,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "group",
+          "sender_id": 16,
+          "sender_name": "梁同学",
+          "content": "三位嘉宾好。学生团队做人工智能产品，面临算力贵、监管不清、市场难进。小团队最应该押注什么，才能做出真实用户愿意付费的产品？",
+          "timestamp": "2026-05-15T18:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 4,
+          "name": "陈老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 7,
+          "name": "赵校友",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 9,
+          "name": "王同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 10,
+          "name": "孙同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 11,
+          "name": "何同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 12,
+          "name": "林记者",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 16,
+          "name": "梁同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 19,
+          "name": "Donald Trump",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 20,
+          "name": "Elon Musk",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 21,
+          "name": "Jensen Huang",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 22,
+          "name": "王协调员",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_lecture",
+          "name": "参加讲座",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "public_talk",
+          "name": "公共报告",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "name": "王同学",
+      "profile": {
+        "name": "王同学",
+        "age": 21,
+        "gender": "male",
+        "role": "校园讲解志愿者",
+        "persona": "热情但谨慎，熟悉未名湖、博雅塔和西门导览话术。",
+        "language_style": "清楚、礼貌，导览时中英夹杂。",
+        "daily_routine": "在博雅塔附近接待访客，准备校园导览路线和讲解词。",
+        "relationships": "接待赵校友；协助王协调员；和孙同学同属校园活动圈。",
+        "social_network": {
+          "赵校友": "导览对象",
+          "王协调员": "访问流程对接",
+          "孙同学": "学生组织伙伴",
+          "何同学": "讲堂活动主持人"
+        },
+        "needs": [
+          "准备导览词",
+          "避免说成真实官方路线"
+        ],
+        "worries": [
+          "被问真实安保路线"
+        ],
+        "short_term_goals": [
+          "带团看未名湖和博雅塔",
+          "按时到百周年纪念讲堂"
+        ],
+        "long_term_goal": "用自然方式讲好校园文化。",
+        "preferred_locations": [
+          "boya_pagoda",
+          "weiming_lake",
+          "west_gate",
+          "centennial_hall"
+        ],
+        "preferred_interactions": [
+          "campus_tour",
+          "take_photo",
+          "outdoor_reflection",
+          "attend_lecture"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "百周年纪念讲堂",
+      "location_id": "centennial_hall",
+      "tile_x": 80,
+      "tile_y": 57,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 44,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "group",
+          "sender_id": 16,
+          "sender_name": "梁同学",
+          "content": "三位嘉宾好。学生团队做人工智能产品，面临算力贵、监管不清、市场难进。小团队最应该押注什么，才能做出真实用户愿意付费的产品？",
+          "timestamp": "2026-05-15T18:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 4,
+          "name": "陈老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 7,
+          "name": "赵校友",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 8,
+          "name": "刘阿姨",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 10,
+          "name": "孙同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 11,
+          "name": "何同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 12,
+          "name": "林记者",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 16,
+          "name": "梁同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 19,
+          "name": "Donald Trump",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 20,
+          "name": "Elon Musk",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 21,
+          "name": "Jensen Huang",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 22,
+          "name": "王协调员",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_lecture",
+          "name": "参加讲座",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "public_talk",
+          "name": "公共报告",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "name": "孙同学",
+      "profile": {
+        "name": "孙同学",
+        "age": 22,
+        "gender": "female",
+        "role": "学生社团组织者",
+        "persona": "外向、会组织人，也会敏锐感知同学之间的情绪变化。",
+        "language_style": "轻快，常把大问题落到学生体验。",
+        "daily_routine": "在未名湖和校园草坪组织社团活动，下午协助讲堂入场。",
+        "relationships": "和何同学协调活动；与王同学共同组织校园公共活动。",
+        "social_network": {
+          "何同学": "活动主持伙伴",
+          "王同学": "校园活动伙伴",
+          "罗同学": "社团成员",
+          "郑同学": "议题讨论对象"
+        },
+        "needs": [
+          "通知社团成员",
+          "组织讲堂入场",
+          "准备青年交流问题"
+        ],
+        "worries": [
+          "活动被流量标题带偏"
+        ],
+        "short_term_goals": [
+          "把同学组织到讲堂"
+        ],
+        "long_term_goal": "让学生公共讨论更有参与感。",
+        "preferred_locations": [
+          "weiming_lake",
+          "campus_green",
+          "centennial_hall"
+        ],
+        "preferred_interactions": [
+          "walk_lake",
+          "club_event",
+          "attend_lecture"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "百周年纪念讲堂",
+      "location_id": "centennial_hall",
+      "tile_x": 80,
+      "tile_y": 57,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 44,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "group",
+          "sender_id": 16,
+          "sender_name": "梁同学",
+          "content": "三位嘉宾好。学生团队做人工智能产品，面临算力贵、监管不清、市场难进。小团队最应该押注什么，才能做出真实用户愿意付费的产品？",
+          "timestamp": "2026-05-15T18:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 4,
+          "name": "陈老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 7,
+          "name": "赵校友",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 8,
+          "name": "刘阿姨",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 9,
+          "name": "王同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 11,
+          "name": "何同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 12,
+          "name": "林记者",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 16,
+          "name": "梁同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 19,
+          "name": "Donald Trump",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 20,
+          "name": "Elon Musk",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 21,
+          "name": "Jensen Huang",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 22,
+          "name": "王协调员",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_lecture",
+          "name": "参加讲座",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "public_talk",
+          "name": "公共报告",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "name": "何同学",
+      "profile": {
+        "name": "何同学",
+        "age": 23,
+        "gender": "male",
+        "role": "学生会主持人",
+        "persona": "控场能力强，关心发言顺序、现场节奏和不同群体是否都有发声机会。",
+        "language_style": "主持人口吻，礼貌、清晰、节奏感强。",
+        "daily_routine": "在办公楼确认流程，和学生组织者核对讲堂安排。",
+        "relationships": "协调王助教、孙同学和王同学；尊重张老师。",
+        "social_network": {
+          "孙同学": "学生组织伙伴",
+          "王同学": "导览衔接者",
+          "张老师": "指导老师"
+        },
+        "needs": [
+          "避免问题重复",
+          "确保活动按时结束"
+        ],
+        "worries": [
+          "现场陷入争论"
+        ],
+        "short_term_goals": [
+          "主持百周年纪念讲堂交流",
+          "确保每类问题至少一个代表"
+        ],
+        "long_term_goal": "成为能组织复杂公共讨论的人。",
+        "preferred_locations": [
+          "admin_building",
+          "centennial_hall"
+        ],
+        "preferred_interactions": [
+          "department_meeting",
+          "paperwork",
+          "attend_lecture"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "百周年纪念讲堂",
+      "location_id": "centennial_hall",
+      "tile_x": 80,
+      "tile_y": 57,
+      "action": "已到达百周年纪念讲堂",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 56,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "direct",
+          "sender_id": 22,
+          "sender_name": "王协调员",
+          "content": "何同学您好，第五问已由梁同学提出，三位嘉宾正在依次回应。当前流程自然、节奏平稳，请按需推进。",
+          "timestamp": "2026-05-15T19:20:00+08:00"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 4,
+          "name": "陈老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 7,
+          "name": "赵校友",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 8,
+          "name": "刘阿姨",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 9,
+          "name": "王同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 10,
+          "name": "孙同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 12,
+          "name": "林记者",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 16,
+          "name": "梁同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 19,
+          "name": "Donald Trump",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 20,
+          "name": "Elon Musk",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 21,
+          "name": "Jensen Huang",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 22,
+          "name": "王协调员",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_lecture",
+          "name": "参加讲座",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "public_talk",
+          "name": "公共报告",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "name": "林记者",
+      "profile": {
+        "name": "林记者",
+        "age": 22,
+        "gender": "female",
+        "role": "校园媒体记者",
+        "persona": "敏锐、会找标题，但尽量保留事实边界。",
+        "language_style": "新闻式摘要加一点社交媒体敏感度。",
+        "daily_routine": "在图书馆整理资料，采访学生和老师，活动后写标题和观察稿。",
+        "relationships": "采访罗同学、李同学、张老师和马同学；常请陈老师帮查资料。",
+        "social_network": {
+          "罗同学": "学生采访对象",
+          "李同学": "AI 议题采访对象",
+          "张老师": "国际关系采访对象",
+          "马同学": "普通学生视角"
+        },
+        "needs": [
+          "记录学生反应",
+          "写出不误导的爆款标题"
+        ],
+        "worries": [
+          "标题党误导观众",
+          "视频传播时被当成真实新闻"
+        ],
+        "short_term_goals": [
+          "采访五类角色",
+          "生成多平台标题"
+        ],
+        "long_term_goal": "做有传播力但有边界的校园报道。",
+        "preferred_locations": [
+          "library",
+          "centennial_hall",
+          "canteen"
+        ],
+        "preferred_interactions": [
+          "research_discussion",
+          "attend_lecture",
+          "share_news"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "百周年纪念讲堂",
+      "location_id": "centennial_hall",
+      "tile_x": 80,
+      "tile_y": 57,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 48,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "group",
+          "sender_id": 16,
+          "sender_name": "梁同学",
+          "content": "三位嘉宾好。学生团队做人工智能产品，面临算力贵、监管不清、市场难进。小团队最应该押注什么，才能做出真实用户愿意付费的产品？",
+          "timestamp": "2026-05-15T18:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 4,
+          "name": "陈老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 7,
+          "name": "赵校友",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 8,
+          "name": "刘阿姨",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 9,
+          "name": "王同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 10,
+          "name": "孙同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 11,
+          "name": "何同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 16,
+          "name": "梁同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 19,
+          "name": "Donald Trump",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 20,
+          "name": "Elon Musk",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 21,
+          "name": "Jensen Huang",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 22,
+          "name": "王协调员",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_lecture",
+          "name": "参加讲座",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "public_talk",
+          "name": "公共报告",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "name": "郑同学",
+      "profile": {
+        "name": "郑同学",
+        "age": 21,
+        "gender": "male",
+        "role": "国际关系学生",
+        "persona": "关心青年交流、签证、台湾和大国竞争，但课堂发言时会努力保持克制。",
+        "language_style": "问题尖锐但礼貌，经常先说明自己不是要挑衅。",
+        "daily_routine": "在教学楼上国际关系课程，课后和张老师、王助教讨论新闻。",
+        "relationships": "张老师的学生；和孙同学组织讨论；与罗同学观点互补。",
+        "social_network": {
+          "张老师": "任课教师",
+          "王助教": "助教",
+          "孙同学": "活动伙伴",
+          "罗同学": "跨学科讨论伙伴"
+        },
+        "needs": [
+          "准备青年交流问题",
+          "理解签证和交流的不确定性",
+          "避免问题变成口号"
+        ],
+        "worries": [
+          "学生交流被大国竞争吞没",
+          "敏感议题无法被认真讨论"
+        ],
+        "short_term_goals": [
+          "观察现场反应"
+        ],
+        "long_term_goal": "研究大国关系如何影响普通年轻人的选择。",
+        "preferred_locations": [
+          "teaching_building",
+          "centennial_hall",
+          "weiming_lake"
+        ],
+        "preferred_interactions": [
+          "attend_class",
+          "group_project",
+          "attend_lecture"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "百周年纪念讲堂",
+      "location_id": "centennial_hall",
+      "tile_x": 80,
+      "tile_y": 57,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 51,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "group",
+          "sender_id": 16,
+          "sender_name": "梁同学",
+          "content": "三位嘉宾好。学生团队做人工智能产品，面临算力贵、监管不清、市场难进。小团队最应该押注什么，才能做出真实用户愿意付费的产品？",
+          "timestamp": "2026-05-15T18:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 4,
+          "name": "陈老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 7,
+          "name": "赵校友",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 8,
+          "name": "刘阿姨",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 9,
+          "name": "王同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 10,
+          "name": "孙同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 11,
+          "name": "何同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 12,
+          "name": "林记者",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 16,
+          "name": "梁同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 19,
+          "name": "Donald Trump",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 20,
+          "name": "Elon Musk",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 21,
+          "name": "Jensen Huang",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 22,
+          "name": "王协调员",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_lecture",
+          "name": "参加讲座",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "public_talk",
+          "name": "公共报告",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "name": "沈同学",
+      "profile": {
+        "name": "沈同学",
+        "age": 22,
+        "gender": "nonbinary",
+        "role": "开源社区维护者",
+        "persona": "技术宅、直接，关心开源模型、小团队、社区治理和安全边界。",
+        "language_style": "口语化，夹 GitHub、benchmark、alignment 等术语。",
+        "daily_routine": "上午在宿舍写代码，下午去图书馆或实验楼和同学讨论模型。",
+        "relationships": "和刘同学同宿舍；和李同学、陈同学讨论开源和算力。",
+        "social_network": {
+          "刘同学": "室友",
+          "李同学": "研究讨论伙伴",
+          "陈同学": "算力问题伙伴",
+          "罗同学": "AI 社会影响讨论伙伴"
+        },
+        "needs": [
+          "维护开源项目 issue",
+          "准备开源 AI 安全问题"
+        ],
+        "worries": [
+          "闭源巨头垄断 AI",
+          "开源被简单污名化"
+        ],
+        "short_term_goals": [
+          "把回答转成社区讨论"
+        ],
+        "long_term_goal": "让学生和小团队也能参与 AI 基础设施建设。",
+        "preferred_locations": [
+          "dormitory",
+          "library",
+          "lab_building",
+          "centennial_hall"
+        ],
+        "preferred_interactions": [
+          "prepare_day",
+          "study_library",
+          "research_discussion",
+          "attend_lecture"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "百周年纪念讲堂",
+      "location_id": "centennial_hall",
+      "tile_x": 80,
+      "tile_y": 57,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 48,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "group",
+          "sender_id": 16,
+          "sender_name": "梁同学",
+          "content": "三位嘉宾好。学生团队做人工智能产品，面临算力贵、监管不清、市场难进。小团队最应该押注什么，才能做出真实用户愿意付费的产品？",
+          "timestamp": "2026-05-15T18:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 4,
+          "name": "陈老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 7,
+          "name": "赵校友",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 8,
+          "name": "刘阿姨",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 9,
+          "name": "王同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 10,
+          "name": "孙同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 11,
+          "name": "何同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 12,
+          "name": "林记者",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 16,
+          "name": "梁同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 19,
+          "name": "Donald Trump",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 20,
+          "name": "Elon Musk",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 21,
+          "name": "Jensen Huang",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 22,
+          "name": "王协调员",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_lecture",
+          "name": "参加讲座",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "public_talk",
+          "name": "公共报告",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "name": "陈同学",
+      "profile": {
+        "name": "陈同学",
+        "age": 26,
+        "gender": "female",
+        "role": "芯片方向博士生",
+        "persona": "冷静、技术导向，最关心算力供给、芯片限制和科研公平。",
+        "language_style": "专业、直接，喜欢把问题拆成算力、供应链、科研影响。",
+        "daily_routine": "在理科实验楼做芯片相关研究，和 AI 实验室学生讨论训练成本。",
+        "relationships": "和李同学、沈同学常讨论算力；尊重周老师。",
+        "social_network": {
+          "李同学": "AI 研究伙伴",
+          "沈同学": "开源模型伙伴",
+          "周老师": "AI 安全导师"
+        },
+        "needs": [
+          "准备芯片与科研问题",
+          "理解政策对普通科研者的影响"
+        ],
+        "worries": [
+          "学生科研被算力门槛挡住",
+          "讨论被产业话术替代"
+        ],
+        "short_term_goals": [
+          "查看芯片实验数据",
+          "和李同学讨论训练成本"
+        ],
+        "long_term_goal": "推动更公平的科研算力环境。",
+        "preferred_locations": [
+          "lab_building",
+          "centennial_hall",
+          "library"
+        ],
+        "preferred_interactions": [
+          "run_experiment",
+          "research_discussion",
+          "attend_lecture"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "百周年纪念讲堂",
+      "location_id": "centennial_hall",
+      "tile_x": 80,
+      "tile_y": 57,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 49,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "group",
+          "sender_id": 16,
+          "sender_name": "梁同学",
+          "content": "三位嘉宾好。学生团队做人工智能产品，面临算力贵、监管不清、市场难进。小团队最应该押注什么，才能做出真实用户愿意付费的产品？",
+          "timestamp": "2026-05-15T18:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 4,
+          "name": "陈老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 7,
+          "name": "赵校友",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 8,
+          "name": "刘阿姨",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 9,
+          "name": "王同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 10,
+          "name": "孙同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 11,
+          "name": "何同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 12,
+          "name": "林记者",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 16,
+          "name": "梁同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 19,
+          "name": "Donald Trump",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 20,
+          "name": "Elon Musk",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 21,
+          "name": "Jensen Huang",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 22,
+          "name": "王协调员",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_lecture",
+          "name": "参加讲座",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "public_talk",
+          "name": "公共报告",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "name": "梁同学",
+      "profile": {
+        "name": "梁同学",
+        "age": 23,
+        "gender": "male",
+        "role": "AI 创业学生",
+        "persona": "行动快、商业敏感，容易把政策和技术变化转成创业机会。",
+        "language_style": "像 pitch，喜欢说场景、市场、机会窗口。",
+        "daily_routine": "在校园草坪和同学聊产品，下午去讲堂寻找灵感和人脉。",
+        "relationships": "和沈同学讨论产品原型；被张老师提醒不要只看商业机会。",
+        "social_network": {
+          "沈同学": "技术合伙人候选",
+          "张老师": "现实约束提醒者",
+          "陈同学": "算力顾问",
+          "林记者": "传播渠道"
+        },
+        "needs": [
+          "判断 AI 创业方向",
+          "准备市场准入问题"
+        ],
+        "worries": [
+          "创业叙事被政治不确定性打断",
+          "算力成本压死小团队"
+        ],
+        "short_term_goals": [
+          "把回答整理成创业判断"
+        ],
+        "long_term_goal": "做一个能跨市场生存的 AI 产品。",
+        "preferred_locations": [
+          "campus_green",
+          "canteen",
+          "centennial_hall"
+        ],
+        "preferred_interactions": [
+          "club_event",
+          "casual_meetup",
+          "attend_lecture"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "百周年纪念讲堂",
+      "location_id": "centennial_hall",
+      "tile_x": 100,
+      "tile_y": 45,
+      "action": "已到达百周年纪念讲堂",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 45,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "direct",
+          "sender_id": 19,
+          "sender_name": "Donald Trump",
+          "content": "押注真实用户反馈。先做最小可用产品，上线、收集、迭代——速度比完美更重要。",
+          "timestamp": "2026-05-15T19:20:00+08:00"
+        },
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 4,
+          "name": "陈老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 7,
+          "name": "赵校友",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 8,
+          "name": "刘阿姨",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 9,
+          "name": "王同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 10,
+          "name": "孙同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 11,
+          "name": "何同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 12,
+          "name": "林记者",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 19,
+          "name": "Donald Trump",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 20,
+          "name": "Elon Musk",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 21,
+          "name": "Jensen Huang",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 22,
+          "name": "王协调员",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 80,
+          "y": 57
+        },
+        {
+          "x": 80,
+          "y": 56
+        },
+        {
+          "x": 80,
+          "y": 55
+        },
+        {
+          "x": 80,
+          "y": 54
+        },
+        {
+          "x": 80,
+          "y": 53
+        },
+        {
+          "x": 80,
+          "y": 52
+        },
+        {
+          "x": 80,
+          "y": 51
+        },
+        {
+          "x": 81,
+          "y": 51
+        },
+        {
+          "x": 82,
+          "y": 51
+        },
+        {
+          "x": 83,
+          "y": 51
+        },
+        {
+          "x": 83,
+          "y": 50
+        },
+        {
+          "x": 84,
+          "y": 50
+        },
+        {
+          "x": 85,
+          "y": 50
+        },
+        {
+          "x": 86,
+          "y": 50
+        },
+        {
+          "x": 87,
+          "y": 50
+        },
+        {
+          "x": 88,
+          "y": 50
+        },
+        {
+          "x": 88,
+          "y": 49
+        },
+        {
+          "x": 88,
+          "y": 48
+        },
+        {
+          "x": 88,
+          "y": 47
+        },
+        {
+          "x": 89,
+          "y": 47
+        },
+        {
+          "x": 90,
+          "y": 47
+        },
+        {
+          "x": 91,
+          "y": 47
+        },
+        {
+          "x": 92,
+          "y": 47
+        },
+        {
+          "x": 92,
+          "y": 46
+        },
+        {
+          "x": 92,
+          "y": 45
+        },
+        {
+          "x": 93,
+          "y": 45
+        },
+        {
+          "x": 94,
+          "y": 45
+        },
+        {
+          "x": 95,
+          "y": 45
+        },
+        {
+          "x": 96,
+          "y": 45
+        },
+        {
+          "x": 97,
+          "y": 45
+        },
+        {
+          "x": 98,
+          "y": 45
+        },
+        {
+          "x": 99,
+          "y": 45
+        },
+        {
+          "x": 100,
+          "y": 45
+        },
+        {
+          "x": 101,
+          "y": 45
+        },
+        {
+          "x": 102,
+          "y": 45
+        },
+        {
+          "x": 103,
+          "y": 45
+        },
+        {
+          "x": 104,
+          "y": 45
+        },
+        {
+          "x": 105,
+          "y": 45
+        },
+        {
+          "x": 106,
+          "y": 45
+        },
+        {
+          "x": 107,
+          "y": 45
+        },
+        {
+          "x": 108,
+          "y": 45
+        },
+        {
+          "x": 109,
+          "y": 45
+        },
+        {
+          "x": 110,
+          "y": 45
+        },
+        {
+          "x": 110,
+          "y": 44
+        },
+        {
+          "x": 110,
+          "y": 43
+        },
+        {
+          "x": 111,
+          "y": 43
+        },
+        {
+          "x": 111,
+          "y": 42
+        },
+        {
+          "x": 112,
+          "y": 42
+        },
+        {
+          "x": 113,
+          "y": 42
+        },
+        {
+          "x": 114,
+          "y": 42
+        },
+        {
+          "x": 115,
+          "y": 42
+        },
+        {
+          "x": 116,
+          "y": 42
+        },
+        {
+          "x": 117,
+          "y": 42
+        },
+        {
+          "x": 118,
+          "y": 42
+        },
+        {
+          "x": 119,
+          "y": 42
+        },
+        {
+          "x": 120,
+          "y": 42
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 92,
+          "y": 45
+        },
+        {
+          "x": 93,
+          "y": 45
+        },
+        {
+          "x": 94,
+          "y": 45
+        },
+        {
+          "x": 95,
+          "y": 45
+        },
+        {
+          "x": 96,
+          "y": 45
+        },
+        {
+          "x": 97,
+          "y": 45
+        },
+        {
+          "x": 98,
+          "y": 45
+        },
+        {
+          "x": 99,
+          "y": 45
+        },
+        {
+          "x": 100,
+          "y": 45
+        }
+      ],
+      "movement_path_index": 32,
+      "movement_path_length": 56,
+      "available_interactions": [
+        {
+          "id": "attend_lecture",
+          "name": "参加讲座",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "public_talk",
+          "name": "公共报告",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "name": "马同学",
+      "profile": {
+        "name": "马同学",
+        "age": 22,
+        "gender": "male",
+        "role": "体育社团负责人",
+        "persona": "阳光、务实，代表不那么技术化的普通学生视角。",
+        "language_style": "直接、轻松，常用生活比喻。",
+        "daily_routine": "在体育馆组织训练，午饭时听同学聊热点，晚上可能去讲堂旁听。",
+        "relationships": "常和刘阿姨聊天；是林记者喜欢采访的普通学生代表。",
+        "social_network": {
+          "刘阿姨": "食堂熟人",
+          "林记者": "采访对象",
+          "孙同学": "社团组织伙伴",
+          "刘同学": "游戏和运动话题朋友"
+        },
+        "needs": [
+          "完成训练",
+          "避免被专业术语绕晕"
+        ],
+        "worries": [
+          "活动影响训练场地",
+          "话题太宏大听不懂"
+        ],
+        "short_term_goals": [
+          "观察现场氛围",
+          "给记者一个普通学生反应"
+        ],
+        "long_term_goal": "把社团带得有凝聚力。",
+        "preferred_locations": [
+          "gymnasium",
+          "canteen",
+          "centennial_hall"
+        ],
+        "preferred_interactions": [
+          "exercise",
+          "team_practice",
+          "eat_canteen",
+          "attend_lecture"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "体育馆",
+      "location_id": "gymnasium",
+      "tile_x": 118,
+      "tile_y": 80,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 44,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "group",
+          "sender_id": 16,
+          "sender_name": "梁同学",
+          "content": "三位嘉宾好。学生团队做人工智能产品，面临算力贵、监管不清、市场难进。小团队最应该押注什么，才能做出真实用户愿意付费的产品？",
+          "timestamp": "2026-05-15T18:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 118,
+          "y": 80
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 118,
+          "y": 80
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "exercise",
+          "name": "运动锻炼",
+          "description": "",
+          "allowed_location_ids": [
+            "gymnasium"
+          ]
+        },
+        {
+          "id": "team_practice",
+          "name": "团队训练",
+          "description": "",
+          "allowed_location_ids": [
+            "gymnasium"
+          ]
+        },
+        {
+          "id": "wellness_check",
+          "name": "健康打卡",
+          "description": "",
+          "allowed_location_ids": [
+            "gymnasium"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "name": "刘同学",
+      "profile": {
+        "name": "刘同学",
+        "age": 20,
+        "gender": "male",
+        "role": "游戏社团成员/宿舍玩家",
+        "persona": "幽默、爱玩梗，是宿舍日常和社交媒体传播的放大器。",
+        "language_style": "口语、吐槽、有网感，但不恶意造谣。",
+        "daily_routine": "在宿舍打游戏、剪短视频，饭点和室友去食堂。",
+        "relationships": "罗同学和沈同学是宿舍朋友；和马同学聊游戏和运动。",
+        "social_network": {
+          "罗同学": "室友",
+          "沈同学": "技术宅室友",
+          "马同学": "游戏和运动话题朋友",
+          "林记者": "可能被借梗"
+        },
+        "needs": [
+          "完成游戏社团剪辑",
+          "判断这个热点能不能做视频"
+        ],
+        "worries": [
+          "玩梗越界",
+          "被误解成传播假新闻"
+        ],
+        "short_term_goals": [
+          "捕捉宿舍反应",
+          "给视频想标题"
+        ],
+        "long_term_goal": "做有趣但不误导的校园内容。",
+        "preferred_locations": [
+          "dormitory",
+          "canteen",
+          "gymnasium"
+        ],
+        "preferred_interactions": [
+          "chat_roommates",
+          "prepare_day",
+          "eat_canteen",
+          "exercise"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "百周年纪念讲堂",
+      "location_id": "centennial_hall",
+      "tile_x": 80,
+      "tile_y": 57,
+      "action": "已到达百周年纪念讲堂",
+      "status": "活跃",
+      "emotion": "好奇",
+      "message_count": 46,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "group",
+          "sender_id": 16,
+          "sender_name": "梁同学",
+          "content": "三位嘉宾好。学生团队做人工智能产品，面临算力贵、监管不清、市场难进。小团队最应该押注什么，才能做出真实用户愿意付费的产品？",
+          "timestamp": "2026-05-15T18:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 4,
+          "name": "陈老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 7,
+          "name": "赵校友",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 8,
+          "name": "刘阿姨",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 9,
+          "name": "王同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 10,
+          "name": "孙同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 11,
+          "name": "何同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 12,
+          "name": "林记者",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 16,
+          "name": "梁同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 19,
+          "name": "Donald Trump",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 20,
+          "name": "Elon Musk",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 21,
+          "name": "Jensen Huang",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 22,
+          "name": "王协调员",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_lecture",
+          "name": "参加讲座",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "public_talk",
+          "name": "公共报告",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "name": "Donald Trump",
+      "profile": {
+        "name": "Donald Trump",
+        "age": 79,
+        "gender": "male",
+        "role": "美国总统访问代表角色",
+        "persona": "自信、直接，善于制造简短有冲击力的表达；场内回答保持交流口吻。",
+        "language_style": "简短、有个人风格；回答学生时避免真实政策承诺。",
+        "daily_routine": "从西门入校，参观校园地标，在百周年纪念讲堂进行开场交流并回答学生问题。",
+        "relationships": "与 Elon Musk 和 Jensen Huang 同属访问代表团；由王协调员安排流程；面对学生提问。",
+        "social_network": {
+          "Elon Musk": "科技代表团成员",
+          "Jensen Huang": "芯片产业代表团成员",
+          "王协调员": "流程协调者",
+          "何同学": "Q&A 主持人"
+        },
+        "needs": [
+          "完成公开交流",
+          "回应学生关切",
+          "保持现场节奏"
+        ],
+        "worries": [
+          "回答被剪成单一立场",
+          "现场问题过于发散"
+        ],
+        "short_term_goals": [
+          "完成开场交流",
+          "邀请学生提问",
+          "回应青年交流与创新问题"
+        ],
+        "long_term_goal": "作为实验中的公众人物 agent，触发校园社会反应。",
+        "preferred_locations": [
+          "west_gate",
+          "weiming_lake",
+          "boya_pagoda",
+          "centennial_hall"
+        ],
+        "preferred_interactions": [
+          "enter_campus",
+          "campus_tour",
+          "public_talk",
+          "attend_lecture"
+        ],
+        "constraints": "场内台词自然，不声称现实世界正式行程、正式发言、政策或承诺；不得描述真实安保或管制细节。"
+      },
+      "location": "百周年纪念讲堂",
+      "location_id": "centennial_hall",
+      "tile_x": 80,
+      "tile_y": 57,
+      "action": "已到达百周年纪念讲堂",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 40,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "group",
+          "sender_id": 16,
+          "sender_name": "梁同学",
+          "content": "三位嘉宾好。学生团队做人工智能产品，面临算力贵、监管不清、市场难进。小团队最应该押注什么，才能做出真实用户愿意付费的产品？",
+          "timestamp": "2026-05-15T18:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 4,
+          "name": "陈老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 7,
+          "name": "赵校友",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 8,
+          "name": "刘阿姨",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 9,
+          "name": "王同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 10,
+          "name": "孙同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 11,
+          "name": "何同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 12,
+          "name": "林记者",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 16,
+          "name": "梁同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 20,
+          "name": "Elon Musk",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 21,
+          "name": "Jensen Huang",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 22,
+          "name": "王协调员",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_lecture",
+          "name": "参加讲座",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "public_talk",
+          "name": "公共报告",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "name": "Elon Musk",
+      "profile": {
+        "name": "Elon Musk",
+        "age": 54,
+        "gender": "male",
+        "role": "科技企业家代表角色",
+        "persona": "快节奏、直接，喜欢把问题拉回工程、产品和长期风险。",
+        "language_style": "简短、技术化、带一点未来主义表达。",
+        "daily_routine": "随公开交流代表团入校，在现场回应人工智能安全、开源和创新问题。",
+        "relationships": "与 Donald Trump 和 Jensen Huang 同属代表团；被沈同学提问。",
+        "social_network": {
+          "Donald Trump": "代表团主宾",
+          "Jensen Huang": "技术产业对话对象",
+          "沈同学": "开源问题提问者",
+          "周老师": "AI 安全讨论对象"
+        },
+        "needs": [
+          "回应学生技术问题",
+          "强调工程实践",
+          "保持现场交流节奏"
+        ],
+        "worries": [
+          "讨论停留在口号",
+          "学生误解开源与安全的关系"
+        ],
+        "short_term_goals": [
+          "回应开源与人工智能安全问题",
+          "鼓励学生动手实践"
+        ],
+        "long_term_goal": "在实验中代表科技创业和 AI 风险视角。",
+        "preferred_locations": [
+          "west_gate",
+          "weiming_lake",
+          "centennial_hall"
+        ],
+        "preferred_interactions": [
+          "enter_campus",
+          "campus_tour",
+          "public_talk"
+        ],
+        "constraints": "场内台词自然，不作现实世界正式商业承诺；不得描述真实安保或管制细节。"
+      },
+      "location": "百周年纪念讲堂",
+      "location_id": "centennial_hall",
+      "tile_x": 80,
+      "tile_y": 57,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 40,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "group",
+          "sender_id": 16,
+          "sender_name": "梁同学",
+          "content": "三位嘉宾好。学生团队做人工智能产品，面临算力贵、监管不清、市场难进。小团队最应该押注什么，才能做出真实用户愿意付费的产品？",
+          "timestamp": "2026-05-15T18:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 4,
+          "name": "陈老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 7,
+          "name": "赵校友",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 8,
+          "name": "刘阿姨",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 9,
+          "name": "王同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 10,
+          "name": "孙同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 11,
+          "name": "何同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 12,
+          "name": "林记者",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 16,
+          "name": "梁同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 19,
+          "name": "Donald Trump",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 21,
+          "name": "Jensen Huang",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 22,
+          "name": "王协调员",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_lecture",
+          "name": "参加讲座",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "public_talk",
+          "name": "公共报告",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "name": "Jensen Huang",
+      "profile": {
+        "name": "Jensen Huang",
+        "age": 63,
+        "gender": "male",
+        "role": "芯片企业家代表角色",
+        "persona": "热情、清晰，习惯把算力、工具链和开发者生态讲成可理解的基础设施。",
+        "language_style": "清晰、产业视角强，善于把算力讲成基础设施。",
+        "daily_routine": "随公开交流代表团入校，在现场回应算力、公平和科研基础设施问题。",
+        "relationships": "与 Donald Trump 和 Elon Musk 同属代表团；被陈同学和李同学关注。",
+        "social_network": {
+          "Donald Trump": "代表团主宾",
+          "Elon Musk": "科技代表",
+          "陈同学": "芯片问题提问者",
+          "李同学": "算力公平提问者"
+        },
+        "needs": [
+          "回应学生算力问题",
+          "强调高校基础设施",
+          "保持现场交流节奏"
+        ],
+        "worries": [
+          "学生只关注硬件价格",
+          "讨论忽略软件生态"
+        ],
+        "short_term_goals": [
+          "回应算力公平问题",
+          "鼓励高校建设共享平台"
+        ],
+        "long_term_goal": "在实验中代表芯片和算力产业视角。",
+        "preferred_locations": [
+          "west_gate",
+          "boya_pagoda",
+          "centennial_hall"
+        ],
+        "preferred_interactions": [
+          "enter_campus",
+          "campus_tour",
+          "public_talk"
+        ],
+        "constraints": "场内台词自然，不作现实世界正式商业承诺；不得描述真实安保或管制细节。"
+      },
+      "location": "百周年纪念讲堂",
+      "location_id": "centennial_hall",
+      "tile_x": 80,
+      "tile_y": 57,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 40,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "group",
+          "sender_id": 16,
+          "sender_name": "梁同学",
+          "content": "三位嘉宾好。学生团队做人工智能产品，面临算力贵、监管不清、市场难进。小团队最应该押注什么，才能做出真实用户愿意付费的产品？",
+          "timestamp": "2026-05-15T18:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 4,
+          "name": "陈老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 7,
+          "name": "赵校友",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 8,
+          "name": "刘阿姨",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 9,
+          "name": "王同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 10,
+          "name": "孙同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 11,
+          "name": "何同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 12,
+          "name": "林记者",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 16,
+          "name": "梁同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 19,
+          "name": "Donald Trump",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 20,
+          "name": "Elon Musk",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 22,
+          "name": "王协调员",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_lecture",
+          "name": "参加讲座",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "public_talk",
+          "name": "公共报告",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "name": "王协调员",
+      "profile": {
+        "name": "王协调员",
+        "age": 38,
+        "gender": "female",
+        "role": "访问流程协调员",
+        "persona": "谨慎、低调、注重流程边界，只处理公开访问节奏，不描述安保细节。",
+        "language_style": "简洁、流程化，避免泄露或生成真实安保细节。",
+        "daily_routine": "在西门和讲堂之间协调公开访问流程，与校园志愿者和主持人对接。",
+        "relationships": "协调 Donald Trump、Elon Musk、Jensen Huang；和王同学、何同学衔接。",
+        "social_network": {
+          "Donald Trump": "代表团主宾",
+          "Elon Musk": "代表团成员",
+          "Jensen Huang": "代表团成员",
+          "王同学": "校园导览对接",
+          "何同学": "讲堂主持对接"
+        },
+        "needs": [
+          "等待公开流程信号",
+          "控制公开流程节奏",
+          "避免安保和管制细节"
+        ],
+        "worries": [
+          "流程太散影响录制",
+          "观众误解场内台词"
+        ],
+        "short_term_goals": [
+          "按指令从西门进入",
+          "提醒代表团按时到讲堂"
+        ],
+        "long_term_goal": "让实验可看、可控、可发布且不误导。",
+        "preferred_locations": [
+          "west_gate",
+          "weiming_lake",
+          "boya_pagoda",
+          "centennial_hall",
+          "admin_building"
+        ],
+        "preferred_interactions": [
+          "enter_campus",
+          "campus_tour",
+          "department_meeting",
+          "public_talk"
+        ],
+        "constraints": "收到明确流程信号前，保持低存在感待命，不主动发布活动信息，不主动发群聊；收到信号后只描述公开交流，不涉及真实安保或管制细节。"
+      },
+      "location": "百周年纪念讲堂",
+      "location_id": "centennial_hall",
+      "tile_x": 80,
+      "tile_y": 57,
+      "action": "已到达百周年纪念讲堂",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 41,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "group",
+          "sender_id": 16,
+          "sender_name": "梁同学",
+          "content": "三位嘉宾好。学生团队做人工智能产品，面临算力贵、监管不清、市场难进。小团队最应该押注什么，才能做出真实用户愿意付费的产品？",
+          "timestamp": "2026-05-15T18:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 20,
+          "sender_name": "Elon Musk",
+          "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T19:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 4,
+          "name": "陈老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 7,
+          "name": "赵校友",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 8,
+          "name": "刘阿姨",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 9,
+          "name": "王同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 10,
+          "name": "孙同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 11,
+          "name": "何同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 12,
+          "name": "林记者",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 16,
+          "name": "梁同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 19,
+          "name": "Donald Trump",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 20,
+          "name": "Elon Musk",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        },
+        {
+          "agent_id": 21,
+          "name": "Jensen Huang",
+          "location_id": "centennial_hall",
+          "location": "百周年纪念讲堂"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 80,
+          "y": 57
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_lecture",
+          "name": "参加讲座",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "public_talk",
+          "name": "公共报告",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    }
+  ],
+  "env": {
+    "step": 23,
+    "t": "2026-05-15 19:50:00+08:00",
+    "total_messages_sent": 141,
+    "active_groups": 1,
+    "total_agents": 22,
+    "active_location_count": 2,
+    "current_phase": "setup",
+    "latest_event": "刘同学 给罗同学 发了私信。",
+    "latest_communications": [
+      {
+        "type": "group",
+        "sender_id": 11,
+        "sender_name": "何同学",
+        "content": "感谢各位参与，今天的公开交流结束。请大家有序离场，校园媒体会继续采访老师和同学的反馈。",
+        "group_id": 1,
+        "group_name": "北大校园",
+        "recipient_count": 22
+      },
+      {
+        "type": "direct",
+        "sender_id": 19,
+        "sender_name": "Donald Trump",
+        "content": "押注真实用户反馈。先做最小可用产品，上线、收集、迭代——速度比完美更重要。",
+        "receiver_id": 16,
+        "receiver_name": "梁同学"
+      },
+      {
+        "type": "group",
+        "sender_id": 1,
+        "sender_name": "罗同学",
+        "content": "我一开始只想看热闹，听完发现同学们问的都是自己会遇见的难题：论文复现、算力、签证、创业成本。",
+        "group_id": 1,
+        "group_name": "北大校园",
+        "recipient_count": 22
+      },
+      {
+        "type": "group",
+        "sender_id": 20,
+        "sender_name": "Elon Musk",
+        "content": "真实用户愿意付费，才是唯一校准器。小团队不押注算力或模型大小，而押注最小可行闭环、快速迭代、以及和用户面对面的深度对话——问题越小，反馈越快，价值越真。",
+        "group_id": 1,
+        "group_name": "北大校园",
+        "recipient_count": 22
+      },
+      {
+        "type": "direct",
+        "sender_id": 2,
+        "sender_name": "王助教",
+        "content": "我把五轮问题和回应都记下来了，稍后按芯片、开源、算力、留学、创业五类整理。",
+        "receiver_id": 5,
+        "receiver_name": "张老师"
+      },
+      {
+        "type": "direct",
+        "sender_id": 22,
+        "sender_name": "王协调员",
+        "content": "何同学您好，第五问已由梁同学提出，三位嘉宾正在依次回应。当前流程自然、节奏平稳，请按需推进。",
+        "receiver_id": 11,
+        "receiver_name": "何同学"
+      },
+      {
+        "type": "group",
+        "sender_id": 5,
+        "sender_name": "张老师",
+        "content": "这场交流价值不在名人效应，而在学生把抽象议题拆成机制问题：开放研究、算力公平、青年交流、创业约束。",
+        "group_id": 1,
+        "group_name": "北大校园",
+        "recipient_count": 22
+      },
+      {
+        "type": "group",
+        "sender_id": 12,
+        "sender_name": "林记者",
+        "content": "我先拟五个标题：1. 北大讲堂追问人工智能与青年交流；2. 学生把问题递给特朗普、马斯克和黄仁勋；3. 算力、开源、留学：今天最热的三组问题；4. PKU students press guests on AI, chips and exchange; 5. 一场公共交流如何暴露青年真正关心的议题。",
+        "group_id": 1,
+        "group_name": "北大校园",
+        "recipient_count": 22
+      },
+      {
+        "type": "direct",
+        "sender_id": 18,
+        "sender_name": "刘同学",
+        "content": "今天素材够剪一整期了：问题具体、回答短，弹幕点肯定在算力公平和开源安全。",
+        "receiver_id": 1,
+        "receiver_name": "罗同学"
+      },
+      {
+        "type": "group",
+        "sender_id": 8,
+        "sender_name": "刘阿姨",
+        "content": "食堂这边刚才还在聊，学生最关心的还是就业、出国、科研资源这些实在事。",
+        "group_id": 1,
+        "group_name": "北大校园",
+        "recipient_count": 22
+      }
+    ]
+  }
+}

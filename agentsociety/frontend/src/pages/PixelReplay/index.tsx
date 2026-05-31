@@ -1128,6 +1128,42 @@ function spriteForAgent(index: number, walkableMap: WalkableMap, profile?: Agent
     return CHARACTER_NAMES[index % CHARACTER_NAMES.length];
 }
 
+function characterSpritesFromProfiles(profiles: AgentProfile[]): ReplayMapCharacter[] {
+    const result: ReplayMapCharacter[] = [];
+    const seen = new Set<string>();
+    profiles.forEach((profile) => {
+        const appearance = asRecord(profile.profile?.appearance);
+        const asset = asRecord(appearance?.character_asset);
+        const name = String(asset?.sprite_name || appearance?.character_sprite || '').trim();
+        const imageUrl = String(asset?.image_url || '').trim();
+        if (!name || !imageUrl || seen.has(name)) {
+            return;
+        }
+        seen.add(name);
+        result.push({
+            name,
+            image_url: imageUrl,
+            frame_width: Number(asset?.frame_width || 32),
+            frame_height: Number(asset?.frame_height || 32),
+        });
+    });
+    return result;
+}
+
+function mergeCharacterSprites(profileSprites: ReplayMapCharacter[], mapSprites: ReplayMapCharacter[]): ReplayMapCharacter[] {
+    const seen = new Set(profileSprites.map((sprite) => sprite.name));
+    return [
+        ...profileSprites,
+        ...mapSprites.filter((sprite) => {
+            if (seen.has(sprite.name)) {
+                return false;
+            }
+            seen.add(sprite.name);
+            return true;
+        }),
+    ];
+}
+
 function buildPixelFrame(
     profiles: AgentProfile[],
     bundle: ReplayStepBundle | undefined,
@@ -1246,7 +1282,7 @@ async function waitForInitialReplay<T>(
     throw lastError ?? new Error('Replay loading was cancelled');
 }
 
-async function loadWalkableMap(mapInfo: ReplayMapInfo, t: TFunction, language: string): Promise<WalkableMap> {
+async function loadWalkableMap(mapInfo: ReplayMapInfo, profiles: AgentProfile[], t: TFunction, language: string): Promise<WalkableMap> {
     const response = await fetchCustom(mapInfo.tiled_map_url);
     if (!response.ok) {
         throw new Error(t('replay.pixel.error.mapLoadFailed', { status: response.status, statusText: response.statusText }));
@@ -1278,7 +1314,10 @@ async function loadWalkableMap(mapInfo: ReplayMapInfo, t: TFunction, language: s
         tiledMapUrl: mapInfo.tiled_map_url,
         previewUrl: mapInfo.preview_url,
         tilesets: mapInfo.tilesets,
-        characterSprites: mapInfo.character_sprites || [],
+        characterSprites: mergeCharacterSprites(
+            characterSpritesFromProfiles(profiles),
+            mapInfo.character_sprites || [],
+        ),
         locations: mapInfo.locations.map((location) => ({
             ...location,
             name: localizeMapLocationName(mapInfo.map_id, location, language),
@@ -2754,8 +2793,11 @@ export default function PixelReplay() {
             try {
                 const { nextMap, nextLiveStatus } = await waitForInitialReplay(
                     async () => {
-                        const mapInfo = await fetchJson<ReplayMapInfo>(withWorkspace('/map'));
-                        const loadedMap = await loadWalkableMap(mapInfo, t, currentLanguage);
+                        const [mapInfo, initialProfiles] = await Promise.all([
+                            fetchJson<ReplayMapInfo>(withWorkspace('/map')),
+                            fetchJson<AgentProfile[]>(withWorkspace('/agents/profiles')),
+                        ]);
+                        const loadedMap = await loadWalkableMap(mapInfo, initialProfiles, t, currentLanguage);
                         let loadedLiveStatus: LiveStatus | undefined;
                         if (liveBaseUrl) {
                             try {

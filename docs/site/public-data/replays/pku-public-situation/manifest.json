@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "slug": "pku-public-situation",
+  "title": "PKU Public Situation",
+  "summary": "A campus-scale public event replay for watching attention, gathering, targeted questions, and live interventions.",
+  "image": "assets/screenshots/map-pku.png",
+  "hypothesis_id": "pku_trump_visit",
+  "experiment_id": "1",
+  "map_pack": "pku",
+  "agent_pack": "pku-campus-cast",
+  "experiment_pack": "pku-public-situation",
+  "tags": [
+    "campus",
+    "public event",
+    "operator replay"
+  ],
+  "total_steps": 24,
+  "agent_count": 22,
+  "command_count": 54,
+  "start_time": "2026-05-15T08:20:00+08:00",
+  "end_time": "2026-05-15T19:50:00+08:00",
+  "urls": {
+    "timeline": "timeline.json",
+    "commands": "commands.json",
+    "profiles": "agents/profiles.json",
+    "map": "map/map.json",
+    "map_pack": "../../map-packs/pku/map_pack.json",
+    "agent_pack": "../../agent-packs/pku-campus-cast/agent_pack.json",
+    "experiment_pack": "../../experiments/pku-public-situation/experiment.json"
+  },
+  "downloads": [
+    {
+      "type": "replay",
+      "label": "Replay data",
+      "href": "downloads/pku-public-situation-replay-data.zip"
+    },
+    {
+      "type": "map",
+      "label": "Map pack",
+      "href": "downloads/pku-map-pack.zip"
+    },
+    {
+      "type": "agent",
+      "label": "Agent pack",
+      "href": "downloads/pku-public-situation-agent-pack.zip"
+    },
+    {
+      "type": "experiment",
+      "label": "Experiment pack",
+      "href": "downloads/pku-public-situation-experiment-pack.zip"
+    }
+  ]
+}

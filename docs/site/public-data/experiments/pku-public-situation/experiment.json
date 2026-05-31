@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "pack_id": "pku-public-situation",
+  "display_name": "PKU Public Situation",
+  "summary": "A campus-scale public event replay for watching attention, gathering, targeted questions, and live interventions.",
+  "replay_slug": "pku-public-situation",
+  "map_pack": "pku",
+  "agent_pack": "pku-campus-cast",
+  "tags": [
+    "campus",
+    "public event",
+    "operator replay"
+  ],
+  "total_steps": 24,
+  "agent_count": 22,
+  "command_count": 54,
+  "urls": {
+    "replay": "../replays/pku-public-situation/manifest.json",
+    "map_pack": "../map-packs/pku/map_pack.json",
+    "agent_pack": "../agent-packs/pku-campus-cast/agent_pack.json"
+  },
+  "downloads": [
+    {
+      "type": "experiment",
+      "label": "Experiment pack",
+      "href": "downloads/pku-public-situation-experiment-pack.zip"
+    }
+  ]
+}

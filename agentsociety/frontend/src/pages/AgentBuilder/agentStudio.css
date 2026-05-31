@@ -110,6 +110,29 @@
     white-space: nowrap;
 }
 
+.agent-studio-agent-hub {
+    display: grid;
+    gap: 10px;
+    margin-top: 12px;
+    margin-bottom: 12px;
+    padding: 12px;
+    border: 1px solid #d9e1ee;
+    border-radius: 8px;
+    background: #fbfdff;
+}
+
+.agent-studio-agent-hub .ant-typography {
+    margin-bottom: 0;
+}
+
+.agent-studio-agent-hub .ant-select-selector {
+    min-width: 0;
+}
+
+.agent-studio-agent-hub .ant-btn {
+    flex: 0 0 auto;
+}
+
 .agent-studio-field-row.compact .ant-upload-wrapper,
 .agent-studio-field-row.compact .ant-upload {
     max-width: 100%;
@@ -444,6 +467,16 @@
 
     .agent-studio-field-row.compact .ant-form-item:last-child {
         justify-self: start;
+    }
+
+    .agent-studio-agent-hub .ant-space-compact {
+        display: grid;
+        gap: 8px;
+    }
+
+    .agent-studio-agent-hub .ant-space-compact .ant-select,
+    .agent-studio-agent-hub .ant-space-compact .ant-btn {
+        width: 100%;
     }
 
     .agent-studio-side {

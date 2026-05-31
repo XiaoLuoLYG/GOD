@@ -1,3 +1,4 @@
+import base64
 import asyncio
 import io
 import json
@@ -336,7 +337,7 @@ def test_agent_studio_character_requires_image_config(monkeypatch, tmp_path):
     assert not list((package / "characters").glob("Generated_Agent_23*.png"))
 
 
-def test_agent_studio_character_generation_writes_map_sprite(monkeypatch, tmp_path):
+def test_agent_studio_character_generation_writes_draft_sprite_not_map_sprite(monkeypatch, tmp_path):
     _configure_tmp_god(monkeypatch, tmp_path)
     package = _write_test_map_package(tmp_path, "the_ville")
     source = Image.new("RGB", (24, 24), (92, 140, 220))
@@ -365,19 +366,36 @@ def test_agent_studio_character_generation_writes_map_sprite(monkeypatch, tmp_pa
         )
 
     asset = anyio.run(call_endpoint)
-    output_path = package / "characters" / asset.filename
+    output_path = tmp_path / "agentsociety" / "custom" / "agent_packs" / "_drafts" / "characters" / asset.filename
 
     assert asset.sprite_name.startswith("Generated_Agent_23")
     assert asset.sprite_name == output_path.stem
+    assert "/agent-studio/draft-characters/" in asset.image_url
     assert asset.image_url.endswith(asset.filename)
     assert asset.preview_data_url and asset.preview_data_url.startswith("data:image/png;base64,")
     assert asset.source["model"] == "gpt-image-1.5"
     assert "key" not in json.dumps(asset.source).lower()
     assert output_path.exists()
+    assert not list((package / "characters").glob("Generated_Agent_23*.png"))
     with Image.open(output_path) as generated:
         assert generated.size == (96, 128)
         assert generated.mode == "RGBA"
     assert "IMAGE_GEN_API_KEY=test-image-key" in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+def test_agent_studio_legacy_character_route_still_reads_map_sprite(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    package = _write_test_map_package(tmp_path, "the_ville")
+    sprite_path = package / "characters" / "Legacy_Alice.png"
+    sprite_path.write_bytes(_large_sprite_sheet_bytes())
+    app = FastAPI()
+    app.include_router(god_setup.router)
+    client = TestClient(app)
+
+    response = client.get("/api/v1/god/setup/agent-studio/characters/the_ville/Legacy_Alice.png")
+
+    assert response.status_code == 200, response.text
+    assert response.content == sprite_path.read_bytes()
 
 
 def test_agent_studio_character_invalid_ai_sheet_retries_without_partial_files(monkeypatch, tmp_path):
@@ -418,6 +436,62 @@ def test_agent_studio_character_invalid_ai_sheet_retries_without_partial_files(m
     assert not list((package / "characters").glob("Generated_Agent_23*.png"))
     env_text = (tmp_path / ".env").read_text(encoding="utf-8") if (tmp_path / ".env").exists() else ""
     assert "IMAGE_GEN_API_KEY" not in env_text
+
+
+def test_agent_studio_save_agent_pack_persists_profile_and_sprite(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    _write_test_map_package(tmp_path, "the_ville")
+    sprite_bytes = _large_sprite_sheet_bytes()
+    sprite_data = "data:image/png;base64," + base64.b64encode(sprite_bytes).decode("ascii")
+    app = FastAPI()
+    app.include_router(god_setup.router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/god/setup/agent-studio/save-agent-pack",
+        json={
+            "pack_id": "moon_transformer",
+            "display_name": "Moon Transformer",
+            "agent": {
+                "agent_id": 23,
+                "agent_type": "JiuwenClawAgent",
+                "kwargs": {
+                    "id": 23,
+                    "name": "Moon Transformer",
+                    "skill_ids": ["routine.daily"],
+                    "profile": {
+                        "name": "Moon Transformer",
+                        "role": "commuter",
+                        "routine": {"initial_location": "lab"},
+                        "appearance": {
+                            "character_asset": {
+                                "sprite_name": "Moon_Transformer",
+                                "filename": "Moon_Transformer.png",
+                                "frame_width": 32,
+                                "frame_height": 32,
+                                "preview_data_url": sprite_data,
+                                "source": {"provider": "openai", "map_id": "the_ville"},
+                            },
+                            "character_sprite": "Moon_Transformer",
+                        },
+                    },
+                },
+            },
+            "initial_location": "lab",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["pack_id"] == "moon_transformer"
+    package = tmp_path / "agentsociety" / "custom" / "agent_packs" / "moon_transformer"
+    assert package.joinpath("agent_pack.yaml").exists()
+    assert package.joinpath("agents", "23", "profile.json").exists()
+    assert package.joinpath("agents", "23", "runtime.json").exists()
+    assert package.joinpath("characters", "Moon_Transformer.png").exists()
+    profile = json.loads(package.joinpath("agents", "23", "profile.json").read_text(encoding="utf-8"))
+    assert profile["appearance"]["character_sprite"] == "Moon_Transformer"
+    assert "preview_data_url" not in json.dumps(profile)
 
 
 def test_image_model_error_redacts_masked_api_key():

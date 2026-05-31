@@ -463,7 +463,7 @@ def validate_manifest_path(manifest_path: Path) -> MapValidation:
             if str(interaction_id) not in interaction_ids:
                 errors.append(f"location {location_id} references unknown interaction: {interaction_id}")
 
-    char_root = str(manifest.get("character_root") or "characters").strip()
+    char_root = str(manifest.get("character_root") or "").strip()
     if char_root:
         try:
             root = safe_resolve(package_root, char_root, package_root)

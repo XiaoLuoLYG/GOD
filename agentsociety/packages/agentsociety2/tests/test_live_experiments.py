@@ -59,6 +59,15 @@ class FakeMoveEnv:
         }
 
 
+class FakeReplayWriter:
+    def __init__(self) -> None:
+        self.rows: list[dict] = []
+
+
+async def fake_write_operator_command(writer, **kwargs):
+    writer.rows.append(kwargs)
+
+
 def test_targeted_live_ask_uses_external_question_api(tmp_path):
     asyncio.run(_targeted_live_ask_uses_external_question_api(tmp_path))
 
@@ -124,3 +133,48 @@ async def _live_intervene_directly_moves_agents_for_gather_instruction(tmp_path)
     assert agents[1].queued == []
     assert "直接调用环境寻路" in result
     assert "path_length=4" in result
+
+
+def test_live_interaction_records_operator_command(monkeypatch, tmp_path):
+    asyncio.run(_live_interaction_records_operator_command(monkeypatch, tmp_path))
+
+
+async def _live_interaction_records_operator_command(monkeypatch, tmp_path):
+    from agentsociety2.backend.routers import live_experiments
+
+    fake_writer = FakeReplayWriter()
+    monkeypatch.setattr(
+        live_experiments,
+        "write_operator_command",
+        fake_write_operator_command,
+    )
+    session = LiveExperimentSession(
+        workspace_path=tmp_path,
+        hypothesis_id="demo",
+        experiment_id="1",
+    )
+    session.replay_writer = fake_writer
+    session.status = "waiting"
+    session.default_tick = 1
+    session.society = SimpleNamespace(
+        step_count=7,
+        current_time=datetime(2026, 5, 31, 9, 30),
+    )
+
+    async def run_answer(society):
+        return "A public event happened."
+
+    response = await session._run_interaction(
+        command_type="ask",
+        busy_status="asking",
+        prompt="What happened?",
+        runner=run_answer,
+        metadata={"target": {"type": "society"}},
+    )
+
+    assert response.type == "ask"
+    assert fake_writer.rows[0]["command_type"] == "ask"
+    assert fake_writer.rows[0]["step"] == 7
+    assert fake_writer.rows[0]["prompt"] == "What happened?"
+    assert fake_writer.rows[0]["target"] == {"type": "society"}
+    assert fake_writer.rows[0]["status"] == "completed"

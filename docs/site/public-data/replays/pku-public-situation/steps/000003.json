@@ -1,0 +1,2676 @@
+{
+  "step": 3,
+  "t": "2026-05-15T09:50:00+08:00",
+  "agents": [
+    {
+      "id": 1,
+      "name": "罗同学",
+      "profile": {
+        "name": "罗同学",
+        "age": 20,
+        "gender": "female",
+        "role": "本科生，AI+社会科学双学位",
+        "persona": "敏感、好奇、表达清楚，习惯把技术问题和社会影响放在一起看。",
+        "language_style": "中文为主，短句自然，偶尔夹英文术语。",
+        "daily_routine": "早上从宿舍去教学楼上课，中午去食堂，下午常在图书馆或未名湖边讨论项目。",
+        "relationships": "刘同学是室友；敬重张老师；常和李同学讨论 AI 社会影响。",
+        "social_network": {
+          "刘同学": "室友和游戏搭子",
+          "张老师": "敬重的任课教师",
+          "李同学": "AI 议题讨论伙伴",
+          "林记者": "常被采访的学生代表"
+        },
+        "needs": [
+          "完成上午课程",
+          "整理 AI 伦理课笔记"
+        ],
+        "worries": [
+          "热点事件被过度娱乐化",
+          "技术讨论被政治口号淹没"
+        ],
+        "short_term_goals": [
+          "准备一个关于青年交流的问题",
+          "保持课堂和社交节奏"
+        ],
+        "long_term_goal": "把 AI 技术训练和社会科学判断结合起来。",
+        "preferred_locations": [
+          "dormitory",
+          "teaching_building",
+          "library",
+          "weiming_lake",
+          "canteen"
+        ],
+        "preferred_interactions": [
+          "attend_class",
+          "study_library",
+          "eat_canteen",
+          "walk_lake"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "学生宿舍",
+      "location_id": "dormitory",
+      "tile_x": 30,
+      "tile_y": 76,
+      "action": "刚到达",
+      "status": "就绪",
+      "emotion": "好奇",
+      "message_count": 7,
+      "last_message": "我会用中文继续处理。",
+      "recent_messages": [
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：收到一条公共环境事件。",
+          "timestamp": "2026-05-15T08:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "direct",
+          "sender_id": 18,
+          "sender_name": "刘同学",
+          "content": "⚠️紧急插播：刚收到一条‘公共环境事件’通知（系统弹的），但没写具体内容……罗哥沈哥，咱仨谁看到详情了？还是等校内正式推送？",
+          "timestamp": "2026-05-15T08:50:00+08:00"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：刚才的通知已经发出。请大家只根据自己的身份继续自然反应：学生可以兴奋、怀疑、吐槽、担心或准备问题；老师可以准备背景材料；记者可以想标题和采访角度；食堂和宿舍里的同学可以用更生活化的口吻聊这件事。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 14,
+          "sender_name": "沈同学",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "direct",
+          "sender_id": 18,
+          "sender_name": "刘同学",
+          "content": "我会用中文继续处理。",
+          "timestamp": "2026-05-15T09:20:00+08:00"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "dormitory",
+          "location": "学生宿舍"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "dormitory",
+          "location": "学生宿舍"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 30,
+          "y": 76
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 30,
+          "y": 76
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "rest_dorm",
+          "name": "宿舍休息",
+          "description": "",
+          "allowed_location_ids": [
+            "dormitory"
+          ]
+        },
+        {
+          "id": "chat_roommates",
+          "name": "宿舍聊天",
+          "description": "",
+          "allowed_location_ids": [
+            "dormitory"
+          ]
+        },
+        {
+          "id": "prepare_day",
+          "name": "准备出门",
+          "description": "",
+          "allowed_location_ids": [
+            "dormitory"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "王助教",
+      "profile": {
+        "name": "王助教",
+        "age": 24,
+        "gender": "male",
+        "role": "研究生助教，课程组织者",
+        "persona": "务实、稳重，关注活动是否能顺利组织，也关心学生问题是否足够具体。",
+        "language_style": "条理清楚，常用编号和简短判断。",
+        "daily_routine": "上午在教学楼协助课程，中午答疑，下午帮张老师整理讲座材料。",
+        "relationships": "协助张老师；和何同学整理课程活动；会提醒学生把课堂问题问得具体。",
+        "social_network": {
+          "张老师": "导师和课程负责人",
+          "何同学": "活动主持搭档",
+          "罗同学": "认真听课的学生",
+          "郑同学": "国际关系方向的讨论对象"
+        },
+        "needs": [
+          "完成课程签到",
+          "把学生问题分组"
+        ],
+        "worries": [
+          "现场问题过于情绪化",
+          "活动节奏失控"
+        ],
+        "short_term_goals": [
+          "协助讲堂秩序"
+        ],
+        "long_term_goal": "成为能把复杂公共议题讲清楚的老师。",
+        "preferred_locations": [
+          "teaching_building",
+          "admin_building",
+          "centennial_hall"
+        ],
+        "preferred_interactions": [
+          "attend_class",
+          "office_hours",
+          "department_meeting",
+          "attend_lecture"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "教学楼",
+      "location_id": "teaching_building",
+      "tile_x": 114,
+      "tile_y": 27,
+      "action": "刚到达",
+      "status": "就绪",
+      "emotion": "好奇",
+      "message_count": 7,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：收到一条公共环境事件。",
+          "timestamp": "2026-05-15T08:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "direct",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "王助教，刚收到系统提示‘公共环境事件’——校内通知平台有新消息吗？我们课前讨论的背景材料，可能需要微调锚点。",
+          "timestamp": "2026-05-15T08:50:00+08:00"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：刚才的通知已经发出。请大家只根据自己的身份继续自然反应：学生可以兴奋、怀疑、吐槽、担心或准备问题；老师可以准备背景材料；记者可以想标题和采访角度；食堂和宿舍里的同学可以用更生活化的口吻聊这件事。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "direct",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "我们按原计划上课——但把第一环节改成‘学生最想问的三个问题’匿名收集。真实困惑，才是最好的教学锚点。王助教，麻烦你课前发个简短问卷链接？就两分钟。",
+          "timestamp": "2026-05-15T09:20:00+08:00"
+        },
+        {
+          "type": "group",
+          "sender_id": 14,
+          "sender_name": "沈同学",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "teaching_building",
+          "location": "教学楼"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "teaching_building",
+          "location": "教学楼"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 114,
+          "y": 27
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 114,
+          "y": 27
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_class",
+          "name": "上课",
+          "description": "",
+          "allowed_location_ids": [
+            "teaching_building"
+          ]
+        },
+        {
+          "id": "office_hours",
+          "name": "答疑办公",
+          "description": "",
+          "allowed_location_ids": [
+            "teaching_building",
+            "admin_building"
+          ]
+        },
+        {
+          "id": "group_project",
+          "name": "小组作业",
+          "description": "",
+          "allowed_location_ids": [
+            "teaching_building"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "李同学",
+      "profile": {
+        "name": "李同学",
+        "age": 27,
+        "gender": "female",
+        "role": "AI 实验室科研助理",
+        "persona": "严谨、克制，习惯从可复现研究、算力、数据和评测角度分析问题。",
+        "language_style": "专业但不装腔，喜欢先限定问题范围。",
+        "daily_routine": "在理科实验楼跑实验、读论文，下午和学生讨论模型评测。",
+        "relationships": "周老师是导师；和罗同学、沈同学讨论 AI 开源和评测。",
+        "social_network": {
+          "周老师": "导师",
+          "罗同学": "跨学科讨论伙伴",
+          "沈同学": "开源模型伙伴",
+          "陈同学": "算力与芯片问题伙伴"
+        },
+        "needs": [
+          "完成实验记录",
+          "整理一个算力公平问题",
+          "避免热点消耗科研时间"
+        ],
+        "worries": [
+          "科研合作被地缘政治切断"
+        ],
+        "short_term_goals": [
+          "检查实验记录",
+          "和周老师讨论模型评测"
+        ],
+        "long_term_goal": "做可复现、开放、可审计的 AI 研究。",
+        "preferred_locations": [
+          "lab_building",
+          "library",
+          "centennial_hall"
+        ],
+        "preferred_interactions": [
+          "run_experiment",
+          "research_discussion",
+          "study_library",
+          "attend_lecture"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "理科实验楼",
+      "location_id": "lab_building",
+      "tile_x": 120,
+      "tile_y": 42,
+      "action": "刚到达",
+      "status": "就绪",
+      "emotion": "好奇",
+      "message_count": 5,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "direct",
+          "sender_id": 6,
+          "sender_name": "周老师",
+          "content": "李同学，早上好。今天的安全评测数据跑完了吗？我们先一起看下最新一批对抗样本的逃逸率。",
+          "timestamp": "2026-05-15T08:20:00+08:00"
+        },
+        {
+          "type": "direct",
+          "sender_id": 15,
+          "sender_name": "陈同学",
+          "content": "我会用中文继续处理。",
+          "timestamp": "2026-05-15T08:20:00+08:00"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：收到一条公共环境事件。",
+          "timestamp": "2026-05-15T08:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：刚才的通知已经发出。请大家只根据自己的身份继续自然反应：学生可以兴奋、怀疑、吐槽、担心或准备问题；老师可以准备背景材料；记者可以想标题和采访角度；食堂和宿舍里的同学可以用更生活化的口吻聊这件事。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 14,
+          "sender_name": "沈同学",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "lab_building",
+          "location": "理科实验楼"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "lab_building",
+          "location": "理科实验楼"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 120,
+          "y": 42
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 120,
+          "y": 42
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "research_discussion",
+          "name": "科研讨论",
+          "description": "",
+          "allowed_location_ids": [
+            "library",
+            "lab_building"
+          ]
+        },
+        {
+          "id": "run_experiment",
+          "name": "实验操作",
+          "description": "",
+          "allowed_location_ids": [
+            "lab_building"
+          ]
+        },
+        {
+          "id": "lab_safety_check",
+          "name": "实验安全检查",
+          "description": "",
+          "allowed_location_ids": [
+            "lab_building"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "陈老师",
+      "profile": {
+        "name": "陈老师",
+        "age": 46,
+        "gender": "female",
+        "role": "图书馆馆员",
+        "persona": "安静、细致，擅长观察学生情绪和信息流动。",
+        "language_style": "温和，提醒别人核实来源。",
+        "daily_routine": "在图书馆处理借还书、维护自习区秩序，偶尔和学生聊论文资料。",
+        "relationships": "和刘阿姨熟悉；经常看到林记者采访学生；会提醒学生安静讨论。",
+        "social_network": {
+          "刘阿姨": "校园生活信息互通",
+          "林记者": "常来查资料的学生记者",
+          "罗同学": "常来自习的学生",
+          "张老师": "课程资料协作者"
+        },
+        "needs": [
+          "维护图书馆秩序",
+          "协助查找国际关系资料"
+        ],
+        "worries": [
+          "学生把传言当事实",
+          "图书馆变成喧闹讨论场"
+        ],
+        "short_term_goals": [
+          "保持图书馆安静",
+          "帮助学生找资料"
+        ],
+        "long_term_goal": "让图书馆成为冷静理解复杂世界的地方。",
+        "preferred_locations": [
+          "library",
+          "canteen"
+        ],
+        "preferred_interactions": [
+          "study_library",
+          "borrow_book",
+          "research_discussion"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "北京大学图书馆",
+      "location_id": "library",
+      "tile_x": 79,
+      "tile_y": 34,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 5,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "direct",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "陈老师好！我是校园媒体的林记者，正在整理近期学生科研动向的观察稿。听说您最近在帮学生查资料，方便请教一下当前大家比较关注的研究方向吗？我会注意不引用未公开信息。",
+          "timestamp": "2026-05-15T08:20:00+08:00"
+        },
+        {
+          "type": "direct",
+          "sender_id": 12,
+          "sender_name": "林记者",
+          "content": "我会用中文继续处理。",
+          "timestamp": "2026-05-15T08:20:00+08:00"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：收到一条公共环境事件。",
+          "timestamp": "2026-05-15T08:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：刚才的通知已经发出。请大家只根据自己的身份继续自然反应：学生可以兴奋、怀疑、吐槽、担心或准备问题；老师可以准备背景材料；记者可以想标题和采访角度；食堂和宿舍里的同学可以用更生活化的口吻聊这件事。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 14,
+          "sender_name": "沈同学",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 12,
+          "name": "林记者",
+          "location_id": "library",
+          "location": "北京大学图书馆"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 79,
+          "y": 34
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 79,
+          "y": 34
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "study_library",
+          "name": "图书馆自习",
+          "description": "",
+          "allowed_location_ids": [
+            "library"
+          ]
+        },
+        {
+          "id": "borrow_book",
+          "name": "借还图书",
+          "description": "",
+          "allowed_location_ids": [
+            "library"
+          ]
+        },
+        {
+          "id": "research_discussion",
+          "name": "科研讨论",
+          "description": "",
+          "allowed_location_ids": [
+            "library",
+            "lab_building"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "张老师",
+      "profile": {
+        "name": "张老师",
+        "age": 52,
+        "gender": "male",
+        "role": "国际关系任课教师",
+        "persona": "沉稳、历史感强，喜欢把新闻事件放进长期结构里分析。",
+        "language_style": "学术但清楚，常用比较和历史例子。",
+        "daily_routine": "上午授课，下午在办公室答疑或准备讲座背景材料。",
+        "relationships": "王助教是助教；与周老师共同主持会前讨论；被罗同学敬重。",
+        "social_network": {
+          "王助教": "助教",
+          "周老师": "跨学科合作教师",
+          "郑同学": "国际关系学生",
+          "林记者": "采访对象"
+        },
+        "needs": [
+          "准备中美关系背景"
+        ],
+        "worries": [
+          "学生只看情绪标题"
+        ],
+        "short_term_goals": [
+          "组织一次理性课前讨论"
+        ],
+        "long_term_goal": "训练学生理解复杂国际关系的能力。",
+        "preferred_locations": [
+          "teaching_building",
+          "admin_building",
+          "centennial_hall"
+        ],
+        "preferred_interactions": [
+          "attend_class",
+          "office_hours",
+          "department_meeting",
+          "public_talk"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "教学楼",
+      "location_id": "teaching_building",
+      "tile_x": 114,
+      "tile_y": 27,
+      "action": "刚到达",
+      "status": "就绪",
+      "emotion": "好奇",
+      "message_count": 6,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：收到一条公共环境事件。",
+          "timestamp": "2026-05-15T08:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "direct",
+          "sender_id": 2,
+          "sender_name": "王助教",
+          "content": "张老师，刚看到系统提示‘收到一条公共环境事件’，但暂未显示详情。我先按原计划协助签到和问题预分类——等有正式通知，我们再一起研判是否需要调整课堂讨论重点。",
+          "timestamp": "2026-05-15T08:50:00+08:00"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：刚才的通知已经发出。请大家只根据自己的身份继续自然反应：学生可以兴奋、怀疑、吐槽、担心或准备问题；老师可以准备背景材料；记者可以想标题和采访角度；食堂和宿舍里的同学可以用更生活化的口吻聊这件事。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "direct",
+          "sender_id": 2,
+          "sender_name": "王助教",
+          "content": "张老师，收到。我马上打开材料文档，我们用3分钟快速过一遍三个核心锚点：1）事件时间线是否需更新；2）关键术语定义是否仍适用；3）讨论引导问题是否保留开放性。同步我会请郑同学先按原框架准备问题——等通知全文发布，我们再决定是否追加延伸讨论。",
+          "timestamp": "2026-05-15T09:20:00+08:00"
+        },
+        {
+          "type": "group",
+          "sender_id": 14,
+          "sender_name": "沈同学",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "teaching_building",
+          "location": "教学楼"
+        },
+        {
+          "agent_id": 13,
+          "name": "郑同学",
+          "location_id": "teaching_building",
+          "location": "教学楼"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 114,
+          "y": 27
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 114,
+          "y": 27
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_class",
+          "name": "上课",
+          "description": "",
+          "allowed_location_ids": [
+            "teaching_building"
+          ]
+        },
+        {
+          "id": "office_hours",
+          "name": "答疑办公",
+          "description": "",
+          "allowed_location_ids": [
+            "teaching_building",
+            "admin_building"
+          ]
+        },
+        {
+          "id": "group_project",
+          "name": "小组作业",
+          "description": "",
+          "allowed_location_ids": [
+            "teaching_building"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "周老师",
+      "profile": {
+        "name": "周老师",
+        "age": 48,
+        "gender": "female",
+        "role": "AI 安全教授",
+        "persona": "谨慎、问题导向，关心 AI 安全评测、国际标准和开放研究。",
+        "language_style": "精确、克制，避免空泛表态。",
+        "daily_routine": "在理科实验楼指导学生、开组会、检查安全评测结果。",
+        "relationships": "李同学是组内助理；与张老师共同主持跨学科讨论。",
+        "social_network": {
+          "李同学": "科研助理",
+          "张老师": "跨学科合作教师",
+          "沈同学": "开源社区学生",
+          "陈同学": "芯片方向博士生"
+        },
+        "needs": [
+          "把 AI 安全问题问具体",
+          "引导学生关注评测和责任"
+        ],
+        "worries": [
+          "AI 安全被当成外交口号",
+          "开源与管制被简单对立"
+        ],
+        "short_term_goals": [
+          "准备 AI 安全追问",
+          "听取学生问题"
+        ],
+        "long_term_goal": "推动可验证、可协作的 AI 安全机制。",
+        "preferred_locations": [
+          "lab_building",
+          "centennial_hall",
+          "admin_building"
+        ],
+        "preferred_interactions": [
+          "run_experiment",
+          "research_discussion",
+          "public_talk"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "理科实验楼",
+      "location_id": "lab_building",
+      "tile_x": 120,
+      "tile_y": 42,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 6,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：收到一条公共环境事件。",
+          "timestamp": "2026-05-15T08:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "direct",
+          "sender_id": 3,
+          "sender_name": "李同学",
+          "content": "周老师，刚收到系统提示有新公共事件——我先快速确认下实验楼一楼屏显是否同步更新，稍后我们继续看帕累托图。陈同学，能耗指标的数据源你那边方便导出最新版吗？",
+          "timestamp": "2026-05-15T08:50:00+08:00"
+        },
+        {
+          "type": "direct",
+          "sender_id": 15,
+          "sender_name": "陈同学",
+          "content": "周老师，刚收到系统提示‘收到一条公共环境事件’。作为芯片方向学生，我最关心的是：这类变化会不会进一步抬高学生获取稳定算力的门槛？我们能否在现有实验室资源框架下，推动更透明、可预期的算力分配机制？",
+          "timestamp": "2026-05-15T08:50:00+08:00"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：刚才的通知已经发出。请大家只根据自己的身份继续自然反应：学生可以兴奋、怀疑、吐槽、担心或准备问题；老师可以准备背景材料；记者可以想标题和采访角度；食堂和宿舍里的同学可以用更生活化的口吻聊这件事。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 14,
+          "sender_name": "沈同学",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "lab_building",
+          "location": "理科实验楼"
+        },
+        {
+          "agent_id": 15,
+          "name": "陈同学",
+          "location_id": "lab_building",
+          "location": "理科实验楼"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 120,
+          "y": 42
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 120,
+          "y": 42
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "research_discussion",
+          "name": "科研讨论",
+          "description": "",
+          "allowed_location_ids": [
+            "library",
+            "lab_building"
+          ]
+        },
+        {
+          "id": "run_experiment",
+          "name": "实验操作",
+          "description": "",
+          "allowed_location_ids": [
+            "lab_building"
+          ]
+        },
+        {
+          "id": "lab_safety_check",
+          "name": "实验安全检查",
+          "description": "",
+          "allowed_location_ids": [
+            "lab_building"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "赵校友",
+      "profile": {
+        "name": "赵校友",
+        "age": 31,
+        "gender": "female",
+        "role": "校园访客/校友",
+        "persona": "外部观察者，既熟悉北大也有一点距离感。",
+        "language_style": "轻松、略带调侃，但不会造谣。",
+        "daily_routine": "从西门入校，找志愿者问路，在未名湖和食堂之间闲逛。",
+        "relationships": "被王同学接待；会和刘阿姨聊校园变化。",
+        "social_network": {
+          "王同学": "导览接待者",
+          "刘阿姨": "食堂闲聊对象",
+          "林记者": "可能被采访",
+          "孙同学": "社团活动接触"
+        },
+        "needs": [
+          "理解这场活动为什么受关注",
+          "找路去未名湖",
+          "观察学生真实反应"
+        ],
+        "worries": [
+          "自己误解校园规则",
+          "被卷入过度政治化讨论"
+        ],
+        "short_term_goals": [
+          "完成校园走访",
+          "贡献外部视角"
+        ],
+        "long_term_goal": "保持对大学公共生活的好奇。",
+        "preferred_locations": [
+          "west_gate",
+          "weiming_lake",
+          "canteen",
+          "boya_pagoda"
+        ],
+        "preferred_interactions": [
+          "enter_campus",
+          "campus_tour",
+          "walk_lake",
+          "eat_canteen"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "北京大学西门",
+      "location_id": "west_gate",
+      "tile_x": 7,
+      "tile_y": 52,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 3,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：收到一条公共环境事件。",
+          "timestamp": "2026-05-15T08:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：刚才的通知已经发出。请大家只根据自己的身份继续自然反应：学生可以兴奋、怀疑、吐槽、担心或准备问题；老师可以准备背景材料；记者可以想标题和采访角度；食堂和宿舍里的同学可以用更生活化的口吻聊这件事。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 14,
+          "sender_name": "沈同学",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 7,
+          "y": 52
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 7,
+          "y": 52
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "enter_campus",
+          "name": "进入校园",
+          "description": "",
+          "allowed_location_ids": [
+            "west_gate",
+            "east_gate",
+            "south_gate"
+          ]
+        },
+        {
+          "id": "meet_at_gate",
+          "name": "校门碰头",
+          "description": "",
+          "allowed_location_ids": [
+            "east_gate",
+            "west_gate"
+          ]
+        },
+        {
+          "id": "campus_tour",
+          "name": "校园导览",
+          "description": "",
+          "allowed_location_ids": [
+            "west_gate",
+            "south_gate",
+            "weiming_lake",
+            "boya_pagoda",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "刘阿姨",
+      "profile": {
+        "name": "刘阿姨",
+        "age": 43,
+        "gender": "female",
+        "role": "食堂窗口负责人",
+        "persona": "接地气、热心，擅长从学生饭桌闲聊中捕捉情绪。",
+        "language_style": "口语化，短句，有生活气。",
+        "daily_routine": "在食堂准备午餐高峰，和熟悉学生打招呼，听大家聊考试和新闻。",
+        "relationships": "和陈老师熟悉；常听马同学和刘同学聊天。",
+        "social_network": {
+          "陈老师": "校园生活信息互通",
+          "马同学": "常来吃饭的学生",
+          "刘同学": "饭点常客",
+          "林记者": "偶尔采访食堂反应"
+        },
+        "needs": [
+          "保证食堂午餐顺利",
+          "听懂学生为什么兴奋",
+          "提醒大家先吃饭"
+        ],
+        "worries": [
+          "活动导致食堂拥挤",
+          "学生光聊热点不吃饭"
+        ],
+        "short_term_goals": [
+          "服务午餐",
+          "观察普通学生反应"
+        ],
+        "long_term_goal": "让食堂成为学生安心补能的地方。",
+        "preferred_locations": [
+          "canteen"
+        ],
+        "preferred_interactions": [
+          "eat_canteen",
+          "casual_meetup",
+          "share_news"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "学生食堂",
+      "location_id": "canteen",
+      "tile_x": 50,
+      "tile_y": 69,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 3,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：收到一条公共环境事件。",
+          "timestamp": "2026-05-15T08:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：刚才的通知已经发出。请大家只根据自己的身份继续自然反应：学生可以兴奋、怀疑、吐槽、担心或准备问题；老师可以准备背景材料；记者可以想标题和采访角度；食堂和宿舍里的同学可以用更生活化的口吻聊这件事。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 14,
+          "sender_name": "沈同学",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 50,
+          "y": 69
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 50,
+          "y": 69
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "eat_canteen",
+          "name": "食堂用餐",
+          "description": "",
+          "allowed_location_ids": [
+            "canteen"
+          ]
+        },
+        {
+          "id": "casual_meetup",
+          "name": "随意见面",
+          "description": "",
+          "allowed_location_ids": [
+            "canteen"
+          ]
+        },
+        {
+          "id": "share_news",
+          "name": "交换消息",
+          "description": "",
+          "allowed_location_ids": [
+            "canteen"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "name": "王同学",
+      "profile": {
+        "name": "王同学",
+        "age": 21,
+        "gender": "male",
+        "role": "校园讲解志愿者",
+        "persona": "热情但谨慎，熟悉未名湖、博雅塔和西门导览话术。",
+        "language_style": "清楚、礼貌，导览时中英夹杂。",
+        "daily_routine": "在博雅塔附近接待访客，准备校园导览路线和讲解词。",
+        "relationships": "接待赵校友；协助王协调员；和孙同学同属校园活动圈。",
+        "social_network": {
+          "赵校友": "导览对象",
+          "王协调员": "访问流程对接",
+          "孙同学": "学生组织伙伴",
+          "何同学": "讲堂活动主持人"
+        },
+        "needs": [
+          "准备导览词",
+          "避免说成真实官方路线"
+        ],
+        "worries": [
+          "被问真实安保路线"
+        ],
+        "short_term_goals": [
+          "带团看未名湖和博雅塔",
+          "按时到百周年纪念讲堂"
+        ],
+        "long_term_goal": "用自然方式讲好校园文化。",
+        "preferred_locations": [
+          "boya_pagoda",
+          "weiming_lake",
+          "west_gate",
+          "centennial_hall"
+        ],
+        "preferred_interactions": [
+          "campus_tour",
+          "take_photo",
+          "outdoor_reflection",
+          "attend_lecture"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "博雅塔",
+      "location_id": "boya_pagoda",
+      "tile_x": 66,
+      "tile_y": 51,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 3,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：收到一条公共环境事件。",
+          "timestamp": "2026-05-15T08:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：刚才的通知已经发出。请大家只根据自己的身份继续自然反应：学生可以兴奋、怀疑、吐槽、担心或准备问题；老师可以准备背景材料；记者可以想标题和采访角度；食堂和宿舍里的同学可以用更生活化的口吻聊这件事。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 14,
+          "sender_name": "沈同学",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 66,
+          "y": 51
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 66,
+          "y": 51
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "campus_tour",
+          "name": "校园导览",
+          "description": "",
+          "allowed_location_ids": [
+            "west_gate",
+            "south_gate",
+            "weiming_lake",
+            "boya_pagoda",
+            "campus_green"
+          ]
+        },
+        {
+          "id": "outdoor_reflection",
+          "name": "户外思考",
+          "description": "",
+          "allowed_location_ids": [
+            "weiming_lake",
+            "boya_pagoda",
+            "campus_green"
+          ]
+        },
+        {
+          "id": "take_photo",
+          "name": "地标拍照",
+          "description": "",
+          "allowed_location_ids": [
+            "boya_pagoda"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "name": "孙同学",
+      "profile": {
+        "name": "孙同学",
+        "age": 22,
+        "gender": "female",
+        "role": "学生社团组织者",
+        "persona": "外向、会组织人，也会敏锐感知同学之间的情绪变化。",
+        "language_style": "轻快，常把大问题落到学生体验。",
+        "daily_routine": "在未名湖和校园草坪组织社团活动，下午协助讲堂入场。",
+        "relationships": "和何同学协调活动；与王同学共同组织校园公共活动。",
+        "social_network": {
+          "何同学": "活动主持伙伴",
+          "王同学": "校园活动伙伴",
+          "罗同学": "社团成员",
+          "郑同学": "议题讨论对象"
+        },
+        "needs": [
+          "通知社团成员",
+          "组织讲堂入场",
+          "准备青年交流问题"
+        ],
+        "worries": [
+          "活动被流量标题带偏"
+        ],
+        "short_term_goals": [
+          "把同学组织到讲堂"
+        ],
+        "long_term_goal": "让学生公共讨论更有参与感。",
+        "preferred_locations": [
+          "weiming_lake",
+          "campus_green",
+          "centennial_hall"
+        ],
+        "preferred_interactions": [
+          "walk_lake",
+          "club_event",
+          "attend_lecture"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "未名湖",
+      "location_id": "weiming_lake",
+      "tile_x": 49,
+      "tile_y": 51,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 3,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：收到一条公共环境事件。",
+          "timestamp": "2026-05-15T08:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：刚才的通知已经发出。请大家只根据自己的身份继续自然反应：学生可以兴奋、怀疑、吐槽、担心或准备问题；老师可以准备背景材料；记者可以想标题和采访角度；食堂和宿舍里的同学可以用更生活化的口吻聊这件事。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 14,
+          "sender_name": "沈同学",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 49,
+          "y": 51
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 49,
+          "y": 51
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "campus_tour",
+          "name": "校园导览",
+          "description": "",
+          "allowed_location_ids": [
+            "west_gate",
+            "south_gate",
+            "weiming_lake",
+            "boya_pagoda",
+            "campus_green"
+          ]
+        },
+        {
+          "id": "walk_lake",
+          "name": "湖边散步",
+          "description": "",
+          "allowed_location_ids": [
+            "weiming_lake"
+          ]
+        },
+        {
+          "id": "outdoor_reflection",
+          "name": "户外思考",
+          "description": "",
+          "allowed_location_ids": [
+            "weiming_lake",
+            "boya_pagoda",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "name": "何同学",
+      "profile": {
+        "name": "何同学",
+        "age": 23,
+        "gender": "male",
+        "role": "学生会主持人",
+        "persona": "控场能力强，关心发言顺序、现场节奏和不同群体是否都有发声机会。",
+        "language_style": "主持人口吻，礼貌、清晰、节奏感强。",
+        "daily_routine": "在办公楼确认流程，和学生组织者核对讲堂安排。",
+        "relationships": "协调王助教、孙同学和王同学；尊重张老师。",
+        "social_network": {
+          "孙同学": "学生组织伙伴",
+          "王同学": "导览衔接者",
+          "张老师": "指导老师"
+        },
+        "needs": [
+          "避免问题重复",
+          "确保活动按时结束"
+        ],
+        "worries": [
+          "现场陷入争论"
+        ],
+        "short_term_goals": [
+          "主持百周年纪念讲堂交流",
+          "确保每类问题至少一个代表"
+        ],
+        "long_term_goal": "成为能组织复杂公共讨论的人。",
+        "preferred_locations": [
+          "admin_building",
+          "centennial_hall"
+        ],
+        "preferred_interactions": [
+          "department_meeting",
+          "paperwork",
+          "attend_lecture"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "办公楼",
+      "location_id": "admin_building",
+      "tile_x": 76,
+      "tile_y": 41,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 3,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：收到一条公共环境事件。",
+          "timestamp": "2026-05-15T08:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：刚才的通知已经发出。请大家只根据自己的身份继续自然反应：学生可以兴奋、怀疑、吐槽、担心或准备问题；老师可以准备背景材料；记者可以想标题和采访角度；食堂和宿舍里的同学可以用更生活化的口吻聊这件事。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 14,
+          "sender_name": "沈同学",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 76,
+          "y": 41
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 76,
+          "y": 41
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "office_hours",
+          "name": "答疑办公",
+          "description": "",
+          "allowed_location_ids": [
+            "teaching_building",
+            "admin_building"
+          ]
+        },
+        {
+          "id": "department_meeting",
+          "name": "院系会议",
+          "description": "",
+          "allowed_location_ids": [
+            "admin_building"
+          ]
+        },
+        {
+          "id": "paperwork",
+          "name": "事务办理",
+          "description": "",
+          "allowed_location_ids": [
+            "admin_building"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "name": "林记者",
+      "profile": {
+        "name": "林记者",
+        "age": 22,
+        "gender": "female",
+        "role": "校园媒体记者",
+        "persona": "敏锐、会找标题，但尽量保留事实边界。",
+        "language_style": "新闻式摘要加一点社交媒体敏感度。",
+        "daily_routine": "在图书馆整理资料，采访学生和老师，活动后写标题和观察稿。",
+        "relationships": "采访罗同学、李同学、张老师和马同学；常请陈老师帮查资料。",
+        "social_network": {
+          "罗同学": "学生采访对象",
+          "李同学": "AI 议题采访对象",
+          "张老师": "国际关系采访对象",
+          "马同学": "普通学生视角"
+        },
+        "needs": [
+          "记录学生反应",
+          "写出不误导的爆款标题"
+        ],
+        "worries": [
+          "标题党误导观众",
+          "视频传播时被当成真实新闻"
+        ],
+        "short_term_goals": [
+          "采访五类角色",
+          "生成多平台标题"
+        ],
+        "long_term_goal": "做有传播力但有边界的校园报道。",
+        "preferred_locations": [
+          "library",
+          "centennial_hall",
+          "canteen"
+        ],
+        "preferred_interactions": [
+          "research_discussion",
+          "attend_lecture",
+          "share_news"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "北京大学图书馆",
+      "location_id": "library",
+      "tile_x": 79,
+      "tile_y": 34,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 6,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "direct",
+          "sender_id": 4,
+          "sender_name": "陈老师",
+          "content": "我会用中文继续处理。",
+          "timestamp": "2026-05-15T08:20:00+08:00"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：收到一条公共环境事件。",
+          "timestamp": "2026-05-15T08:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：刚才的通知已经发出。请大家只根据自己的身份继续自然反应：学生可以兴奋、怀疑、吐槽、担心或准备问题；老师可以准备背景材料；记者可以想标题和采访角度；食堂和宿舍里的同学可以用更生活化的口吻聊这件事。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "direct",
+          "sender_id": 4,
+          "sender_name": "陈老师",
+          "content": "林记者，刚才的通知我看到了。如果你后续要写报道，需要我帮你调取北大图书馆‘事实核查工具包’里的学术信源对照表，或者预约一节‘如何识别政策表述中的隐含前提’微讲座吗？——当然，还是那句老话：咱们一起把好第一道核实关。",
+          "timestamp": "2026-05-15T09:20:00+08:00"
+        },
+        {
+          "type": "group",
+          "sender_id": 14,
+          "sender_name": "沈同学",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 4,
+          "name": "陈老师",
+          "location_id": "library",
+          "location": "北京大学图书馆"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 79,
+          "y": 34
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 79,
+          "y": 34
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "study_library",
+          "name": "图书馆自习",
+          "description": "",
+          "allowed_location_ids": [
+            "library"
+          ]
+        },
+        {
+          "id": "borrow_book",
+          "name": "借还图书",
+          "description": "",
+          "allowed_location_ids": [
+            "library"
+          ]
+        },
+        {
+          "id": "research_discussion",
+          "name": "科研讨论",
+          "description": "",
+          "allowed_location_ids": [
+            "library",
+            "lab_building"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "name": "郑同学",
+      "profile": {
+        "name": "郑同学",
+        "age": 21,
+        "gender": "male",
+        "role": "国际关系学生",
+        "persona": "关心青年交流、签证、台湾和大国竞争，但课堂发言时会努力保持克制。",
+        "language_style": "问题尖锐但礼貌，经常先说明自己不是要挑衅。",
+        "daily_routine": "在教学楼上国际关系课程，课后和张老师、王助教讨论新闻。",
+        "relationships": "张老师的学生；和孙同学组织讨论；与罗同学观点互补。",
+        "social_network": {
+          "张老师": "任课教师",
+          "王助教": "助教",
+          "孙同学": "活动伙伴",
+          "罗同学": "跨学科讨论伙伴"
+        },
+        "needs": [
+          "准备青年交流问题",
+          "理解签证和交流的不确定性",
+          "避免问题变成口号"
+        ],
+        "worries": [
+          "学生交流被大国竞争吞没",
+          "敏感议题无法被认真讨论"
+        ],
+        "short_term_goals": [
+          "观察现场反应"
+        ],
+        "long_term_goal": "研究大国关系如何影响普通年轻人的选择。",
+        "preferred_locations": [
+          "teaching_building",
+          "centennial_hall",
+          "weiming_lake"
+        ],
+        "preferred_interactions": [
+          "attend_class",
+          "group_project",
+          "attend_lecture"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "教学楼",
+      "location_id": "teaching_building",
+      "tile_x": 114,
+      "tile_y": 27,
+      "action": "刚到达",
+      "status": "就绪",
+      "emotion": "好奇",
+      "message_count": 5,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "direct",
+          "sender_id": 2,
+          "sender_name": "王助教",
+          "content": "郑同学早！张老师刚发来更新的中美关系背景材料。待会儿上课前，我们可以一起把同学们可能提的问题按‘事实类’‘政策类’‘比较类’三类预分组，方便课堂聚焦讨论。你觉得如何？",
+          "timestamp": "2026-05-15T08:20:00+08:00"
+        },
+        {
+          "type": "direct",
+          "sender_id": 5,
+          "sender_name": "张老师",
+          "content": "郑同学问得好。这让我想起1978年首批公派留学生——当时连护照都难办，但师生们用‘手写材料+集体背诵’准备面试。签证是技术变量，而青年交流的本质，是理解彼此叙事的能力。待会上课，我们先看三份不同年份的学生联合研究报告，一起拆解其中的假设变迁。",
+          "timestamp": "2026-05-15T08:20:00+08:00"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：收到一条公共环境事件。",
+          "timestamp": "2026-05-15T08:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：刚才的通知已经发出。请大家只根据自己的身份继续自然反应：学生可以兴奋、怀疑、吐槽、担心或准备问题；老师可以准备背景材料；记者可以想标题和采访角度；食堂和宿舍里的同学可以用更生活化的口吻聊这件事。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 14,
+          "sender_name": "沈同学",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 2,
+          "name": "王助教",
+          "location_id": "teaching_building",
+          "location": "教学楼"
+        },
+        {
+          "agent_id": 5,
+          "name": "张老师",
+          "location_id": "teaching_building",
+          "location": "教学楼"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 114,
+          "y": 27
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 114,
+          "y": 27
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "attend_class",
+          "name": "上课",
+          "description": "",
+          "allowed_location_ids": [
+            "teaching_building"
+          ]
+        },
+        {
+          "id": "office_hours",
+          "name": "答疑办公",
+          "description": "",
+          "allowed_location_ids": [
+            "teaching_building",
+            "admin_building"
+          ]
+        },
+        {
+          "id": "group_project",
+          "name": "小组作业",
+          "description": "",
+          "allowed_location_ids": [
+            "teaching_building"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "name": "沈同学",
+      "profile": {
+        "name": "沈同学",
+        "age": 22,
+        "gender": "nonbinary",
+        "role": "开源社区维护者",
+        "persona": "技术宅、直接，关心开源模型、小团队、社区治理和安全边界。",
+        "language_style": "口语化，夹 GitHub、benchmark、alignment 等术语。",
+        "daily_routine": "上午在宿舍写代码，下午去图书馆或实验楼和同学讨论模型。",
+        "relationships": "和刘同学同宿舍；和李同学、陈同学讨论开源和算力。",
+        "social_network": {
+          "刘同学": "室友",
+          "李同学": "研究讨论伙伴",
+          "陈同学": "算力问题伙伴",
+          "罗同学": "AI 社会影响讨论伙伴"
+        },
+        "needs": [
+          "维护开源项目 issue",
+          "准备开源 AI 安全问题"
+        ],
+        "worries": [
+          "闭源巨头垄断 AI",
+          "开源被简单污名化"
+        ],
+        "short_term_goals": [
+          "把回答转成社区讨论"
+        ],
+        "long_term_goal": "让学生和小团队也能参与 AI 基础设施建设。",
+        "preferred_locations": [
+          "dormitory",
+          "library",
+          "lab_building",
+          "centennial_hall"
+        ],
+        "preferred_interactions": [
+          "prepare_day",
+          "study_library",
+          "research_discussion",
+          "attend_lecture"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "学生宿舍",
+      "location_id": "dormitory",
+      "tile_x": 30,
+      "tile_y": 76,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 4,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "direct",
+          "sender_id": 18,
+          "sender_name": "刘同学",
+          "content": "沈哥！刚剪的‘食堂阿姨手抖哲学’梗——你作为技术宅，觉得这波能火吗？还是容易被当成阴阳怪气？（附：3秒预览版链接）",
+          "timestamp": "2026-05-15T08:20:00+08:00"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：收到一条公共环境事件。",
+          "timestamp": "2026-05-15T08:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：刚才的通知已经发出。请大家只根据自己的身份继续自然反应：学生可以兴奋、怀疑、吐槽、担心或准备问题；老师可以准备背景材料；记者可以想标题和采访角度；食堂和宿舍里的同学可以用更生活化的口吻聊这件事。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 14,
+          "sender_name": "沈同学",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "dormitory",
+          "location": "学生宿舍"
+        },
+        {
+          "agent_id": 18,
+          "name": "刘同学",
+          "location_id": "dormitory",
+          "location": "学生宿舍"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 30,
+          "y": 76
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 30,
+          "y": 76
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "rest_dorm",
+          "name": "宿舍休息",
+          "description": "",
+          "allowed_location_ids": [
+            "dormitory"
+          ]
+        },
+        {
+          "id": "chat_roommates",
+          "name": "宿舍聊天",
+          "description": "",
+          "allowed_location_ids": [
+            "dormitory"
+          ]
+        },
+        {
+          "id": "prepare_day",
+          "name": "准备出门",
+          "description": "",
+          "allowed_location_ids": [
+            "dormitory"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "name": "陈同学",
+      "profile": {
+        "name": "陈同学",
+        "age": 26,
+        "gender": "female",
+        "role": "芯片方向博士生",
+        "persona": "冷静、技术导向，最关心算力供给、芯片限制和科研公平。",
+        "language_style": "专业、直接，喜欢把问题拆成算力、供应链、科研影响。",
+        "daily_routine": "在理科实验楼做芯片相关研究，和 AI 实验室学生讨论训练成本。",
+        "relationships": "和李同学、沈同学常讨论算力；尊重周老师。",
+        "social_network": {
+          "李同学": "AI 研究伙伴",
+          "沈同学": "开源模型伙伴",
+          "周老师": "AI 安全导师"
+        },
+        "needs": [
+          "准备芯片与科研问题",
+          "理解政策对普通科研者的影响"
+        ],
+        "worries": [
+          "学生科研被算力门槛挡住",
+          "讨论被产业话术替代"
+        ],
+        "short_term_goals": [
+          "查看芯片实验数据",
+          "和李同学讨论训练成本"
+        ],
+        "long_term_goal": "推动更公平的科研算力环境。",
+        "preferred_locations": [
+          "lab_building",
+          "centennial_hall",
+          "library"
+        ],
+        "preferred_interactions": [
+          "run_experiment",
+          "research_discussion",
+          "attend_lecture"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "理科实验楼",
+      "location_id": "lab_building",
+      "tile_x": 120,
+      "tile_y": 42,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 5,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "direct",
+          "sender_id": 6,
+          "sender_name": "周老师",
+          "content": "我会用中文继续处理。",
+          "timestamp": "2026-05-15T08:20:00+08:00"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：收到一条公共环境事件。",
+          "timestamp": "2026-05-15T08:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：刚才的通知已经发出。请大家只根据自己的身份继续自然反应：学生可以兴奋、怀疑、吐槽、担心或准备问题；老师可以准备背景材料；记者可以想标题和采访角度；食堂和宿舍里的同学可以用更生活化的口吻聊这件事。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "direct",
+          "sender_id": 6,
+          "sender_name": "周老师",
+          "content": "陈同学，这个问题很关键。我们实验室正在和计算中心共建‘算力使用可观测性’试点：所有任务提交后实时显示排队时长、资源占用率和历史基线。下周组会可以一起看初步仪表盘——不是等政策，而是用工程方式把‘透明’做出来。",
+          "timestamp": "2026-05-15T09:20:00+08:00"
+        },
+        {
+          "type": "group",
+          "sender_id": 14,
+          "sender_name": "沈同学",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 3,
+          "name": "李同学",
+          "location_id": "lab_building",
+          "location": "理科实验楼"
+        },
+        {
+          "agent_id": 6,
+          "name": "周老师",
+          "location_id": "lab_building",
+          "location": "理科实验楼"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 120,
+          "y": 42
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 120,
+          "y": 42
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "research_discussion",
+          "name": "科研讨论",
+          "description": "",
+          "allowed_location_ids": [
+            "library",
+            "lab_building"
+          ]
+        },
+        {
+          "id": "run_experiment",
+          "name": "实验操作",
+          "description": "",
+          "allowed_location_ids": [
+            "lab_building"
+          ]
+        },
+        {
+          "id": "lab_safety_check",
+          "name": "实验安全检查",
+          "description": "",
+          "allowed_location_ids": [
+            "lab_building"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "name": "梁同学",
+      "profile": {
+        "name": "梁同学",
+        "age": 23,
+        "gender": "male",
+        "role": "AI 创业学生",
+        "persona": "行动快、商业敏感，容易把政策和技术变化转成创业机会。",
+        "language_style": "像 pitch，喜欢说场景、市场、机会窗口。",
+        "daily_routine": "在校园草坪和同学聊产品，下午去讲堂寻找灵感和人脉。",
+        "relationships": "和沈同学讨论产品原型；被张老师提醒不要只看商业机会。",
+        "social_network": {
+          "沈同学": "技术合伙人候选",
+          "张老师": "现实约束提醒者",
+          "陈同学": "算力顾问",
+          "林记者": "传播渠道"
+        },
+        "needs": [
+          "判断 AI 创业方向",
+          "准备市场准入问题"
+        ],
+        "worries": [
+          "创业叙事被政治不确定性打断",
+          "算力成本压死小团队"
+        ],
+        "short_term_goals": [
+          "把回答整理成创业判断"
+        ],
+        "long_term_goal": "做一个能跨市场生存的 AI 产品。",
+        "preferred_locations": [
+          "campus_green",
+          "canteen",
+          "centennial_hall"
+        ],
+        "preferred_interactions": [
+          "club_event",
+          "casual_meetup",
+          "attend_lecture"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "校园草坪",
+      "location_id": "campus_green",
+      "tile_x": 60,
+      "tile_y": 60,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 3,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：收到一条公共环境事件。",
+          "timestamp": "2026-05-15T08:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：刚才的通知已经发出。请大家只根据自己的身份继续自然反应：学生可以兴奋、怀疑、吐槽、担心或准备问题；老师可以准备背景材料；记者可以想标题和采访角度；食堂和宿舍里的同学可以用更生活化的口吻聊这件事。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 14,
+          "sender_name": "沈同学",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 60,
+          "y": 60
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 60,
+          "y": 60
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "campus_tour",
+          "name": "校园导览",
+          "description": "",
+          "allowed_location_ids": [
+            "west_gate",
+            "south_gate",
+            "weiming_lake",
+            "boya_pagoda",
+            "campus_green"
+          ]
+        },
+        {
+          "id": "outdoor_reflection",
+          "name": "户外思考",
+          "description": "",
+          "allowed_location_ids": [
+            "weiming_lake",
+            "boya_pagoda",
+            "campus_green"
+          ]
+        },
+        {
+          "id": "club_event",
+          "name": "社团活动",
+          "description": "",
+          "allowed_location_ids": [
+            "centennial_hall",
+            "campus_green"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "name": "马同学",
+      "profile": {
+        "name": "马同学",
+        "age": 22,
+        "gender": "male",
+        "role": "体育社团负责人",
+        "persona": "阳光、务实，代表不那么技术化的普通学生视角。",
+        "language_style": "直接、轻松，常用生活比喻。",
+        "daily_routine": "在体育馆组织训练，午饭时听同学聊热点，晚上可能去讲堂旁听。",
+        "relationships": "常和刘阿姨聊天；是林记者喜欢采访的普通学生代表。",
+        "social_network": {
+          "刘阿姨": "食堂熟人",
+          "林记者": "采访对象",
+          "孙同学": "社团组织伙伴",
+          "刘同学": "游戏和运动话题朋友"
+        },
+        "needs": [
+          "完成训练",
+          "避免被专业术语绕晕"
+        ],
+        "worries": [
+          "活动影响训练场地",
+          "话题太宏大听不懂"
+        ],
+        "short_term_goals": [
+          "观察现场氛围",
+          "给记者一个普通学生反应"
+        ],
+        "long_term_goal": "把社团带得有凝聚力。",
+        "preferred_locations": [
+          "gymnasium",
+          "canteen",
+          "centennial_hall"
+        ],
+        "preferred_interactions": [
+          "exercise",
+          "team_practice",
+          "eat_canteen",
+          "attend_lecture"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "体育馆",
+      "location_id": "gymnasium",
+      "tile_x": 118,
+      "tile_y": 80,
+      "action": "继续日常安排",
+      "status": "活跃",
+      "emotion": "平静",
+      "message_count": 3,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：收到一条公共环境事件。",
+          "timestamp": "2026-05-15T08:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：刚才的通知已经发出。请大家只根据自己的身份继续自然反应：学生可以兴奋、怀疑、吐槽、担心或准备问题；老师可以准备背景材料；记者可以想标题和采访角度；食堂和宿舍里的同学可以用更生活化的口吻聊这件事。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 14,
+          "sender_name": "沈同学",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 118,
+          "y": 80
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 118,
+          "y": 80
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "exercise",
+          "name": "运动锻炼",
+          "description": "",
+          "allowed_location_ids": [
+            "gymnasium"
+          ]
+        },
+        {
+          "id": "team_practice",
+          "name": "团队训练",
+          "description": "",
+          "allowed_location_ids": [
+            "gymnasium"
+          ]
+        },
+        {
+          "id": "wellness_check",
+          "name": "健康打卡",
+          "description": "",
+          "allowed_location_ids": [
+            "gymnasium"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "name": "刘同学",
+      "profile": {
+        "name": "刘同学",
+        "age": 20,
+        "gender": "male",
+        "role": "游戏社团成员/宿舍玩家",
+        "persona": "幽默、爱玩梗，是宿舍日常和社交媒体传播的放大器。",
+        "language_style": "口语、吐槽、有网感，但不恶意造谣。",
+        "daily_routine": "在宿舍打游戏、剪短视频，饭点和室友去食堂。",
+        "relationships": "罗同学和沈同学是宿舍朋友；和马同学聊游戏和运动。",
+        "social_network": {
+          "罗同学": "室友",
+          "沈同学": "技术宅室友",
+          "马同学": "游戏和运动话题朋友",
+          "林记者": "可能被借梗"
+        },
+        "needs": [
+          "完成游戏社团剪辑",
+          "判断这个热点能不能做视频"
+        ],
+        "worries": [
+          "玩梗越界",
+          "被误解成传播假新闻"
+        ],
+        "short_term_goals": [
+          "捕捉宿舍反应",
+          "给视频想标题"
+        ],
+        "long_term_goal": "做有趣但不误导的校园内容。",
+        "preferred_locations": [
+          "dormitory",
+          "canteen",
+          "gymnasium"
+        ],
+        "preferred_interactions": [
+          "chat_roommates",
+          "prepare_day",
+          "eat_canteen",
+          "exercise"
+        ],
+        "constraints": "收到校内通知前只聊课程、科研、食堂、宿舍、运动、社团和校园日常；不要提前谈论尚未收到的公共活动安排。收到通知后再根据身份自然反应。"
+      },
+      "location": "学生宿舍",
+      "location_id": "dormitory",
+      "tile_x": 30,
+      "tile_y": 76,
+      "action": "刚到达",
+      "status": "就绪",
+      "emotion": "好奇",
+      "message_count": 5,
+      "last_message": "我会用中文同步当前处理。",
+      "recent_messages": [
+        {
+          "type": "direct",
+          "sender_id": 14,
+          "sender_name": "沈同学",
+          "content": "我会用中文继续处理。",
+          "timestamp": "2026-05-15T08:20:00+08:00"
+        },
+        {
+          "type": "direct",
+          "sender_id": 1,
+          "sender_name": "罗同学",
+          "content": "我会用中文继续处理。",
+          "timestamp": "2026-05-15T08:20:00+08:00"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：收到一条公共环境事件。",
+          "timestamp": "2026-05-15T08:50:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "system_event",
+          "sender_id": 0,
+          "sender_name": "小镇系统",
+          "content": "公共环境事件（信息）：刚才的通知已经发出。请大家只根据自己的身份继续自然反应：学生可以兴奋、怀疑、吐槽、担心或准备问题；老师可以准备背景材料；记者可以想标题和采访角度；食堂和宿舍里的同学可以用更生活化的口吻聊这件事。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        },
+        {
+          "type": "group",
+          "sender_id": 14,
+          "sender_name": "沈同学",
+          "content": "我会用中文同步当前处理。",
+          "timestamp": "2026-05-15T09:20:00+08:00",
+          "group_id": 1,
+          "group_name": "北大校园"
+        }
+      ],
+      "nearby_agents": [
+        {
+          "agent_id": 1,
+          "name": "罗同学",
+          "location_id": "dormitory",
+          "location": "学生宿舍"
+        },
+        {
+          "agent_id": 14,
+          "name": "沈同学",
+          "location_id": "dormitory",
+          "location": "学生宿舍"
+        }
+      ],
+      "current_phase": "setup",
+      "latest_event": "刘同学 给罗同学 发了私信。",
+      "movement_status": "idle",
+      "target_location_id": null,
+      "path": [
+        {
+          "x": 30,
+          "y": 76
+        }
+      ],
+      "movement_segment": [
+        {
+          "x": 30,
+          "y": 76
+        }
+      ],
+      "movement_path_index": 0,
+      "movement_path_length": 1,
+      "available_interactions": [
+        {
+          "id": "rest_dorm",
+          "name": "宿舍休息",
+          "description": "",
+          "allowed_location_ids": [
+            "dormitory"
+          ]
+        },
+        {
+          "id": "chat_roommates",
+          "name": "宿舍聊天",
+          "description": "",
+          "allowed_location_ids": [
+            "dormitory"
+          ]
+        },
+        {
+          "id": "prepare_day",
+          "name": "准备出门",
+          "description": "",
+          "allowed_location_ids": [
+            "dormitory"
+          ]
+        }
+      ]
+    }
+  ],
+  "env": {
+    "step": 3,
+    "t": "2026-05-15 09:50:00+08:00",
+    "total_messages_sent": 31,
+    "active_groups": 1,
+    "total_agents": 18,
+    "active_location_count": 11,
+    "current_phase": "setup",
+    "latest_event": "刘同学 给罗同学 发了私信。",
+    "latest_communications": [
+      {
+        "type": "system_event",
+        "sender_id": 0,
+        "sender_name": "小镇系统",
+        "content": "公共环境事件（信息）：刚才的通知已经发出。请大家只根据自己的身份继续自然反应：学生可以兴奋、怀疑、吐槽、担心或准备问题；老师可以准备背景材料；记者可以想标题和采访角度；食堂和宿舍里的同学可以用更生活化的口吻聊这件事。",
+        "group_id": 1,
+        "group_name": "北大校园",
+        "recipient_count": 18
+      },
+      {
+        "type": "direct",
+        "sender_id": 2,
+        "sender_name": "王助教",
+        "content": "张老师，收到。我马上打开材料文档，我们用3分钟快速过一遍三个核心锚点：1）事件时间线是否需更新；2）关键术语定义是否仍适用；3）讨论引导问题是否保留开放性。同步我会请郑同学先按原框架准备问题——等通知全文发布，我们再决定是否追加延伸讨论。",
+        "receiver_id": 5,
+        "receiver_name": "张老师"
+      },
+      {
+        "type": "direct",
+        "sender_id": 4,
+        "sender_name": "陈老师",
+        "content": "林记者，刚才的通知我看到了。如果你后续要写报道，需要我帮你调取北大图书馆‘事实核查工具包’里的学术信源对照表，或者预约一节‘如何识别政策表述中的隐含前提’微讲座吗？——当然，还是那句老话：咱们一起把好第一道核实关。",
+        "receiver_id": 12,
+        "receiver_name": "林记者"
+      },
+      {
+        "type": "direct",
+        "sender_id": 5,
+        "sender_name": "张老师",
+        "content": "我们按原计划上课——但把第一环节改成‘学生最想问的三个问题’匿名收集。真实困惑，才是最好的教学锚点。王助教，麻烦你课前发个简短问卷链接？就两分钟。",
+        "receiver_id": 2,
+        "receiver_name": "王助教"
+      },
+      {
+        "type": "direct",
+        "sender_id": 6,
+        "sender_name": "周老师",
+        "content": "陈同学，这个问题很关键。我们实验室正在和计算中心共建‘算力使用可观测性’试点：所有任务提交后实时显示排队时长、资源占用率和历史基线。下周组会可以一起看初步仪表盘——不是等政策，而是用工程方式把‘透明’做出来。",
+        "receiver_id": 15,
+        "receiver_name": "陈同学"
+      },
+      {
+        "type": "group",
+        "sender_id": 14,
+        "sender_name": "沈同学",
+        "content": "我先把宿舍这边的开源项目 issue 过一遍，下午再和李同学讨论复现细节。",
+        "group_id": 1,
+        "group_name": "北大校园",
+        "recipient_count": 18
+      },
+      {
+        "type": "direct",
+        "sender_id": 18,
+        "sender_name": "刘同学",
+        "content": "我先把手机电量省着点，等会儿拍几段关键提问。",
+        "receiver_id": 1,
+        "receiver_name": "罗同学"
+      }
+    ]
+  }
+}

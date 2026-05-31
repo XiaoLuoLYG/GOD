@@ -19,6 +19,9 @@ COLUMN_CATALOG_TABLE = "replay_column_catalog"
 AGENT_PROFILE_DATASET_ID = "core.agent_profile"
 AGENT_PROFILE_TABLE_NAME = "core_agent_profile"
 AGENT_PROFILE_DATASET_CAPABILITY = "agent_profile"
+OPERATOR_COMMAND_DATASET_ID = "core.operator_command"
+OPERATOR_COMMAND_TABLE_NAME = "core_operator_command"
+OPERATOR_COMMAND_DATASET_CAPABILITY = "operator_command"
 
 
 @dataclass

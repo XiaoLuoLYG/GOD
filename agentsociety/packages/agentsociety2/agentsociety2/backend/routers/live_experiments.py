@@ -29,6 +29,7 @@ from agentsociety2.society.cli import ExperimentRunner
 from agentsociety2.society.models import RunStep
 from agentsociety2.society.society import AgentSociety
 from agentsociety2.storage import ReplayWriter
+from agentsociety2.storage.operator_commands import write_operator_command
 
 logger = get_logger()
 
@@ -950,6 +951,19 @@ class LiveExperimentSession:
                     result,
                     metadata=metadata,
                 )
+                if self.replay_writer is not None:
+                    await write_operator_command(
+                        self.replay_writer,
+                        command_id=command_id,
+                        command_type=command_type,
+                        step=society.step_count,
+                        simulation_time=society.current_time,
+                        prompt=prompt,
+                        target=metadata.get("target") if metadata else None,
+                        result=result,
+                        artifact_name=artifact_name,
+                        status="completed",
+                    )
             except asyncio.CancelledError:
                 await self._mark_interaction_failed(
                     command_id=command_id,

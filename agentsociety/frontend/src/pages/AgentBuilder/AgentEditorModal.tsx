@@ -21,9 +21,11 @@ import {
     BgColorsOutlined,
     CheckCircleOutlined,
     ExperimentOutlined,
+    ImportOutlined,
     PictureOutlined,
     ReloadOutlined,
     RobotOutlined,
+    SaveOutlined,
     UploadOutlined,
     UserOutlined,
 } from '@ant-design/icons';
@@ -103,6 +105,56 @@ type CharacterAsset = {
     generated_from_photo?: boolean;
     preview_data_url?: string | null;
     source?: Record<string, unknown>;
+};
+
+type AgentPackSprite = {
+    path: string;
+    image_url?: string;
+    name?: string;
+    frame_width?: number;
+    frame_height?: number;
+};
+
+type AgentPackAgent = {
+    id: string;
+    name: string;
+    profile?: Record<string, any>;
+    runtime?: {
+        agent_type?: string;
+        kwargs?: Record<string, any>;
+    };
+    sprite?: AgentPackSprite;
+};
+
+type AgentPackSummary = {
+    pack_id: string;
+    display_name: string;
+    scope: 'global' | 'map';
+    map_id?: string | null;
+    agents: AgentPackAgent[];
+};
+
+const agentPackAgentSelectionKey = (pack: AgentPackSummary, agent: AgentPackAgent) => JSON.stringify({
+    scope: pack.scope,
+    map_id: pack.map_id || null,
+    pack_id: pack.pack_id,
+    agent_id: agent.id,
+});
+
+const parseAgentPackAgentSelectionKey = (value?: string) => {
+    if (!value) return null;
+    try {
+        const parsed = JSON.parse(value);
+        if (!parsed || typeof parsed !== 'object') return null;
+        return {
+            scope: String(parsed.scope || ''),
+            map_id: parsed.map_id ? String(parsed.map_id) : null,
+            pack_id: String(parsed.pack_id || ''),
+            agent_id: String(parsed.agent_id || ''),
+        };
+    } catch {
+        return null;
+    }
 };
 
 const defaultImageConfig = {
@@ -254,6 +306,10 @@ const absoluteAssetUrl = (url?: string) => {
     return `${base}${url.startsWith('/') ? url : `/${url}`}`;
 };
 
+const basename = (path: string) => path.split('/').filter(Boolean).pop() || path;
+const stem = (filename: string) => filename.replace(/\.[^.]+$/, '');
+const slugify = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '') || 'agent-pack';
+
 export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
     open,
     editingAgentId,
@@ -298,6 +354,9 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
     const [warnings, setWarnings] = useState<string[]>([]);
     const [autoGeneratePending, setAutoGeneratePending] = useState(false);
     const [touchedSemanticGroups, setTouchedSemanticGroups] = useState<Set<string>>(() => new Set());
+    const [agentPacks, setAgentPacks] = useState<AgentPackSummary[]>([]);
+    const [agentPacksLoading, setAgentPacksLoading] = useState(false);
+    const [selectedPackAgent, setSelectedPackAgent] = useState<string>();
 
     const profileForView = useMemo(() => safeParseObject(profileJsonText, {}), [profileJsonText]);
     const appearanceForView = asRecord(profileForView.appearance);
@@ -322,6 +381,30 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
     const contextBackground = localizedContextValue(experimentContext, 'background', i18n.language)
         || localizedContextValue(experimentContext, 'world_setting', i18n.language);
     const selectedLocationLabel = labelForChoice(groupById.get('initial_location'), initialLocationValue);
+    const agentPackOptions = useMemo(() => agentPacks.flatMap((pack) => (
+        (pack.agents || []).map((agent) => ({
+            value: agentPackAgentSelectionKey(pack, agent),
+            label: `${agent.name || agent.id} · ${pack.display_name}${pack.scope === 'map' ? ` (${pack.map_id || mapId})` : ''}`,
+        }))
+    )), [agentPacks, mapId]);
+
+    const selectedPackAgentRecord = useMemo(() => {
+        const selected = parseAgentPackAgentSelectionKey(selectedPackAgent);
+        if (!selected) return null;
+        const pack = agentPacks.find((item) => (
+            item.pack_id === selected.pack_id
+            && item.scope === selected.scope
+            && (item.map_id || null) === selected.map_id
+        ));
+        const agent = pack?.agents.find((item) => String(item.id) === selected.agent_id);
+        return pack && agent ? { pack, agent } : null;
+    }, [agentPacks, selectedPackAgent]);
+
+    const packAssetUrl = (pack: AgentPackSummary, sprite?: AgentPackSprite) => {
+        if (!sprite?.path) return '';
+        const query = pack.scope === 'map' && pack.map_id ? `?map_id=${encodeURIComponent(pack.map_id)}` : '';
+        return `/api/v1/god/agent-packs/${encodeURIComponent(pack.pack_id)}/assets/${sprite.path}${query}`;
+    };
 
     const buildLocalGroups = (
         nextSelected: Record<string, string>,
@@ -759,6 +842,35 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
     }, [open, editingAgentId, initialValues]);
 
     useEffect(() => {
+        if (!open) return;
+        let cancelled = false;
+        setAgentPacksLoading(true);
+        fetchCustom(`/api/v1/god/agent-packs?map_id=${encodeURIComponent(mapId)}`)
+            .then(async (response) => {
+                if (!response.ok) throw new Error(await response.text());
+                return response.json();
+            })
+            .then((payload) => {
+                if (cancelled) return;
+                setAgentPacks(Array.isArray(payload.agent_packs) ? payload.agent_packs : []);
+            })
+            .catch((error) => {
+                if (!cancelled) {
+                    setAgentPacks([]);
+                    message.warning(copy('agentHubLoadFailed', { error: error instanceof Error ? error.message : String(error) }));
+                }
+            })
+            .finally(() => {
+                if (!cancelled) setAgentPacksLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+        // Agent Hub is reloaded when the modal opens or the selected map changes.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open, mapId]);
+
+    useEffect(() => {
         setCurrentStep((value) => Math.min(value, stepKeys.length - 1));
     }, [stepKeys.length]);
 
@@ -821,6 +933,87 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         }
     };
 
+    const importSelectedPackAgent = () => {
+        if (!selectedPackAgentRecord) return;
+        const { pack, agent } = selectedPackAgentRecord;
+        const importedProfile = { ...(agent.profile || {}) };
+        const knownLocations = new Set(mapLocations.map((location) => location.id));
+        const routine = asRecord(importedProfile.routine);
+        const rawInitialLocation = String(routine.initial_location || '');
+        const nextInitialLocation = knownLocations.has(rawInitialLocation)
+            ? rawInitialLocation
+            : firstLocationId(mapLocations, defaultInitialLocation);
+        if (rawInitialLocation && rawInitialLocation !== nextInitialLocation) {
+            message.warning(copy('locationRemapped', { from: rawInitialLocation, to: nextInitialLocation }));
+        }
+        importedProfile.routine = {
+            ...routine,
+            initial_location: nextInitialLocation,
+        };
+        importedProfile.name = importedProfile.name || agent.name;
+
+        let nextCharacterAsset: CharacterAsset | null = null;
+        if (agent.sprite?.path) {
+            const filename = basename(agent.sprite.path);
+            const spriteName = agent.sprite.name || stem(filename);
+            const imageUrl = packAssetUrl(pack, agent.sprite);
+            nextCharacterAsset = {
+                sprite_name: spriteName,
+                filename,
+                image_url: imageUrl,
+                frame_width: Number(agent.sprite.frame_width || 32),
+                frame_height: Number(agent.sprite.frame_height || 32),
+                source: {
+                    agent_pack: pack.pack_id,
+                    scope: pack.scope,
+                    map_id: pack.map_id || undefined,
+                },
+            };
+            const appearance = asRecord(importedProfile.appearance);
+            importedProfile.appearance = {
+                ...appearance,
+                character_asset: {
+                    sprite_name: spriteName,
+                    filename,
+                    image_url: imageUrl,
+                    frame_width: nextCharacterAsset.frame_width,
+                    frame_height: nextCharacterAsset.frame_height,
+                    source: nextCharacterAsset.source,
+                },
+                character_sprite: spriteName,
+                character_sprite_filename: filename,
+                character_sprite_source: nextCharacterAsset.source,
+            };
+        } else {
+            nextCharacterAsset = assetFromProfile(importedProfile);
+        }
+
+        const runtime = asRecord(agent.runtime);
+        const runtimeKwargs = asRecord(runtime.kwargs);
+        const restRuntimeKwargs = { ...runtimeKwargs };
+        delete restRuntimeKwargs.id;
+        delete restRuntimeKwargs.name;
+        delete restRuntimeKwargs.profile;
+        const importedName = String(importedProfile.name || agent.name || name || `Agent ${agentId}`);
+        const studio = asRecord(importedProfile.agent_studio);
+        const draft = buildStudioDraft(importedProfile, studio, nextInitialLocation);
+        setName(importedName);
+        setAgentType(String(runtime.agent_type || agentType || 'JiuwenClawAgent'));
+        setPhotoFile(null);
+        setPhotoName('');
+        setPhotoPreviewUrl('');
+        setCharacterAsset(nextCharacterAsset);
+        setProfileJsonText(jsonStringify(importedProfile));
+        setKwargsJsonText(jsonStringify(restRuntimeKwargs));
+        setSelectedChoices(draft.selected);
+        setCustomChoices(draft.custom);
+        setGroups(draft.groups);
+        setInitialLocationValue(nextInitialLocation);
+        setWarnings([]);
+        setTouchedSemanticGroups(new Set());
+        message.success(copy('importedFromHub', { name: importedName }));
+    };
+
     const selectChoice = (group: StudioGroup, value: string) => {
         const nextSelected = { ...selectedChoices, [group.id]: value };
         const nextInitial = group.id === 'initial_location' ? value : initialLocationValue;
@@ -873,34 +1066,65 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         await requestGeneration(nextRound, lockedChoices, customChoices, groupId);
     };
 
-    const submitAgent = async () => {
+    const buildCurrentAgent = () => {
         if (photoFile && !characterAsset) {
             message.warning(copy('spriteRequiredBeforeSave'));
-            return;
+            return null;
         }
-        try {
-            const baseProfile = parseJsonObject(profileJsonText, 'profile_json');
-            const nextSelected = { ...selectedChoices, initial_location: initialLocationValue };
-            const profile = mergeProfilePatch(
-                baseProfile,
-                patchFromSelections(nextSelected, customChoices, groups, characterAsset, photoName, touchedSemanticGroups),
-                nextSelected,
-                customChoices,
-                characterAsset,
-                photoName,
+        const baseProfile = parseJsonObject(profileJsonText, 'profile_json');
+        const nextSelected = { ...selectedChoices, initial_location: initialLocationValue };
+        const profile = mergeProfilePatch(
+            baseProfile,
+            patchFromSelections(nextSelected, customChoices, groups, characterAsset, photoName, touchedSemanticGroups),
+            nextSelected,
+            customChoices,
+            characterAsset,
+            photoName,
+            name,
+        );
+        const extraKwargs = parseJsonObject(kwargsJsonText, 'kwargs_json');
+        return {
+            agent_id: Number(agentId),
+            agent_type: agentType,
+            kwargs: {
+                ...extraKwargs,
+                id: Number(agentId),
                 name,
-            );
-            const extraKwargs = parseJsonObject(kwargsJsonText, 'kwargs_json');
-            const agent: AgentRecord = {
-                agent_id: Number(agentId),
-                agent_type: agentType,
-                kwargs: {
-                    ...extraKwargs,
-                    id: Number(agentId),
-                    name,
-                    profile,
-                },
-            };
+                profile,
+            },
+        } as AgentRecord;
+    };
+
+    const saveCurrentAgentToHub = async () => {
+        try {
+            const agent = buildCurrentAgent();
+            if (!agent) return;
+            const response = await fetchCustom('/api/v1/god/setup/agent-studio/save-agent-pack', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    pack_id: slugify(name || `agent-${agentId}`),
+                    display_name: name || `Agent ${agentId}`,
+                    agent,
+                    initial_location: initialLocationValue,
+                }),
+            });
+            if (!response.ok) throw new Error(await response.text());
+            const payload = await response.json() as AgentPackSummary;
+            setAgentPacks((current) => {
+                const withoutCurrent = current.filter((pack) => pack.pack_id !== payload.pack_id);
+                return [payload, ...withoutCurrent];
+            });
+            message.success(copy('savedToHub', { name: payload.display_name || name }));
+        } catch (error) {
+            message.error(copy('saveToHubFailed', { error: error instanceof Error ? error.message : String(error) }));
+        }
+    };
+
+    const submitAgent = async () => {
+        try {
+            const agent = buildCurrentAgent();
+            if (!agent) return;
             await onSave(agent, { initial_location: initialLocationValue });
         } catch (error) {
             message.error(error instanceof Error ? error.message : t('agentBuilder.editor.invalidForm'));
@@ -1002,6 +1226,27 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                         placeholder={copy('seedPlaceholder')}
                     />
                 </Form.Item>
+                <div className="agent-studio-agent-hub">
+                    <div>
+                        <Text strong>{copy('agentHub')}</Text>
+                        <Paragraph type="secondary">{copy('agentHubHint')}</Paragraph>
+                    </div>
+                    <Space.Compact style={{ width: '100%' }}>
+                        <Select
+                            loading={agentPacksLoading}
+                            value={selectedPackAgent}
+                            onChange={setSelectedPackAgent}
+                            options={agentPackOptions}
+                            placeholder={agentPackOptions.length ? copy('agentHubPlaceholder') : copy('agentHubEmpty')}
+                            showSearch
+                            optionFilterProp="label"
+                            style={{ minWidth: 0, flex: 1 }}
+                        />
+                        <Button icon={<ImportOutlined />} disabled={!selectedPackAgentRecord} onClick={importSelectedPackAgent}>
+                            {copy('importFromHub')}
+                        </Button>
+                    </Space.Compact>
+                </div>
                 <div className="agent-studio-field-row compact">
                     <Form.Item label="MBTI">
                         <Input value={mbti} onChange={(event) => setMbti(event.target.value.toUpperCase())} placeholder="INTP / ENFJ" maxLength={4} />
@@ -1188,6 +1433,9 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                         <Tag color="blue">{labelForChoice(groupById.get('identity_role'), selectedChoices.identity_role || '')}</Tag>
                         <Tag color="purple">{labelForChoice(groupById.get('personality_core'), selectedChoices.personality_core || '')}</Tag>
                         <Tag color="green">{selectedLocationLabel}</Tag>
+                        <Button size="small" icon={<SaveOutlined />} onClick={saveCurrentAgentToHub}>
+                            {copy('saveToHub')}
+                        </Button>
                     </Space>
                 </div>
             </div>
