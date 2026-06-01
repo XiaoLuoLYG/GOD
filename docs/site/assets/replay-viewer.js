@@ -257,11 +257,16 @@
     if (!list || !state.manifest) {
       return;
     }
-    list.innerHTML = (state.manifest.downloads || []).map(function (item) {
+    var visibleDownloads = (state.manifest.downloads || []).filter(function (item) {
+      return !item.hidden && item.type !== "replay";
+    });
+    list.innerHTML = visibleDownloads.map(function (item) {
+      var description = item.description ? '<span>' + escapeHtml(item.description) + '</span>' : '<span>' + escapeHtml(item.type) + '</span>';
+      var action = item.type === "experiment" ? "Download ExperimentPack" : "Download";
       return [
         '<a class="download-row" href="' + dataUrl(item.href) + '">',
-        '  <span><strong>' + escapeHtml(item.label) + '</strong><span>' + escapeHtml(item.type) + '</span></span>',
-        '  <span>Download</span>',
+        '  <span><strong>' + escapeHtml(item.label) + '</strong>' + description + '</span>',
+        '  <span>' + escapeHtml(action) + '</span>',
         '</a>'
       ].join("");
     }).join("");

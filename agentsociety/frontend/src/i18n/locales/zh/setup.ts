@@ -77,7 +77,7 @@ export default {
         customDescription: '用模型生成新实验草案，编辑智能体和环境参数，然后发布为当前实验。',
         createCustom: '新建实验配置',
         importTitle: '导入实验',
-        importDescription: '把 ExperimentPack Zip 安装到本地工作区。',
+        importDescription: '把可玩的 ExperimentPack Zip 安装到本地工作区。',
         importExperiment: '导入实验 Zip',
     },
     defaultExperiments: {

@@ -1,2 +1,0 @@
-{"time": "2026-05-18T04:52:24.525675+00:00", "agent_id": 4, "skill_id": "routine.daily", "kind": "skill_event", "content": "记录了技能事件：日常安排。", "metadata": {"skill_id": "routine.daily"}}
-{"time": "2026-05-18T04:56:47.399057+00:00", "agent_id": 4, "skill_id": "map.navigate", "kind": "skill_event", "content": "记录了技能事件：地图导航。", "metadata": {"skill_id": "map.navigate"}}

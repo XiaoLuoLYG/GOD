@@ -63,5 +63,7 @@ export default {
         error: '错误',
         warning: '警告',
         unexpectedType: '这个 zip 是 {{type}} 包。',
+        ignoredRunTitle: '已忽略本地运行状态',
+        ignoredRunDescription: 'ExperimentPack 只会安装可玩的实验设定，旧包里的 run 目录、日志、数据库和智能体运行快照不会进入导入后的实验。',
     }
 }; 

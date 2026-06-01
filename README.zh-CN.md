@@ -105,7 +105,7 @@ http://127.0.0.1:5174/pixel-replay/god_town/1
 
 |     | 能力 | 你得到什么 |
 | --- | --- | --- |
-| 🎬 | **Replay 控制** | 按 step 拖动、暂停、跳转、自动推进，live 或 replay 都行。 |
+| 🎬 | **Replay 控制** | 按 step 拖动、暂停、跳转、自动推进，live 或已记录 replay 都行。 |
 | 💬 | **定向提问** | 用自然语言向某个 Agent、某组人或全镇提问。 |
 | 🎛️ | **实时干预** | 给即将执行的 step 注入指令，Agent 下一回合就读得到。 |
 | ⌨️ | **命令输入器** | 在地图上直接输入 `/ask` 或 `/intervene`，用 `@Name #id` 自动补全目标。 |
@@ -145,6 +145,12 @@ flowchart LR
 
 GOD 是 local-first：控制台、后端、runtime bridge、实验文件和 replay store 都运行在本机。唯一外部服务是你选择的模型接口。
 
+GOD 把三个概念分开：
+
+- **Experiment** 是可玩的实验设定：地图、智能体、场景上下文和 step 计划。
+- **Replay** 是实验被运行之后可以观看的结果。
+- **本地运行状态** 是 SQLite replay store、日志、agent snapshot 等机器数据；它不属于 ExperimentPack，也不应该提交到仓库。
+
 | 层 | 职责 |
 | --- | --- |
 | 🎮 **Control Room** | React/Vite 控制台 —— replay、ask、intervention、status 都在这里。 |
@@ -158,7 +164,7 @@ GOD 是 local-first：控制台、后端、runtime bridge、实验文件和 repl
 ./scripts/god.sh start      # 启动完整栈（可重复执行）
 ./scripts/god.sh configure  # 打开配置向导，切换默认实验或新建实验
 ./scripts/god.sh restart    # 先干净停止，再重新启动
-./scripts/god.sh new-run    # 清空当前实验 run，并开一个新的 session
+./scripts/god.sh new-run    # 清空当前实验的本地运行状态，并开一个新的 session
 ./scripts/god.sh status     # 查看端口、URL、模型状态
 ./scripts/god.sh stop       # 停止所有服务
 ./scripts/god.sh tail       # 跟随日志

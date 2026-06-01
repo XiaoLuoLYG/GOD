@@ -63,5 +63,7 @@ export default {
         error: 'Error',
         warning: 'Warning',
         unexpectedType: 'This zip is a {{type}} package.',
+        ignoredRunTitle: 'Local run state was ignored',
+        ignoredRunDescription: 'ExperimentPacks install the playable setup only. Existing run folders, logs, databases, and agent runtime snapshots stay out of the imported experiment.',
     }
 }; 

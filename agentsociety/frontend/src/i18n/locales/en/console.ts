@@ -28,7 +28,7 @@ export default {
         viewLog: "View Log",
         export: "Export All",
         exportArtifacts: "Export Artifacts",
-        exportExperimentPack: "Export Experiment Pack",
+        exportExperimentPack: "Export Playable Experiment Pack",
         delete: "Delete",
         createExperiment: "Create Experiment"
     },

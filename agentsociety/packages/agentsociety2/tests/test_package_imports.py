@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -53,6 +54,25 @@ def test_import_preview_rejects_unknown_zip(monkeypatch, tmp_path: Path) -> None
 
     assert response.status_code == 400
     assert "Could not identify package type" in response.text
+
+
+def test_import_preview_rejects_replay_data_archive(monkeypatch, tmp_path: Path) -> None:
+    client = _client(monkeypatch, tmp_path)
+    zip_path = tmp_path / "god-town-replay-data.zip"
+    with ZipFile(zip_path, "w") as archive:
+        archive.writestr("timeline.json", "[]")
+        archive.writestr("steps/000000.json", "{}")
+        archive.writestr("agents/profiles.json", "[]")
+        archive.writestr("map/map.json", "{}")
+
+    with zip_path.open("rb") as file:
+        response = client.post(
+            "/api/v1/god/packages/import-preview",
+            files={"file": (zip_path.name, file, "application/zip")},
+        )
+
+    assert response.status_code == 400
+    assert "Replay archives are viewable replay data" in response.text
 
 
 def test_import_preview_cleans_staging_when_extract_fails(monkeypatch, tmp_path: Path) -> None:
@@ -145,3 +165,68 @@ def test_experiment_preview_uses_zip_name_when_old_pack_has_no_id(monkeypatch, t
 
     assert preview.status_code == 200
     assert preview.json()["resource_id"] == "god-town"
+
+
+def test_experiment_import_warns_and_installs_setup_without_run(monkeypatch, tmp_path: Path) -> None:
+    client = _client(monkeypatch, tmp_path)
+    zip_path = tmp_path / "god-town-experiment-pack.zip"
+    init_config = {
+        "env_modules": [
+            {
+                "module_type": "PixelTownSocialEnv",
+                "kwargs": {
+                    "map_id": "the_ville",
+                    "map_manifest_path": "/Users/example/GOD/agentsociety/custom/maps/the_ville/map.yaml",
+                },
+            }
+        ],
+        "agents": [
+            {
+                "agent_id": 1,
+                "agent_type": "JiuwenClawAgent",
+                "kwargs": {
+                    "id": 1,
+                    "name": "Alice",
+                    "profile": {"name": "Alice"},
+                    "session_id": "local-run-agent-1",
+                    "trusted_dirs": ["/Users/example/GOD/agentsociety"],
+                },
+            }
+        ],
+    }
+    with ZipFile(zip_path, "w") as archive:
+        archive.writestr("init/init_config.json", json.dumps(init_config))
+        archive.writestr(
+            "init/steps.yaml",
+            "start_t: '2026-05-11T08:20:00+08:00'\nsteps:\n- type: run\n  num_steps: 1\n  tick: 600\n",
+        )
+        archive.writestr("run.sh", "#!/usr/bin/env bash\n")
+        archive.writestr("run/sqlite.db", "db")
+        archive.writestr("run/thread_messages.jsonl", "{}")
+        archive.writestr("run/agents/1/.runtime/agent_state_snapshot.json", "{}")
+        archive.writestr("run_2/sqlite.db", "db")
+
+    with zip_path.open("rb") as file:
+        preview = client.post(
+            "/api/v1/god/packages/import-preview",
+            files={"file": (zip_path.name, file, "application/zip")},
+        )
+    assert preview.status_code == 200
+    payload = preview.json()
+    assert any("ignored run content" in warning for warning in payload["validation"]["warnings"])
+
+    install = client.post(
+        "/api/v1/god/packages/install",
+        json={"preview_token": payload["preview_token"], "conflict_strategy": "save_as"},
+    )
+
+    assert install.status_code == 200
+    target = Path(install.json()["install_path"])
+    assert target.joinpath("init", "init_config.json").exists()
+    installed_text = target.joinpath("init", "init_config.json").read_text(encoding="utf-8")
+    assert "session_id" not in installed_text
+    assert "trusted_dirs" not in installed_text
+    assert "/Users/" not in installed_text
+    assert target.joinpath("run.sh").exists()
+    assert not target.joinpath("run").exists()
+    assert not target.joinpath("run_2").exists()

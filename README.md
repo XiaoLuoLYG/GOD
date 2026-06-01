@@ -106,7 +106,7 @@ Full walkthrough: **[Quickstart →](QUICKSTART.md)**
 
 |     | Feature | What you get |
 | --- | --- | --- |
-| 🎬 | **Replay control** | Scrub a live or recorded run by step. Pause, jump, auto-play. |
+| 🎬 | **Replay control** | Scrub a live or recorded replay by step. Pause, jump, auto-play. |
 | 💬 | **Targeted ask** | Send a natural-language question to one agent, a group, or the whole town. |
 | 🎛️ | **Real-time intervention** | Inject instructions into the *next* step — the agents read them on their next turn. |
 | ⌨️ | **Command composer** | Type `/ask` or `/intervene`, use `@Name #id` completions, and send operator commands without leaving the map. |
@@ -146,6 +146,12 @@ flowchart LR
 
 GOD is intentionally local-first: the control room, backend, runtime bridge, experiment files, and replay store all run on your machine. The model endpoint is the only external service you choose.
 
+GOD keeps three concepts separate:
+
+- **Experiment** is the playable setup: map, agents, scenario context, and step plan.
+- **Replay** is the viewable result of an experiment after it has been played.
+- **Runtime state** is local machine data such as SQLite replay stores, logs, and agent snapshots; it is not part of an ExperimentPack and should not be committed.
+
 | Layer | What it does |
 | --- | --- |
 | 🎮 **Control Room** | React/Vite browser UI — replay, ask, intervention, status. |
@@ -159,7 +165,7 @@ GOD is intentionally local-first: the control room, backend, runtime bridge, exp
 ./scripts/god.sh start      # start the full stack (idempotent)
 ./scripts/god.sh configure  # open setup to switch defaults or create an experiment
 ./scripts/god.sh restart    # stop everything cleanly, then start again
-./scripts/god.sh new-run    # wipe the current experiment run and start fresh
+./scripts/god.sh new-run    # wipe local runtime state for the current experiment and start fresh
 ./scripts/god.sh status     # ports, URLs, model status
 ./scripts/god.sh stop       # stop everything
 ./scripts/god.sh tail       # follow logs

@@ -15,12 +15,26 @@ def _write_experiment(root: Path) -> Path:
     (exp / "init" / "init_config.json").write_text(
         json.dumps(
             {
-                "env_modules": [{"module_type": "PixelTownSocialEnv", "kwargs": {"map_id": "demo_map"}}],
+                "env_modules": [
+                    {
+                        "module_type": "PixelTownSocialEnv",
+                        "kwargs": {
+                            "map_id": "demo_map",
+                            "map_manifest_path": "/Users/example/GOD/agentsociety/custom/maps/demo_map/map.yaml",
+                        },
+                    }
+                ],
                 "agents": [
                     {
                         "agent_id": 1,
                         "agent_type": "JiuwenClawAgent",
-                        "kwargs": {"id": 1, "name": "Alice", "profile": {"name": "Alice"}},
+                        "kwargs": {
+                            "id": 1,
+                            "name": "Alice",
+                            "profile": {"name": "Alice"},
+                            "session_id": "demo-local-run-agent-1",
+                            "trusted_dirs": ["/Users/example/GOD/agentsociety"],
+                        },
                     }
                 ],
             }
@@ -92,17 +106,40 @@ def test_validate_experiment_pack_discovers_map_dependency(tmp_path: Path) -> No
 def test_export_experiment_pack_excludes_run_state(tmp_path: Path) -> None:
     root = tmp_path / "agentsociety"
     exp = _write_experiment(root)
-    (exp / "run").mkdir()
+    (exp / "run" / "artifacts").mkdir(parents=True)
     (exp / "run" / "sqlite.db").write_bytes(b"db")
+    (exp / "run" / "artifacts" / "ask.md").write_text("runtime answer", encoding="utf-8")
+    (exp / "run" / "logs").mkdir()
+    (exp / "run" / "logs" / "agent.log").write_text("debug", encoding="utf-8")
+    (exp / "run" / "agents" / "1" / ".runtime").mkdir(parents=True)
+    (exp / "run" / "agents" / "1" / ".runtime" / "agent_state_snapshot.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+    (exp / "run_2").mkdir()
+    (exp / "run_2" / "sqlite.db").write_bytes(b"db")
+    (exp / "run.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
     zip_path = tmp_path / "demo-experiment.zip"
 
     experiment_packs.export_experiment_pack(exp, zip_path)
 
     with ZipFile(zip_path) as archive:
         names = set(archive.namelist())
+        exported_config = json.loads(archive.read("init/init_config.json").decode("utf-8"))
+        exported_text = json.dumps(exported_config)
     assert "init/init_config.json" in names
     assert "init/steps.yaml" in names
-    assert "run/sqlite.db" not in names
+    assert "run.sh" in names
+    assert "session_id" not in exported_text
+    assert "trusted_dirs" not in exported_text
+    assert "/Users/" not in exported_text
+    assert exported_config["env_modules"][0]["kwargs"]["map_id"] == "demo_map"
+    assert "map_manifest_path" not in exported_config["env_modules"][0]["kwargs"]
+    assert not any(name.startswith("run/") or name.startswith("run_") for name in names)
+    assert not any(name.endswith(("sqlite.db", ".sqlite", ".sqlite3", ".log")) for name in names)
+    assert not any(".runtime/" in name for name in names)
+    assert "thread_messages.jsonl" not in names
+    assert "agent_state_snapshot.json" not in names
 
 
 def test_export_experiment_pack_can_embed_map_and_agent_dependencies(tmp_path: Path) -> None:
@@ -141,17 +178,34 @@ def test_export_experiment_pack_can_embed_map_and_agent_dependencies(tmp_path: P
 
 def test_import_old_public_experiment_pack_warns_and_ignores_run_artifacts(tmp_path: Path) -> None:
     source = _write_experiment(tmp_path / "source")
+    (source / "run.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
     (source / "run" / "artifacts").mkdir(parents=True)
     (source / "run" / "artifacts" / "ask.md").write_text("hello", encoding="utf-8")
+    (source / "run" / "sqlite.db").write_bytes(b"db")
+    (source / "run" / "agents" / "1" / ".runtime").mkdir(parents=True)
+    (source / "run" / "agents" / "1" / ".runtime" / "agent_state_snapshot.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
     zip_path = tmp_path / "old-public.zip"
-    experiment_packs.export_experiment_pack(source, zip_path, include_legacy_run_artifacts=True)
+    with ZipFile(zip_path, "w") as archive:
+        for path in source.rglob("*"):
+            if path.is_file():
+                archive.write(path, path.relative_to(source))
 
     imported = experiment_packs.import_experiment_pack_zip(zip_path, workspace_root=tmp_path / "target")
 
     assert imported.validation.ok is True
     assert any("ignored run content" in warning for warning in imported.validation.warnings)
-    assert (tmp_path / "target" / "hypothesis_demo" / "experiment_1" / "init" / "init_config.json").exists()
-    assert not (tmp_path / "target" / "hypothesis_demo" / "experiment_1" / "run").exists()
+    target = tmp_path / "target" / "hypothesis_demo" / "experiment_1"
+    assert target.joinpath("init", "init_config.json").exists()
+    installed_text = target.joinpath("init", "init_config.json").read_text(encoding="utf-8")
+    assert "session_id" not in installed_text
+    assert "trusted_dirs" not in installed_text
+    assert "/Users/" not in installed_text
+    assert target.joinpath("run.sh").exists()
+    assert not target.joinpath("run").exists()
+    assert not target.joinpath("run_2").exists()
 
 
 def test_import_experiment_pack_conflict_does_not_install_dependencies(tmp_path: Path) -> None:

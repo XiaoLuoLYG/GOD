@@ -1,10 +1,17 @@
 window.GOD_CATALOG = {
   products: [
     {
+      key: "experiment",
+      label: "Experiment",
+      title: "Play setup seeds",
+      summary: "Download a playable setup with map, cast, scenario, and steps.",
+      href: "experiments/"
+    },
+    {
       key: "replay",
       label: "Replay",
-      title: "Replay worlds",
-      summary: "Open a completed run in the browser.",
+      title: "Watch example outcomes",
+      summary: "Open curated replay archives in the browser.",
       href: "replays/"
     },
     {
@@ -20,13 +27,6 @@ window.GOD_CATALOG = {
       title: "Publish casts",
       summary: "Download reusable profiles and sprites.",
       href: "agent-packs/"
-    },
-    {
-      key: "experiment",
-      label: "Experiment",
-      title: "Publish scenarios",
-      summary: "Bundle map, cast, setup, and replay.",
-      href: "experiments/"
     }
   ],
   replays: [
@@ -101,16 +101,18 @@ window.GOD_CATALOG = {
       image: "assets/screenshots/map-the-ville.png",
       replayHref: "replays/god-town/",
       download: "public-data/experiments/god-town-daily-life/downloads/god-town-daily-life-experiment-pack.zip",
-      stats: ["The Ville map", "10 residents", "operator artifacts"]
+      downloadLabel: "Download ExperimentPack",
+      stats: ["The Ville map", "10 residents", "playable setup"]
     },
     {
       title: "PKU Public Situation",
       slug: "pku-public-situation",
-      summary: "A reproducible campus scenario for public notices, crowd movement, interviews, and intervention replay.",
+      summary: "A reproducible campus setup for public notices, crowd movement, interviews, and interventions.",
       image: "assets/screenshots/map-pku.png",
       replayHref: "replays/pku-public-situation/",
       download: "public-data/experiments/pku-public-situation/downloads/pku-public-situation-experiment-pack.zip",
-      stats: ["PKU map", "22 agents", "54 operator records"]
+      downloadLabel: "Download ExperimentPack",
+      stats: ["PKU map", "22 agents", "playable setup"]
     }
   ]
 };

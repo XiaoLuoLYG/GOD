@@ -1,2 +1,0 @@
-{"time": "2026-05-18T04:52:37.215101+00:00", "agent_id": 6, "skill_id": "class.learn", "kind": "skill_event", "content": "记录了技能事件：课堂学习。", "metadata": {"skill_id": "class.learn", "location_id": "school"}}
-{"time": "2026-05-18T04:57:04.630503+00:00", "agent_id": 6, "skill_id": "sketch.draw", "kind": "skill_event", "content": "记录了技能事件：速写记录。", "metadata": {"skill_id": "sketch.draw", "location_id": "school"}}

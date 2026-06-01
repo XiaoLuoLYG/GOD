@@ -39,29 +39,31 @@ agentsociety/quick_experiments/**/run_*/
 agentsociety/quick_experiments/**/run_failed*/
 agentsociety/quick_experiments/**/run_stuck*/
 agentsociety/quick_experiments/**/run_launcher.log
+agentsociety/quick_experiments/**/.runtime/
 agentsociety/quick_experiments/hypothesis_*/
 !agentsociety/quick_experiments/hypothesis_god_town/
 !agentsociety/quick_experiments/hypothesis_god_town/**
 !agentsociety/quick_experiments/hypothesis_pku_trump_visit/
 !agentsociety/quick_experiments/hypothesis_pku_trump_visit/**
-!agentsociety/quick_experiments/hypothesis_god_town/experiment_1/run/
-!agentsociety/quick_experiments/hypothesis_god_town/experiment_1/run/**
-!agentsociety/quick_experiments/hypothesis_pku_trump_visit/experiment_1/run/
-!agentsociety/quick_experiments/hypothesis_pku_trump_visit/experiment_1/run/**
 **/.DS_Store
+agentsociety/quick_experiments/hypothesis_god_town/**/run/
+agentsociety/quick_experiments/hypothesis_pku_trump_visit/**/run/
 agentsociety/quick_experiments/hypothesis_god_town/**/run_*/
 agentsociety/quick_experiments/hypothesis_god_town/**/run_failed*/
 agentsociety/quick_experiments/hypothesis_god_town/**/run_stuck*/
 agentsociety/quick_experiments/hypothesis_god_town/**/run_launcher.log
+agentsociety/quick_experiments/hypothesis_god_town/**/.runtime/
 agentsociety/quick_experiments/hypothesis_pku_trump_visit/**/run_*/
 agentsociety/quick_experiments/hypothesis_pku_trump_visit/**/run_failed*/
 agentsociety/quick_experiments/hypothesis_pku_trump_visit/**/run_stuck*/
 agentsociety/quick_experiments/hypothesis_pku_trump_visit/**/run_launcher.log
-agentsociety/quick_experiments/hypothesis_god_town/experiment_1/run/**/*.log
-agentsociety/quick_experiments/hypothesis_pku_trump_visit/experiment_1/run/**/*.log
+agentsociety/quick_experiments/hypothesis_pku_trump_visit/**/.runtime/
 
 # Agent Studio generates these locally; configs should not depend on committed test sprites.
 agentsociety/custom/maps/*/characters/Generated_Agent_*.png
+
+# Local Superpowers planning/spec artifacts are development process notes, not product docs.
+docs/superpowers/
 
 # Map Studio generated packages are local user output by default.
 agentsociety/custom/generated_maps/

@@ -41,6 +41,11 @@ def create_preview(
     staging = package_archives.temp_staging_dir("god-import-preview-")
     try:
         package_archives.safe_extract_zip(zip_path, staging)
+        if _looks_like_replay_archive(staging):
+            raise ValueError(
+                "Replay archives are viewable replay data, not installable packages. "
+                "Import an ExperimentPack zip to play a setup."
+            )
         package_path = _find_package_path(staging)
         if package_path is None:
             raise ValueError("Could not identify package type from archive contents")
@@ -167,6 +172,16 @@ def _find_package_path(staging: Path) -> Path | None:
         if (candidate / "init" / "init_config.json").exists() and (candidate / "init" / "steps.yaml").exists():
             return candidate
     return None
+
+
+def _looks_like_replay_archive(staging: Path) -> bool:
+    candidates = [staging] + [child for child in staging.iterdir() if child.is_dir()]
+    return any(
+        (candidate / "timeline.json").exists()
+        and (candidate / "steps").is_dir()
+        and (candidate / "agents" / "profiles.json").exists()
+        for candidate in candidates
+    )
 
 
 def _describe_package(

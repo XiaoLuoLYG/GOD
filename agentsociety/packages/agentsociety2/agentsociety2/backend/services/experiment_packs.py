@@ -14,6 +14,8 @@ import yaml
 from agentsociety2.backend.services import agent_packs, map_packages, package_archives
 from agentsociety2.society.models import InitConfig, StepsConfig
 
+_PRIVATE_INIT_CONFIG_KEYS = {"session_id", "trusted_dirs"}
+
 
 @dataclass(frozen=True)
 class ExperimentPackValidation:
@@ -61,7 +63,7 @@ def preview_experiment_pack(package_path: Path) -> ExperimentPackPreview:
             StepsConfig.model_validate(yaml.safe_load(steps_path.read_text(encoding="utf-8")) or {})
         except Exception as exc:
             errors.append(f"invalid steps.yaml: {exc}")
-    if (package_path / "run").exists():
+    if _has_runtime_state(package_path):
         warnings.append("ignored run content during ExperimentPack import")
     context = _load_context(package_path)
     map_id = _map_id_from_init_or_context(init_config, context)
@@ -87,12 +89,13 @@ def export_experiment_pack(
 ) -> Path:
     with tempfile.TemporaryDirectory(prefix="god-experiment-pack-") as temp:
         staging = Path(temp) / experiment_path.name
-        ignore = None if include_legacy_run_artifacts else shutil.ignore_patterns("run", "run*", ".env", "*.db", "*.sqlite")
+        ignore = None if include_legacy_run_artifacts else _experiment_pack_ignore()
         shutil.copytree(experiment_path, staging, ignore=ignore)
-        if not include_legacy_run_artifacts and (staging / "run").exists():
-            shutil.rmtree(staging / "run")
+        if not include_legacy_run_artifacts:
+            _remove_runtime_state(staging)
         if agentsociety_root is not None:
             _stage_dependencies(staging, agentsociety_root=agentsociety_root)
+        _sanitize_experiment_pack_files(staging)
         return package_archives.zip_directory(staging, zip_path)
 
 
@@ -213,10 +216,121 @@ def _find_experiment_root(root: Path) -> Path | None:
 
 
 def _copy_experiment_without_run(source: Path, target: Path) -> None:
-    shutil.copytree(source, target, ignore=shutil.ignore_patterns("run", "run*", ".env", "*.db", "*.sqlite"))
-    for run_dir in target.glob("run*"):
-        if run_dir.exists():
-            shutil.rmtree(run_dir)
+    shutil.copytree(source, target, ignore=_experiment_pack_ignore())
+    _remove_runtime_state(target)
+    _sanitize_experiment_pack_files(target)
+
+
+def sanitize_experiment_pack_config(
+    config: dict[str, Any],
+    *,
+    map_id: str | None = None,
+) -> dict[str, Any]:
+    """Return an ExperimentPack-safe init config without local run identity."""
+
+    sanitized = _strip_private_init_config_fields(config)
+    if isinstance(sanitized, dict):
+        _sanitize_env_module_paths(sanitized, map_id=map_id)
+        return sanitized
+    return {}
+
+
+def _sanitize_experiment_pack_files(package_path: Path, *, map_id: str | None = None) -> None:
+    init_path = package_path / "init" / "init_config.json"
+    if not init_path.exists():
+        return
+    try:
+        raw_config = json.loads(init_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return
+    if not isinstance(raw_config, dict):
+        return
+    sanitized = sanitize_experiment_pack_config(raw_config, map_id=map_id)
+    if sanitized != raw_config:
+        init_path.write_text(
+            json.dumps(sanitized, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+
+def _strip_private_init_config_fields(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _strip_private_init_config_fields(item)
+            for key, item in value.items()
+            if key not in _PRIVATE_INIT_CONFIG_KEYS
+        }
+    if isinstance(value, list):
+        return [_strip_private_init_config_fields(item) for item in value]
+    return value
+
+
+def _sanitize_env_module_paths(config: dict[str, Any], *, map_id: str | None = None) -> None:
+    env_modules = config.get("env_modules")
+    if not isinstance(env_modules, list):
+        return
+    for module in env_modules:
+        if not isinstance(module, dict):
+            continue
+        kwargs = module.get("kwargs")
+        if not isinstance(kwargs, dict):
+            continue
+        if map_id and module.get("module_type") == "PixelTownSocialEnv":
+            kwargs.setdefault("map_id", map_id)
+        manifest_path = kwargs.get("map_manifest_path")
+        if manifest_path and Path(str(manifest_path)).expanduser().is_absolute():
+            kwargs.pop("map_manifest_path", None)
+
+
+def _experiment_pack_ignore() -> Any:
+    return shutil.ignore_patterns(
+        "run",
+        "run_*",
+        "run_failed*",
+        "run_stuck*",
+        ".env",
+        "*.db",
+        "*.sqlite",
+        "*.sqlite3",
+        "*.log",
+        ".runtime",
+    )
+
+
+def _remove_runtime_state(experiment_path: Path) -> None:
+    for run_dir in _runtime_state_paths(experiment_path):
+        shutil.rmtree(run_dir)
+    for runtime_dir in experiment_path.rglob(".runtime"):
+        if runtime_dir.exists() and runtime_dir.is_dir():
+            shutil.rmtree(runtime_dir)
+
+
+def _runtime_state_paths(experiment_path: Path) -> tuple[Path, ...]:
+    if not experiment_path.exists():
+        return ()
+    return tuple(
+        path
+        for path in experiment_path.iterdir()
+        if path.is_dir()
+        and (
+            path.name == "run"
+            or path.name.startswith("run_")
+            or path.name.startswith("run_failed")
+            or path.name.startswith("run_stuck")
+        )
+    )
+
+
+def _has_runtime_state(experiment_path: Path) -> bool:
+    return any(_runtime_state_paths(experiment_path)) or any(
+        path.is_dir()
+        or path.name in {"sqlite.db", "thread_messages.jsonl", "agent_state_snapshot.json"}
+        or path.suffix == ".log"
+        for path in experiment_path.rglob("*")
+        if ".runtime" in path.parts
+        or path.name in {"sqlite.db", "thread_messages.jsonl", "agent_state_snapshot.json"}
+        or path.suffix == ".log"
+    )
 
 
 def _load_context(package_path: Path) -> dict[str, Any]:

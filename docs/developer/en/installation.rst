@@ -65,6 +65,6 @@ Do not commit local runtime state:
 - ``.env``
 - ``.god/``
 - ``.live/``
-- ``agentsociety/quick_experiments/**/run*/`` except the tracked built-in sample run folders already in the repo
+- ``agentsociety/quick_experiments/**/run*/``
 - generated ``Generated_Agent_*.png`` sprite files
 - generated map packages under ``agentsociety/custom/generated_maps/``

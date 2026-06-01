@@ -1,2 +1,0 @@
-{"time": "2026-05-18T04:52:44.155375+00:00", "agent_id": 7, "skill_id": "neighbor.greet", "kind": "skill_event", "content": "记录了技能事件：邻里问候。", "metadata": {"skill_id": "neighbor.greet", "location_id": "park"}}
-{"time": "2026-05-18T04:57:15.525973+00:00", "agent_id": 7, "skill_id": "routine.daily", "kind": "skill_event", "content": "记录了技能事件：日常安排。", "metadata": {"skill_id": "routine.daily"}}

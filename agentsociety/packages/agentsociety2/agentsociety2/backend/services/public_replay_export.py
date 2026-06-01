@@ -14,6 +14,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 import yaml
 
+from agentsociety2.backend.services.experiment_packs import sanitize_experiment_pack_config
 from agentsociety2.backend.services.map_packages import (
     DEFAULT_MAP_ID,
     character_sprite_path,
@@ -797,11 +798,16 @@ def _export_experiment_pack(
     if pack_root.exists():
         shutil.rmtree(pack_root)
     pack_root.mkdir(parents=True)
+    setup_summary = (
+        f"Playable setup seed for {display_name}. "
+        "Example replays are published separately as watchable results."
+    )
     manifest = {
         "schema_version": 1,
+        "kind": "experiment",
         "pack_id": pack_id,
         "display_name": display_name,
-        "summary": summary,
+        "summary": setup_summary,
         "replay_slug": replay_slug,
         "map_pack": map_pack_id,
         "agent_pack": agent_pack_id,
@@ -809,6 +815,13 @@ def _export_experiment_pack(
         "total_steps": total_steps,
         "agent_count": agent_count,
         "command_count": command_count,
+        "example_replay": {
+            "slug": replay_slug,
+            "summary": summary,
+            "total_steps": total_steps,
+            "agent_count": agent_count,
+            "command_count": command_count,
+        },
         "urls": {
             "replay": f"../replays/{replay_slug}/manifest.json",
             "map_pack": f"../map-packs/{map_pack_id}/map_pack.json",
@@ -817,7 +830,8 @@ def _export_experiment_pack(
         "downloads": [
             {
                 "type": "experiment",
-                "label": "Experiment pack",
+                "label": "Playable Experiment Pack",
+                "description": "Scenario setup only; excludes replay history and local runtime state.",
                 "href": f"downloads/{pack_id}-experiment-pack.zip",
             }
         ],
@@ -825,15 +839,10 @@ def _export_experiment_pack(
     _write_json(pack_root / "experiment.json", manifest)
     downloads_dir = pack_root / "downloads"
     downloads_dir.mkdir()
-    _zip_directory(
+    _zip_experiment_pack(
         experiment_root,
         downloads_dir / f"{pack_id}-experiment-pack.zip",
-        include=lambda path: (
-            path.is_dir()
-            or path.name in {"README.md", "README.zh-CN.md", "OPERATOR_SCRIPT.md"}
-            or path.relative_to(experiment_root).parts[:1] == ("init",)
-            or path.relative_to(experiment_root).parts[:2] == ("run", "artifacts")
-        ),
+        map_id=map_pack_id,
     )
     return {**manifest, "_package_path": str(pack_root)}
 
@@ -899,7 +908,9 @@ def _create_downloads(
     downloads = [
         {
             "type": "replay",
-            "label": "Replay data",
+            "label": "Replay archive",
+            "description": "Static timeline, step frames, commands, profiles, and replay manifest.",
+            "hidden": True,
             "href": f"downloads/{slug}-replay-data.zip",
         },
         {
@@ -914,7 +925,8 @@ def _create_downloads(
         },
         {
             "type": "experiment",
-            "label": "Experiment pack",
+            "label": "Playable Experiment Pack",
+            "description": "Scenario setup only; excludes replay history and local runtime state.",
             "href": f"downloads/{slug}-experiment-pack.zip",
         },
     ]
@@ -930,17 +942,42 @@ def _create_downloads(
         downloads_dir / f"{slug}-agent-pack.zip",
         include=lambda path: _include_pack_file(path, agent_pack_root),
     )
-    _zip_directory(
+    _zip_experiment_pack(
         experiment_root,
         downloads_dir / f"{slug}-experiment-pack.zip",
-        include=lambda path: (
-            path.is_dir()
-            or path.name in {"README.md", "README.zh-CN.md", "OPERATOR_SCRIPT.md"}
-            or path.relative_to(experiment_root).parts[:1] == ("init",)
-            or path.relative_to(experiment_root).parts[:2] == ("run", "artifacts")
-        ),
+        map_id=map_id,
     )
     return downloads
+
+
+def _include_experiment_pack_file(path: Path, experiment_root: Path) -> bool:
+    rel = path.relative_to(experiment_root)
+    parts = rel.parts
+    if not parts:
+        return True
+    if _is_runtime_state_path(parts):
+        return False
+    if ".runtime" in parts:
+        return False
+    if path.suffix in {".db", ".sqlite", ".sqlite3", ".log"}:
+        return False
+    return (
+        path.is_dir()
+        or path.name in {"README.md", "README.zh-CN.md", "OPERATOR_SCRIPT.md", "run.sh"}
+        or parts[:1] == ("init",)
+    )
+
+
+def _is_runtime_state_path(parts: tuple[str, ...]) -> bool:
+    if not parts:
+        return False
+    name = parts[0]
+    return (
+        name == "run"
+        or name.startswith("run_")
+        or name.startswith("run_failed")
+        or name.startswith("run_stuck")
+    )
 
 
 def _include_replay_data_file(path: Path, replay_root: Path) -> bool:
@@ -962,6 +999,29 @@ def _include_replay_data_file(path: Path, replay_root: Path) -> bool:
 def _include_pack_file(path: Path, pack_root: Path) -> bool:
     parts = path.relative_to(pack_root).parts
     return "downloads" not in parts
+
+
+def _zip_experiment_pack(source_dir: Path, zip_path: Path, *, map_id: str | None = None) -> None:
+    with ZipFile(zip_path, "w", ZIP_DEFLATED) as archive:
+        for path in sorted(source_dir.rglob("*")):
+            if path == zip_path:
+                continue
+            if path.name.startswith("."):
+                continue
+            if not _include_experiment_pack_file(path, source_dir):
+                continue
+            if path.is_dir():
+                continue
+            rel = path.relative_to(source_dir)
+            if rel.parts == ("init", "init_config.json"):
+                config = _load_structured_file(path)
+                safe_config = sanitize_experiment_pack_config(config, map_id=map_id)
+                archive.writestr(
+                    rel.as_posix(),
+                    json.dumps(safe_config, ensure_ascii=False, indent=2) + "\n",
+                )
+                continue
+            archive.write(path, rel)
 
 
 def _zip_directory(

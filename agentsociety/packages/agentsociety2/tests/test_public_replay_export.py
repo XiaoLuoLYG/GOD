@@ -5,6 +5,7 @@ import sqlite3
 from pathlib import Path
 from zipfile import ZipFile
 
+from agentsociety2.backend.services import package_imports
 from agentsociety2.backend.services.public_replay_export import (
     export_public_replay,
     load_operator_commands,
@@ -53,17 +54,36 @@ def test_export_public_replay_writes_static_bundle(tmp_path: Path) -> None:
     map_manifest = _write_map_package(tmp_path / "custom" / "maps" / "demo")
     init_dir.joinpath("init_config.json").write_text(
         json.dumps(
-            {
-                "env_modules": [
-                    {
-                        "module_type": "PixelTownSocialEnv",
-                        "kwargs": {"map_manifest_path": str(map_manifest)},
-                    }
-                ]
-            }
-        ),
+                {
+                    "env_modules": [
+                        {
+                            "module_type": "PixelTownSocialEnv",
+                            "kwargs": {"map_manifest_path": str(map_manifest)},
+                        }
+                    ],
+                    "agents": [
+                        {
+                            "agent_id": 1,
+                            "agent_type": "JiuwenClawAgent",
+                            "kwargs": {
+                                "id": 1,
+                                "name": "Alice",
+                                "profile": {"name": "Alice"},
+                                "session_id": "demo-run-agent-1",
+                                "trusted_dirs": ["/Users/example/GOD/agentsociety"],
+                            },
+                        }
+                    ],
+                }
+            ),
         encoding="utf-8",
     )
+    init_dir.joinpath("steps.yaml").write_text(
+        "start_t: '2026-05-11T08:20:00+08:00'\nsteps:\n- type: run\n  num_steps: 2\n  tick: 600\n",
+        encoding="utf-8",
+    )
+    experiment_root.joinpath("README.md").write_text("# Demo World\n", encoding="utf-8")
+    experiment_root.joinpath("run.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
     _write_replay_db(run_dir / "sqlite.db")
     run_dir.joinpath("artifacts").mkdir()
     run_dir.joinpath("artifacts", "intervene_live_step_1_20260531_100000.md").write_text(
@@ -74,6 +94,14 @@ def test_export_public_replay_writes_static_bundle(tmp_path: Path) -> None:
         "  agent_id: 1\n"
         "---\n\n"
         "Alice is moving.\n",
+        encoding="utf-8",
+    )
+    run_dir.joinpath("thread_messages.jsonl").write_text("{}", encoding="utf-8")
+    run_dir.joinpath("logs").mkdir()
+    run_dir.joinpath("logs", "runtime.log").write_text("debug", encoding="utf-8")
+    run_dir.joinpath("agents", "1", ".runtime").mkdir(parents=True)
+    run_dir.joinpath("agents", "1", ".runtime", "agent_state_snapshot.json").write_text(
+        "{}",
         encoding="utf-8",
     )
 
@@ -112,6 +140,16 @@ def test_export_public_replay_writes_static_bundle(tmp_path: Path) -> None:
     assert agent_pack_root.joinpath("characters", "Alice.png").exists()
     experiment_pack_root = tmp_path / "site-data" / "experiments" / "demo-world-experiment"
     assert experiment_pack_root.joinpath("experiment.json").exists()
+    experiment_manifest = json.loads(experiment_pack_root.joinpath("experiment.json").read_text())
+    assert experiment_manifest["kind"] == "experiment"
+    assert "Playable setup seed" in experiment_manifest["summary"]
+    assert experiment_manifest["example_replay"]["slug"] == "demo-world"
+    assert experiment_manifest["downloads"][0]["label"] == "Playable Experiment Pack"
+    assert "local runtime state" in experiment_manifest["downloads"][0]["description"]
+    assert manifest["downloads"][0]["label"] == "Replay archive"
+    assert manifest["downloads"][0]["type"] == "replay"
+    assert manifest["downloads"][0]["hidden"] is True
+    assert manifest["downloads"][3]["label"] == "Playable Experiment Pack"
     with ZipFile(replay_root.joinpath("downloads", "demo-world-agent-pack.zip")) as archive:
         names = set(archive.namelist())
     assert "agent_pack.yaml" in names
@@ -122,6 +160,55 @@ def test_export_public_replay_writes_static_bundle(tmp_path: Path) -> None:
     assert "agent_pack.yaml" in names
     assert "characters/Alice.png" in names
     assert "downloads/demo-world-agents-agent-pack.zip" not in names
+    for zip_path in (
+        experiment_pack_root.joinpath("downloads", "demo-world-experiment-experiment-pack.zip"),
+        replay_root.joinpath("downloads", "demo-world-experiment-pack.zip"),
+    ):
+        with ZipFile(zip_path) as archive:
+            names = set(archive.namelist())
+            exported_config = json.loads(archive.read("init/init_config.json").decode("utf-8"))
+            exported_text = json.dumps(exported_config)
+        assert "init/init_config.json" in names
+        assert "init/steps.yaml" in names
+        assert "README.md" in names
+        assert "run.sh" in names
+        assert "session_id" not in exported_text
+        assert "trusted_dirs" not in exported_text
+        assert str(tmp_path) not in exported_text
+        assert "/Users/" not in exported_text
+        assert exported_config["env_modules"][0]["kwargs"]["map_id"] == "demo"
+        assert "map_manifest_path" not in exported_config["env_modules"][0]["kwargs"]
+        assert not any(name.startswith("run/") or name.startswith("run_") for name in names)
+        assert not any(".runtime/" in name for name in names)
+        assert not any(name.endswith(("sqlite.db", ".sqlite", ".sqlite3", ".log")) for name in names)
+        assert "thread_messages.jsonl" not in names
+        assert "agent_state_snapshot.json" not in names
+        import_workspace = tmp_path / "imports" / zip_path.stem / "quick_experiments"
+        import_workspace.mkdir(parents=True)
+        preview = package_imports.create_preview(
+            zip_path,
+            agentsociety_root=tmp_path,
+            workspace_root=import_workspace,
+            original_filename=zip_path.name,
+        )
+        assert preview.package_type == "experiment"
+        assert preview.validation["ok"] is True
+        result = package_imports.install_preview(
+            preview_token=preview.token,
+            conflict_strategy="save_as",
+            agentsociety_root=tmp_path,
+            workspace_root=import_workspace,
+            requested_id=preview.resource_id,
+        )
+        installed = Path(str(result["install_path"]))
+        assert installed.joinpath("init", "init_config.json").exists()
+        assert installed.joinpath("init", "steps.yaml").exists()
+        assert not installed.joinpath("run").exists()
+    with ZipFile(replay_root.joinpath("downloads", "demo-world-replay-data.zip")) as archive:
+        names = set(archive.namelist())
+    assert "timeline.json" in names
+    assert "steps/000001.json" in names
+    assert "commands.json" in names
     assert manifest["urls"]["map_pack"] == "../../map-packs/demo/map_pack.json"
     assert manifest["urls"]["agent_pack"] == "../../agent-packs/demo-world-agents/agent_pack.json"
     assert manifest["urls"]["experiment_pack"] == "../../experiments/demo-world-experiment/experiment.json"

@@ -65,6 +65,6 @@ Windows PowerShell 使用：
 - ``.env``
 - ``.god/``
 - ``.live/``
-- ``agentsociety/quick_experiments/**/run*/``，仓库里已追踪的内置示例 run 目录除外
+- ``agentsociety/quick_experiments/**/run*/``
 - 生成的 ``Generated_Agent_*.png`` sprite
 - ``agentsociety/custom/generated_maps/`` 下的生成地图

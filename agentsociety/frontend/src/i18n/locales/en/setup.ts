@@ -77,7 +77,7 @@ export default {
         customDescription: 'Generate a new experiment draft, edit agents and environment settings, then publish it as the current experiment.',
         createCustom: 'Create Experiment Config',
         importTitle: 'Import Experiment',
-        importDescription: 'Install an ExperimentPack zip into the local workspace.',
+        importDescription: 'Install a playable ExperimentPack zip into the local workspace.',
         importExperiment: 'Import Experiment Zip',
     },
     defaultExperiments: {

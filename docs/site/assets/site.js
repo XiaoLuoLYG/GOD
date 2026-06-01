@@ -67,7 +67,7 @@
       '    <h3>' + escapeHtml(item.title) + '</h3>',
       '    <p>' + escapeHtml(item.summary) + '</p>',
       '    <div class="feature-card__meta" data-replay-stats="' + escapeHtml(item.slug) + '">',
-      '      <span>Replay archive</span><span>' + escapeHtml(item.mapPack) + '</span><span>' + escapeHtml(item.agentPack) + '</span>',
+      '      <span>Example replay</span><span>' + escapeHtml(item.mapPack) + '</span><span>' + escapeHtml(item.agentPack) + '</span>',
       '    </div>',
       '    <div class="button-row">',
       '      <a class="button button--small" href="' + url(item.href) + '">Open replay</a>',
@@ -89,6 +89,8 @@
 
   function libraryCard(item, kind) {
     var previewHref = item.previewHref || item.replayHref || item.href || item.download;
+    var previewLabel = kind === "experiment" ? "View example replay" : "Preview";
+    var downloadLabel = item.downloadLabel || (kind === "experiment" ? "Download ExperimentPack" : "Download");
     var media = item.image
       ? '<a class="library-card__media library-card__media--' + escapeHtml(kind) + '" href="' + url(previewHref) + '"><img src="' + url(item.image) + '" alt="' + escapeHtml(item.title) + ' preview" loading="lazy"></a>'
       : '<div class="library-card__glyph" aria-hidden="true">' + productIcon(kind) + '</div>';
@@ -101,8 +103,8 @@
       '    <p>' + escapeHtml(item.summary) + '</p>',
       metricLine(item),
       '    <div class="button-row">',
-      '      <a class="button button--small" href="' + url(previewHref) + '">Preview</a>',
-      '      <a class="button button--small button--ghost" href="' + url(item.download) + '">Download</a>',
+      '      <a class="button button--small" href="' + url(previewHref) + '">' + escapeHtml(previewLabel) + '</a>',
+      '      <a class="button button--small button--ghost" href="' + url(item.download) + '">' + escapeHtml(downloadLabel) + '</a>',
       '    </div>',
       '  </div>',
       '</article>'

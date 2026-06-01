@@ -115,6 +115,9 @@ const PackageImportModal: React.FC<PackageImportModalProps> = ({
       ...preview.dependencies.map((item, index) => ({ id: `dependency-${index}`, kind: item.type, message: item.id })),
     ]
     : [];
+  const ignoredRunWarning = preview?.validation.warnings.find((item) => (
+    item.toLowerCase().includes('ignored run content')
+  ));
 
   return (
     <Modal
@@ -149,6 +152,14 @@ const PackageImportModal: React.FC<PackageImportModalProps> = ({
               message={t('packageImport.previewReady', { type: preview.package_type, id: preview.resource_id })}
               description={preview.install_path}
             />
+            {ignoredRunWarning && (
+              <Alert
+                type="warning"
+                showIcon
+                message={t('packageImport.ignoredRunTitle')}
+                description={t('packageImport.ignoredRunDescription')}
+              />
+            )}
             <Space wrap>
               <Tag>{preview.package_type}</Tag>
               <Tag>{preview.display_name || preview.resource_id}</Tag>

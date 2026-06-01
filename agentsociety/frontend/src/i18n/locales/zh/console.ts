@@ -28,7 +28,7 @@ export default {
         viewLog: "查看日志",
         export: "全部导出",
         exportArtifacts: "导出产物",
-        exportExperimentPack: "导出实验包",
+        exportExperimentPack: "导出可玩实验包",
         delete: "删除",
         createExperiment: "创建实验"
     },
