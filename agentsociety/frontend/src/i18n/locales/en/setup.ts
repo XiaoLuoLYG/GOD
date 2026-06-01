@@ -31,6 +31,7 @@ export default {
         published: 'Experiment saved, and GOD has been asked to start it.',
         publishedQueued: 'Experiment saved. Startup was queued, and GOD is restarting services.',
         publishFailed: 'Failed to save and start: {{error}}',
+        experimentImported: 'Imported experiment {{id}}.',
         roleImagesCompleted: 'Completed role images for {{completed}} roles.',
         roleImagesPartial: 'Completed {{completed}} role images; {{failed}} failed. You can retry or edit them one by one.',
         roleImagesFailed: 'Failed to complete role images: {{error}}',
@@ -75,6 +76,9 @@ export default {
         customTitle: 'Create Custom Experiment',
         customDescription: 'Generate a new experiment draft, edit agents and environment settings, then publish it as the current experiment.',
         createCustom: 'Create Experiment Config',
+        importTitle: 'Import Experiment',
+        importDescription: 'Install an ExperimentPack zip into the local workspace.',
+        importExperiment: 'Import Experiment Zip',
     },
     defaultExperiments: {
         god_town: {
@@ -92,12 +96,13 @@ export default {
     },
     basics: {
         title: 'Experiment Parameters',
-        notice: 'Experiment parameters are optional. Blank fields use the default GOD Town parameters. Maps come from local pluggable map packages and generated Map Studio packages.',
+        notice: 'Experiment parameters are optional. Blank fields use the default GOD Town parameters. Maps come from local pluggable map packages.',
         experimentTitle: 'Experiment title',
         experimentTitleTooltip: 'Used for the directory name, README, and experiment context title. Default: Virtual Eden Civic Morning. Format: short title; the backend will derive a hypothesis directory name.',
         experimentTitlePlaceholder: 'e.g. Virtual Eden Civic Morning',
         mapPackage: 'Map package',
-        mapPackageTooltip: 'Auto-discovered from agentsociety/custom/maps and agentsociety/custom/generated_maps. A package must include map.yaml, Tiled JSON, tileset PNGs, and a Collisions layer.',
+        mapPackageTooltip: 'Auto-discovered from agentsociety/custom/maps. A package must include map.yaml, Tiled JSON, tileset PNGs, and a Collisions layer.',
+        importMap: 'Import Map',
         mapSummary: '{{map}}: {{locations}} locations, {{interactions}} interactions, {{characters}} role images.',
         noRoleImagesTitle: 'This map package has no dedicated role images yet',
         noRoleImagesDescription: 'You can continue generating the experiment draft. After the draft exists, use Role Studio to complete the replay character images.',

@@ -12,6 +12,9 @@ from . import (
     god_setup,
     map_studio,
     agent_packs,
+    map_packs,
+    experiment_packs,
+    package_imports,
 )
 
 __all__ = [
@@ -26,4 +29,7 @@ __all__ = [
     "god_setup",
     "map_studio",
     "agent_packs",
+    "map_packs",
+    "experiment_packs",
+    "package_imports",
 ]

@@ -28,6 +28,7 @@ export default {
         viewLog: "View Log",
         export: "Export All",
         exportArtifacts: "Export Artifacts",
+        exportExperimentPack: "Export Experiment Pack",
         delete: "Delete",
         createExperiment: "Create Experiment"
     },
@@ -55,4 +56,4 @@ export default {
         deleteFailed: "Failed to delete experiment:",
         noToken: "No token found, please login"
     }
-}; 
+};

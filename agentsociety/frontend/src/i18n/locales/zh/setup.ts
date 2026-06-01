@@ -31,6 +31,7 @@ export default {
         published: '实验已保存，并已请求 GOD 启动。',
         publishedQueued: '实验已保存，启动请求已提交，GOD 正在重启服务。',
         publishFailed: '保存并启动失败: {{error}}',
+        experimentImported: '已导入实验 {{id}}。',
         roleImagesCompleted: '已补全 {{completed}} 个角色形象。',
         roleImagesPartial: '已补全 {{completed}} 个角色形象，{{failed}} 个失败，可稍后重试或逐个编辑。',
         roleImagesFailed: '补全角色形象失败: {{error}}',
@@ -75,6 +76,9 @@ export default {
         customTitle: '创建自定义实验',
         customDescription: '用模型生成新实验草案，编辑智能体和环境参数，然后发布为当前实验。',
         createCustom: '新建实验配置',
+        importTitle: '导入实验',
+        importDescription: '把 ExperimentPack Zip 安装到本地工作区。',
+        importExperiment: '导入实验 Zip',
     },
     defaultExperiments: {
         god_town: {
@@ -92,12 +96,13 @@ export default {
     },
     basics: {
         title: '实验基础参数',
-        notice: '实验参数都是可选的；留空会使用默认 GOD Town 参数。地图来自本地可拔插地图包，也包括地图工作台生成的本地地图。',
+        notice: '实验参数都是可选的；留空会使用默认 GOD Town 参数。地图来自本地可拔插地图包。',
         experimentTitle: '实验标题',
         experimentTitleTooltip: '用于生成目录、README、实验背景标题。默认：Virtual Eden Civic Morning。格式：短标题，后端会据此生成 hypothesis 目录名。',
         experimentTitlePlaceholder: '例如：Virtual Eden Civic Morning',
         mapPackage: '地图包',
-        mapPackageTooltip: '从 agentsociety/custom/maps 和 agentsociety/custom/generated_maps 自动扫描的地图包。必须包含 map.yaml、Tiled JSON、tileset PNG 和 Collisions 图层。',
+        mapPackageTooltip: '从 agentsociety/custom/maps 自动扫描的地图包。必须包含 map.yaml、Tiled JSON、tileset PNG 和 Collisions 图层。',
+        importMap: '导入地图',
         mapSummary: '{{map}}：{{locations}} 个地点，{{interactions}} 个交互，{{characters}} 个角色形象。',
         noRoleImagesTitle: '这个地图包还没有专属角色形象',
         noRoleImagesDescription: '可以继续生成实验草案；草案生成后可在角色工作台补全回放中的小人图。',

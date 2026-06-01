@@ -27,6 +27,7 @@ import {
     DeleteOutlined,
     EditOutlined,
     ExperimentOutlined,
+    ImportOutlined,
     PlayCircleOutlined,
     QuestionCircleOutlined,
     RobotOutlined,
@@ -38,6 +39,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { fetchCustom } from '../../components/fetch';
 import LanguageToggle from '../../components/LanguageToggle';
+import PackageImportModal from '../../components/PackageImportModal';
+import type { PackageInstallResult } from '../../components/packageImport';
 import {
     localizeMapDisplayName,
     localizeMapLocationName,
@@ -349,6 +352,7 @@ export default function SetupPage() {
     const [startingDefault, setStartingDefault] = useState<string | null>(null);
     const [latestDraftAvailable, setLatestDraftAvailable] = useState(false);
     const [launchPending, setLaunchPending] = useState<LaunchResult | null>(null);
+    const [packageImportOpen, setPackageImportOpen] = useState<false | 'map' | 'experiment'>(false);
     const [agentModalOpen, setAgentModalOpen] = useState(false);
     const [editingAgentId, setEditingAgentId] = useState<number | null>(null);
     const [completingRoleImages, setCompletingRoleImages] = useState(false);
@@ -423,7 +427,7 @@ export default function SetupPage() {
         ) : null
     );
 
-    const loadStatus = async () => {
+    const loadStatus = async (): Promise<SetupStatus | null> => {
         setLoadingStatus(true);
         try {
             const payload = await fetchJson<SetupStatus>('/api/v1/god/setup/status');
@@ -453,8 +457,10 @@ export default function SetupPage() {
                 GOD_FRONTEND_PORT: payload.model_config.GOD_FRONTEND_PORT?.value || '5174',
             });
             void loadLatestDraft(false);
+            return payload;
         } catch (error) {
             messageApi.error(copy('messages.loadStatusFailed', { error: errorText(error) }));
+            return null;
         } finally {
             setLoadingStatus(false);
         }
@@ -528,6 +534,22 @@ export default function SetupPage() {
         setBasicsValues(normalized);
         saveStoredBasics(normalized);
         return normalized;
+    };
+
+    const handlePackageInstalled = async (result: PackageInstallResult) => {
+        setPackageImportOpen(false);
+        const nextStatus = await loadStatus();
+        if (result.package_type === 'map' && result.resource_id) {
+            const normalized = syncBasicsValues({ ...basicsRef.current, map_id: result.resource_id });
+            basicsForm.setFieldsValue(normalized);
+            setCurrentStep(2);
+        }
+        if (result.package_type === 'experiment') {
+            messageApi.success(copy('messages.experimentImported', { id: result.resource_id || '' }));
+            if (nextStatus) {
+                setStatus(nextStatus);
+            }
+        }
     };
 
     const loadLatestDraft = async (navigateToDraft = false) => {
@@ -1104,6 +1126,9 @@ export default function SetupPage() {
                         <Button icon={<EditOutlined />} onClick={() => setCurrentStep(2)}>
                             {copy('choice.createCustom')}
                         </Button>
+                        <Button icon={<ImportOutlined />} onClick={() => setPackageImportOpen('experiment')}>
+                            {copy('choice.importExperiment')}
+                        </Button>
                     </Space>
                 </div>
             </div>
@@ -1137,15 +1162,27 @@ export default function SetupPage() {
                     </Col>
                     <Col xs={24} lg={8}>
                         <Form.Item
-                            name="map_id"
                             label={formLabel(copy('basics.mapPackage'), copy('basics.mapPackageTooltip'))}
                         >
-                            <Select
-                                options={mapOptions}
-                                placeholder="the_ville"
-                                optionFilterProp="label"
-                                showSearch
-                            />
+                            <div className="setup-map-picker">
+                                <Form.Item name="map_id" noStyle>
+                                    <Select
+                                        options={mapOptions}
+                                        placeholder="the_ville"
+                                        optionFilterProp="label"
+                                        showSearch
+                                        style={{ width: '100%' }}
+                                    />
+                                </Form.Item>
+                                <Tooltip title={copy('basics.importMap')}>
+                                    <Button
+                                        aria-label={copy('basics.importMap')}
+                                        className="setup-map-import-button"
+                                        icon={<ImportOutlined />}
+                                        onClick={() => setPackageImportOpen('map')}
+                                    />
+                                </Tooltip>
+                            </div>
                         </Form.Item>
                     </Col>
                     <Col xs={12} lg={4}>
@@ -1633,6 +1670,12 @@ export default function SetupPage() {
                     onCancel={() => setAgentModalOpen(false)}
                 />
             )}
+            <PackageImportModal
+                open={Boolean(packageImportOpen)}
+                expectedType={packageImportOpen || undefined}
+                onCancel={() => setPackageImportOpen(false)}
+                onInstalled={handlePackageInstalled}
+            />
         </div>
     );
 }

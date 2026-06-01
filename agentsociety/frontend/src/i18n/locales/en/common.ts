@@ -47,5 +47,21 @@ export default {
             switchToChinese: "Switch to Chinese",
             switchToEnglish: "Switch to English"
         }
+    },
+    packageImport: {
+        title: 'Import package zip',
+        dropZip: 'Drop or choose a .zip package',
+        previewReady: '{{type}} package ready: {{id}}',
+        conflict: 'ID conflict',
+        saveAs: 'Save as new ID',
+        overwrite: 'Overwrite',
+        cancelImport: 'Cancel import',
+        install: 'Install',
+        installed: 'Installed {{id}}',
+        kind: 'Kind',
+        message: 'Message',
+        error: 'Error',
+        warning: 'Warning',
+        unexpectedType: 'This zip is a {{type}} package.',
     }
 }; 

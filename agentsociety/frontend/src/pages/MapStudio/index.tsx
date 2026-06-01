@@ -23,6 +23,7 @@ import {
     CheckCircleOutlined,
     CloudUploadOutlined,
     CompassOutlined,
+    ExportOutlined,
     EditOutlined,
     KeyOutlined,
     PlayCircleOutlined,
@@ -477,6 +478,35 @@ export default function MapStudioPage() {
             messageApi.error(toErrorText(error));
         } finally {
             setPublishing(false);
+        }
+    };
+
+    const exportMapPack = async () => {
+        const mapId = published?.map_id || publishMapId.trim() || draft?.map_id;
+        if (!mapId) return;
+        try {
+            const response = await fetchCustom('/api/v1/god/map-packs/export', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    map_id: mapId,
+                    draft_id: published ? undefined : draft?.draft_id,
+                }),
+            });
+            if (!response.ok) {
+                messageApi.error(await response.text());
+                return;
+            }
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `${mapId}-map-pack.zip`;
+            link.click();
+            URL.revokeObjectURL(url);
+            messageApi.success(copy('messages.exported'));
+        } catch (error) {
+            messageApi.error(toErrorText(error));
         }
     };
 
@@ -957,6 +987,13 @@ export default function MapStudioPage() {
                                                         {copy('validate.publish')}
                                                     </Button>
                                                 </Tooltip>
+                                                <Button
+                                                    icon={<ExportOutlined />}
+                                                    disabled={!draft.validation.ok}
+                                                    onClick={exportMapPack}
+                                                >
+                                                    {copy('validate.exportZip')}
+                                                </Button>
                                             </Space>
                                         </div>
                                         {published && (

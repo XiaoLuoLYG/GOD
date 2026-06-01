@@ -47,5 +47,21 @@ export default {
             switchToChinese: "切换到中文",
             switchToEnglish: "切换到英文"
         }
+    },
+    packageImport: {
+        title: '导入 package zip',
+        dropZip: '拖入或选择 .zip 包',
+        previewReady: '{{type}} 包已就绪：{{id}}',
+        conflict: 'ID 冲突',
+        saveAs: '另存为新 ID',
+        overwrite: '覆盖',
+        cancelImport: '取消导入',
+        install: '安装',
+        installed: '已安装 {{id}}',
+        kind: '类型',
+        message: '信息',
+        error: '错误',
+        warning: '警告',
+        unexpectedType: '这个 zip 是 {{type}} 包。',
     }
 }; 

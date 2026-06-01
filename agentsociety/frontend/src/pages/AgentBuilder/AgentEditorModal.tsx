@@ -20,6 +20,7 @@ import type { FormInstance } from 'antd/es/form';
 import {
     BgColorsOutlined,
     CheckCircleOutlined,
+    DownloadOutlined,
     ExperimentOutlined,
     ImportOutlined,
     PictureOutlined,
@@ -31,6 +32,7 @@ import {
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { fetchCustom } from '../../components/fetch';
+import PackageImportModal from '../../components/PackageImportModal';
 import {
     jsonStringify,
     parseJsonObject,
@@ -357,6 +359,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
     const [agentPacks, setAgentPacks] = useState<AgentPackSummary[]>([]);
     const [agentPacksLoading, setAgentPacksLoading] = useState(false);
     const [selectedPackAgent, setSelectedPackAgent] = useState<string>();
+    const [agentPackZipImportOpen, setAgentPackZipImportOpen] = useState(false);
 
     const profileForView = useMemo(() => safeParseObject(profileJsonText, {}), [profileJsonText]);
     const appearanceForView = asRecord(profileForView.appearance);
@@ -399,6 +402,21 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         const agent = pack?.agents.find((item) => String(item.id) === selected.agent_id);
         return pack && agent ? { pack, agent } : null;
     }, [agentPacks, selectedPackAgent]);
+
+    const reloadAgentPacks = async () => {
+        setAgentPacksLoading(true);
+        try {
+            const response = await fetchCustom(`/api/v1/god/agent-packs?map_id=${encodeURIComponent(mapId)}`);
+            if (!response.ok) throw new Error(await response.text());
+            const payload = await response.json();
+            setAgentPacks(Array.isArray(payload.agent_packs) ? payload.agent_packs : []);
+        } catch (error) {
+            setAgentPacks([]);
+            message.warning(copy('agentHubLoadFailed', { error: error instanceof Error ? error.message : String(error) }));
+        } finally {
+            setAgentPacksLoading(false);
+        }
+    };
 
     const packAssetUrl = (pack: AgentPackSummary, sprite?: AgentPackSprite) => {
         if (!sprite?.path) return '';
@@ -843,29 +861,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
 
     useEffect(() => {
         if (!open) return;
-        let cancelled = false;
-        setAgentPacksLoading(true);
-        fetchCustom(`/api/v1/god/agent-packs?map_id=${encodeURIComponent(mapId)}`)
-            .then(async (response) => {
-                if (!response.ok) throw new Error(await response.text());
-                return response.json();
-            })
-            .then((payload) => {
-                if (cancelled) return;
-                setAgentPacks(Array.isArray(payload.agent_packs) ? payload.agent_packs : []);
-            })
-            .catch((error) => {
-                if (!cancelled) {
-                    setAgentPacks([]);
-                    message.warning(copy('agentHubLoadFailed', { error: error instanceof Error ? error.message : String(error) }));
-                }
-            })
-            .finally(() => {
-                if (!cancelled) setAgentPacksLoading(false);
-            });
-        return () => {
-            cancelled = true;
-        };
+        void reloadAgentPacks();
         // Agent Hub is reloaded when the modal opens or the selected map changes.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, mapId]);
@@ -1121,6 +1117,35 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         }
     };
 
+    const exportCurrentAgentPackZip = async () => {
+        try {
+            const agent = buildCurrentAgent();
+            if (!agent) return;
+            const packId = slugify(name || `agent-${agentId}`);
+            const response = await fetchCustom('/api/v1/god/agent-packs/export', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    pack_id: packId,
+                    display_name: name || `Agent ${agentId}`,
+                    agents: [agent],
+                    initial_locations: { [String(agent.agent_id)]: initialLocationValue },
+                }),
+            });
+            if (!response.ok) throw new Error(await response.text());
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `${packId}-agent-pack.zip`;
+            link.click();
+            URL.revokeObjectURL(url);
+            message.success(copy('exportedAgentPackZip', { name: name || packId }));
+        } catch (error) {
+            message.error(copy('exportAgentPackZipFailed', { error: error instanceof Error ? error.message : String(error) }));
+        }
+    };
+
     const submitAgent = async () => {
         try {
             const agent = buildCurrentAgent();
@@ -1246,6 +1271,9 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                             {copy('importFromHub')}
                         </Button>
                     </Space.Compact>
+                    <Button icon={<ImportOutlined />} onClick={() => setAgentPackZipImportOpen(true)}>
+                        {copy('importAgentPackZip')}
+                    </Button>
                 </div>
                 <div className="agent-studio-field-row compact">
                     <Form.Item label="MBTI">
@@ -1436,6 +1464,9 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                         <Button size="small" icon={<SaveOutlined />} onClick={saveCurrentAgentToHub}>
                             {copy('saveToHub')}
                         </Button>
+                        <Button size="small" icon={<DownloadOutlined />} onClick={exportCurrentAgentPackZip}>
+                            {copy('exportAgentPackZip')}
+                        </Button>
                     </Space>
                 </div>
             </div>
@@ -1474,6 +1505,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
     const saveDisabled = Boolean(photoFile && !characterAsset) || characterGenerating;
 
     return (
+        <>
         <Modal
             title={editingAgentId === null ? t('agentBuilder.editor.addTitle') : t('agentBuilder.editor.editTitle')}
             open={open}
@@ -1496,5 +1528,15 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                 {content}
             </div>
         </Modal>
+        <PackageImportModal
+            open={agentPackZipImportOpen}
+            expectedType="agent"
+            onCancel={() => setAgentPackZipImportOpen(false)}
+            onInstalled={() => {
+                setAgentPackZipImportOpen(false);
+                void reloadAgentPacks();
+            }}
+        />
+        </>
     );
 };

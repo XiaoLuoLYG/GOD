@@ -445,10 +445,7 @@ def _default_experiment_status(workspace: Path) -> list[dict[str, Any]]:
 
 def _map_service_root() -> Path | None:
     candidate = _god_root() / "agentsociety"
-    return candidate if (
-        (candidate / "custom" / "maps").exists()
-        or (candidate / "custom" / "generated_maps").exists()
-    ) else None
+    return candidate if (candidate / "custom" / "maps").exists() else None
 
 
 def _load_map_package(map_id: str | None = None) -> MapPackage:

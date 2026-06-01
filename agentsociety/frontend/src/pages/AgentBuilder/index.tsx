@@ -24,6 +24,7 @@ import type { ColumnsType } from 'antd/es/table';
 import {
     DeleteOutlined,
     EditOutlined,
+    ExportOutlined,
     FolderOpenOutlined,
     ImportOutlined,
     PlusOutlined,
@@ -34,6 +35,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import LanguageToggle from '../../components/LanguageToggle';
 import { fetchCustom } from '../../components/fetch';
+import PackageImportModal from '../../components/PackageImportModal';
 import { AgentEditorModal, type AgentEditorSaveMeta, type AgentStudioLocation } from './AgentEditorModal';
 import {
     jsonStringify,
@@ -462,6 +464,8 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
     const [agentPacksLoading, setAgentPacksLoading] = useState(false);
     const [selectedAgentPackId, setSelectedAgentPackId] = useState<string>();
     const [agentPackImportMode, setAgentPackImportMode] = useState<'append' | 'replace'>('append');
+    const [agentPackLocationOverrides, setAgentPackLocationOverrides] = useState<Record<string, string>>({});
+    const [agentPackZipImportOpen, setAgentPackZipImportOpen] = useState(false);
     const [form] = Form.useForm<AgentFormValues>();
 
     const agents = config?.agents ?? EMPTY_AGENTS;
@@ -482,6 +486,22 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
         () => agentPacks.find((pack) => agentPackSelectionKey(pack) === selectedAgentPackId),
         [agentPacks, selectedAgentPackId],
     );
+
+    useEffect(() => {
+        if (!selectedAgentPack) {
+            setAgentPackLocationOverrides({});
+            return;
+        }
+        const fallbackLocation = mapLocations[0]?.id || 'park';
+        setAgentPackLocationOverrides(Object.fromEntries(
+            selectedAgentPack.agents.map((agent) => {
+                const routine = asRecord(agent.profile?.routine);
+                const initial = stringValue(routine.initial_location);
+                const validInitial = mapLocations.some((location) => location.id === initial);
+                return [String(agent.id), validInitial ? initial : fallbackLocation];
+            })
+        ));
+    }, [selectedAgentPack, mapLocations]);
 
     const endpointBase = `/api/v1/experiment-configs/${encodeURIComponent(hypothesisId)}/${encodeURIComponent(experimentId)}`;
     const query = `workspace_path=${encodeURIComponent(workspacePath)}`;
@@ -696,9 +716,10 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
         const knownLocations = new Set(mapLocations.map((location) => location.id));
         const routine = asRecord(profile.routine);
         const rawInitialLocation = stringValue(routine.initial_location);
-        const initialLocation = knownLocations.has(rawInitialLocation)
+        const overrideLocation = agentPackLocationOverrides[String(packAgent.id)];
+        const initialLocation = overrideLocation || (knownLocations.has(rawInitialLocation)
             ? rawInitialLocation
-            : mapLocations[0]?.id || 'park';
+            : mapLocations[0]?.id || 'park');
         profile.routine = {
             ...routine,
             initial_location: initialLocation,
@@ -791,6 +812,41 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
         }
         setAgentPackModalOpen(false);
         message.success(t('agentBuilder.messages.imported', { count: importedAgents.length }));
+    };
+
+    const handleAgentPackZipInstalled = async () => {
+        setAgentPackZipImportOpen(false);
+        setAgentPackModalOpen(true);
+    };
+
+    const exportAgents = async () => {
+        if (!config) return;
+        const initialLocations = asStringRecord(getEnvModule(config)?.kwargs?.initial_locations);
+        try {
+            const response = await fetchCustom('/api/v1/god/agent-packs/export', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    pack_id: `${hypothesisId}-${experimentId}-agents`,
+                    display_name: `${hypothesisId} ${experimentId} Agents`,
+                    agents,
+                    initial_locations: initialLocations,
+                }),
+            });
+            if (!response.ok) {
+                throw new Error(await response.text());
+            }
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `${hypothesisId}-${experimentId}-agent-pack.zip`;
+            link.click();
+            URL.revokeObjectURL(url);
+            message.success(t('agentBuilder.messages.exported'));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : String(error));
+        }
     };
 
     const upsertAgent = async (agent: AgentRecord, meta?: AgentEditorSaveMeta) => {
@@ -1028,7 +1084,13 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                             {t('agentBuilder.actions.batchImport')}
                         </Button>
                         <Button icon={<ImportOutlined />} onClick={() => setAgentPackModalOpen(true)} disabled={!config}>
-                            {t('agentBuilder.actions.importAgentPack')}
+                            {t('agentBuilder.actions.addFromAgentPack')}
+                        </Button>
+                        <Button icon={<ImportOutlined />} onClick={() => setAgentPackZipImportOpen(true)} disabled={!config}>
+                            {t('agentBuilder.actions.importAgentPackZip')}
+                        </Button>
+                        <Button icon={<ExportOutlined />} onClick={exportAgents} disabled={!config || !agents.length}>
+                            {t('agentBuilder.actions.exportAll')}
                         </Button>
                         <Tag>{t('agentBuilder.messages.agentCount', { count: agents.length })}</Tag>
                     </Space>
@@ -1149,7 +1211,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                 footer={[
                     <Button key="cancel" onClick={() => setAgentPackModalOpen(false)}>{t('agentBuilder.actions.cancel')}</Button>,
                     <Button key="import" type="primary" disabled={!selectedAgentPack} onClick={importSelectedAgentPack}>
-                        {t('agentBuilder.actions.importAgentPack')}
+                        {t('agentBuilder.actions.addFromAgentPack')}
                     </Button>,
                 ]}
                 destroyOnHidden
@@ -1169,8 +1231,46 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                         <Radio.Button value="append">{t('agentBuilder.import.append')}</Radio.Button>
                         <Radio.Button value="replace">{t('agentBuilder.import.replace')}</Radio.Button>
                     </Radio.Group>
+                    {selectedAgentPack && (
+                        <Table<AgentPackAgent>
+                            size="small"
+                            pagination={false}
+                            rowKey={(record) => String(record.id)}
+                            dataSource={selectedAgentPack.agents}
+                            scroll={{ x: 520 }}
+                            columns={[
+                                {
+                                    title: t('agentBuilder.import.agent'),
+                                    render: (_, record) => record.name || record.id,
+                                },
+                                {
+                                    title: t('agentBuilder.import.initialLocation'),
+                                    render: (_, record) => (
+                                        <Select
+                                            style={{ width: '100%' }}
+                                            value={agentPackLocationOverrides[String(record.id)] || mapLocations[0]?.id || 'park'}
+                                            options={mapLocations.map((location) => ({
+                                                value: location.id,
+                                                label: location.name || location.id,
+                                            }))}
+                                            onChange={(value) => setAgentPackLocationOverrides((current) => ({
+                                                ...current,
+                                                [String(record.id)]: value,
+                                            }))}
+                                        />
+                                    ),
+                                },
+                            ]}
+                        />
+                    )}
                 </Space>
             </Modal>
+            <PackageImportModal
+                open={agentPackZipImportOpen}
+                expectedType="agent"
+                onCancel={() => setAgentPackZipImportOpen(false)}
+                onInstalled={handleAgentPackZipInstalled}
+            />
         </>
     );
 

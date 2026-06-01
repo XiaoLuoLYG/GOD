@@ -200,7 +200,7 @@ def test_missing_map_id_falls_back_to_default(tmp_path: Path) -> None:
     assert package_info.map_id == "the_ville"
 
 
-def test_generated_map_packages_are_discovered_without_drafts(tmp_path: Path) -> None:
+def test_generated_map_packages_are_not_discovered_from_legacy_registry(tmp_path: Path) -> None:
     agentsociety_root = tmp_path / "agentsociety"
     authored_package = _write_package(agentsociety_root)
     authored_package.rename(authored_package.parent / "the_ville")
@@ -210,31 +210,38 @@ def test_generated_map_packages_are_discovered_without_drafts(tmp_path: Path) ->
         encoding="utf-8",
     )
 
-    generated_root = agentsociety_root / "custom" / "generated_maps"
-    generated_package = _write_package(tmp_path / "generated_source")
-    published = generated_root / "moon_tower"
-    published.parent.mkdir(parents=True)
-    generated_package.rename(published)
-    (published / "map.yaml").write_text(
-        (published / "map.yaml").read_text(encoding="utf-8").replace("demo_map", "moon_tower"),
-        encoding="utf-8",
-    )
-
-    draft_package = _write_package(tmp_path / "draft_source")
-    draft = generated_root / "_drafts" / "draft_1"
-    draft.parent.mkdir(parents=True)
-    draft_package.rename(draft)
-    (draft / "map.yaml").write_text(
-        (draft / "map.yaml").read_text(encoding="utf-8").replace("demo_map", "draft_map"),
+    legacy_root = agentsociety_root / "custom" / "generated_maps"
+    legacy_package = _write_package(tmp_path / "legacy_source")
+    legacy = legacy_root / "moon_tower"
+    legacy.parent.mkdir(parents=True)
+    legacy_package.rename(legacy)
+    (legacy / "map.yaml").write_text(
+        (legacy / "map.yaml").read_text(encoding="utf-8").replace("demo_map", "moon_tower"),
         encoding="utf-8",
     )
 
     packages = map_packages.list_map_packages(agentsociety_root)
 
     by_id = {package.map_id: package for package in packages}
-    assert {"the_ville", "moon_tower"} <= set(by_id)
-    assert "draft_map" not in by_id
-    assert by_id["moon_tower"].validation.ok is True
+    assert set(by_id) == {"the_ville"}
+    assert "moon_tower" not in by_id
+
+
+def test_import_map_pack_zip_installs_into_custom_maps(tmp_path: Path) -> None:
+    source_root = tmp_path / "source_agentsociety"
+    package = _write_package(source_root)
+    zip_path = tmp_path / "demo-map.zip"
+    map_packages.export_map_pack(
+        map_packages.load_map_package_by_manifest(package / "map.yaml"),
+        zip_path,
+    )
+
+    target_root = tmp_path / "target_agentsociety"
+    imported = map_packages.import_map_pack_zip(zip_path, root=target_root)
+
+    assert imported.map_id == "demo_map"
+    assert imported.validation.ok is True
+    assert (target_root / "custom" / "maps" / "demo_map" / "map.yaml").exists()
 
 
 def test_generated_map_validation_rejects_isolated_location_anchors(tmp_path: Path) -> None:

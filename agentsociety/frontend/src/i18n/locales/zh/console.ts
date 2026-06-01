@@ -28,6 +28,7 @@ export default {
         viewLog: "查看日志",
         export: "全部导出",
         exportArtifacts: "导出产物",
+        exportExperimentPack: "导出实验包",
         delete: "删除",
         createExperiment: "创建实验"
     },
@@ -55,4 +56,4 @@ export default {
         deleteFailed: "删除实验失败：",
         noToken: "未找到token，请登录"
     }
-}; 
+};

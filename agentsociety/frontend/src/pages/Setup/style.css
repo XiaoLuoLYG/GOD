@@ -79,6 +79,36 @@
     white-space: pre-wrap;
 }
 
+.setup-map-picker {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+}
+
+.setup-map-picker .ant-select {
+    min-width: 0;
+}
+
+.setup-map-import-button.ant-btn {
+    flex: 0 0 34px;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    color: #475569;
+    border-color: #d8e0ec;
+    background: #ffffff;
+    box-shadow: none;
+}
+
+.setup-map-import-button.ant-btn:hover,
+.setup-map-import-button.ant-btn:focus-visible {
+    color: #0000cc;
+    border-color: rgba(0, 0, 204, 0.38);
+    background: rgba(0, 0, 204, 0.04);
+}
+
 .setup-page .ant-input,
 .setup-page .ant-input-number,
 .setup-page .ant-select-selector {

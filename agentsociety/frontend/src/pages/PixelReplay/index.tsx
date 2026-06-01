@@ -19,6 +19,7 @@ import {
 import {
     AimOutlined,
     CaretRightOutlined,
+    DownloadOutlined,
     PauseOutlined,
     SendOutlined,
     SettingOutlined,
@@ -2773,6 +2774,30 @@ export default function PixelReplay() {
         }
     }, [replayBaseUrl, withWorkspace]);
 
+    const exportExperimentPack = useCallback(async () => {
+        try {
+            const response = await fetchCustom('/api/v1/god/experiment-packs/export', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    workspace_path: workspacePath,
+                    hypothesis_id: effectiveHypothesisId,
+                    experiment_id: effectiveExperimentId,
+                }),
+            });
+            if (!response.ok) throw new Error(await response.text());
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `${effectiveHypothesisId}-experiment-pack.zip`;
+            link.click();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            messageApi.error(toErrorMessage(err));
+        }
+    }, [effectiveExperimentId, effectiveHypothesisId, messageApi, workspacePath]);
+
     useEffect(() => {
         let cancelled = false;
 
@@ -3459,10 +3484,17 @@ export default function PixelReplay() {
                                 children: (
                                     <div className="pixel-rail-pane pixel-summary-pane">
                                         <section className="pixel-rail-section pixel-overview-card">
-                                            <Title level={4}>{t('replay.pixel.overview.title')}</Title>
-                                            <Text type="secondary">
-                                                {t('replay.pixel.overview.subtitle', { hypothesis: effectiveHypothesisId, experiment: effectiveExperimentId })}
-                                            </Text>
+                                            <div className="pixel-overview-header">
+                                                <div>
+                                                    <Title level={4}>{t('replay.pixel.overview.title')}</Title>
+                                                    <Text type="secondary">
+                                                        {t('replay.pixel.overview.subtitle', { hypothesis: effectiveHypothesisId, experiment: effectiveExperimentId })}
+                                                    </Text>
+                                                </div>
+                                                <Button size="small" icon={<DownloadOutlined />} onClick={exportExperimentPack}>
+                                                    {t('replay.pixel.overview.exportExperiment')}
+                                                </Button>
+                                            </div>
                                             <div className="pixel-replay-stats">
                                                 <Tag>{t('replay.pixel.overview.residents', { count: info?.agent_count ?? profiles.length })}</Tag>
                                                 <Tag>{t('replay.pixel.overview.steps', { count: info?.total_steps ?? timeline.length })}</Tag>

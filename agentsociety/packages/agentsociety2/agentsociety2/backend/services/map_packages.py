@@ -7,9 +7,13 @@ import heapq
 import json
 import os
 from pathlib import Path
+import shutil
+import tempfile
 from typing import Any
 
 import yaml
+
+from agentsociety2.backend.services import package_archives
 
 
 DEFAULT_MAP_ID = "the_ville"
@@ -99,7 +103,7 @@ def generated_maps_root(root: Path | None = None) -> Path:
 
 def map_package_roots(root: Path | None = None) -> tuple[Path, ...]:
     root = root or agentsociety_root()
-    return (maps_root(root), generated_maps_root(root))
+    return (maps_root(root),)
 
 
 def _load_structured(path: Path) -> dict[str, Any]:
@@ -532,6 +536,70 @@ def list_map_packages(root: Path | None = None) -> list[MapPackage]:
                     )
                 )
     return found
+
+
+def export_map_pack(package: MapPackage, zip_path: Path) -> Path:
+    return package_archives.zip_directory(package.package_path, zip_path)
+
+
+def import_map_pack_zip(
+    zip_path: Path,
+    *,
+    root: Path | None = None,
+    requested_map_id: str | None = None,
+    overwrite: bool = False,
+) -> MapPackage:
+    root = root or agentsociety_root()
+    with tempfile.TemporaryDirectory(prefix="god-map-pack-") as temp:
+        extracted = package_archives.safe_extract_zip(zip_path, Path(temp))
+        manifest_path = _find_manifest_in_extracted_root(extracted)
+        if manifest_path is None:
+            raise ValueError("MapPack archive must contain map.yaml or a compatible map manifest")
+        package = load_map_package_by_manifest(manifest_path)
+        if not package.validation.ok:
+            raise ValueError(f"Imported MapPack is invalid: {package.validation.errors}")
+        map_id = package_archives.sanitize_id(requested_map_id or package.map_id, "map")
+        target = maps_root(root) / map_id
+        if target.exists():
+            if not overwrite:
+                raise FileExistsError(f"MapPack already exists: {map_id}")
+            shutil.rmtree(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(package.package_path, target)
+        _rewrite_manifest_map_id(target, map_id)
+    return load_map_package_by_manifest(_manifest_path_for_dir(target) or target / "map.yaml")
+
+
+def _find_manifest_in_extracted_root(root: Path) -> Path | None:
+    direct = _manifest_path_for_dir(root)
+    if direct is not None:
+        return direct
+    candidates = [
+        manifest
+        for child in root.iterdir()
+        if child.is_dir()
+        for manifest in [_manifest_path_for_dir(child)]
+        if manifest is not None
+    ]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _rewrite_manifest_map_id(package_path: Path, map_id: str) -> None:
+    manifest_path = _manifest_path_for_dir(package_path)
+    if manifest_path is None:
+        return
+    manifest = _load_structured(manifest_path)
+    manifest["map_id"] = map_id
+    manifest.setdefault("display_name", map_id)
+    localized = manifest.get("localized")
+    if isinstance(localized, dict):
+        for locale_values in localized.values():
+            if isinstance(locale_values, dict):
+                locale_values.setdefault("display_name", manifest.get("display_name") or map_id)
+    if manifest_path.suffix.lower() in {".yaml", ".yml"}:
+        manifest_path.write_text(yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    else:
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def relative_manifest_path(package: MapPackage, root: Path | None = None) -> str:

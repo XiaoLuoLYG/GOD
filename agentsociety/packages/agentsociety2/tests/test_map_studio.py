@@ -1,7 +1,9 @@
 import json
 from functools import partial
 import heapq
+from io import BytesIO
 from pathlib import Path
+from zipfile import ZipFile
 
 import anyio
 import pytest
@@ -11,7 +13,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
-from agentsociety2.backend.routers import god_setup, map_studio
+from agentsociety2.backend.routers import god_setup, map_packs, map_studio
 from agentsociety2.backend.routers.map_studio import (
     CollisionEdit,
     MapDraftCreateRequest,
@@ -184,6 +186,34 @@ def test_map_studio_draft_patch_publish_and_setup_visibility(monkeypatch, tmp_pa
     assert manifest["display_name"] == "moon_tower"
     assert manifest["localized"]["zh"]["display_name"] == "moon_tower"
     assert manifest["localized"]["en"]["display_name"] == "moon_tower"
+
+
+def test_map_studio_draft_can_export_before_publish(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    _write_default_map_root(tmp_path)
+
+    async def fake_image(**_kwargs):
+        return _map_image_bytes()
+
+    monkeypatch.setattr(map_generation, "generate_map_image", fake_image)
+
+    created = anyio.run(
+        map_studio.create_draft,
+        MapDraftCreateRequest(prompt="Exportable draft map"),
+    )
+    app = FastAPI()
+    app.include_router(map_packs.router)
+    response = TestClient(app).post(
+        "/api/v1/god/map-packs/export",
+        json={"map_id": created.map_id, "draft_id": created.draft_id},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert f"{created.map_id}-map-pack.zip" in response.headers["content-disposition"]
+    with ZipFile(BytesIO(response.content)) as archive:
+        assert "map.yaml" in archive.namelist()
+        assert "visuals/map.json" in archive.namelist()
 
 
 def test_map_studio_uses_default_style_reference_when_no_upload(monkeypatch, tmp_path):

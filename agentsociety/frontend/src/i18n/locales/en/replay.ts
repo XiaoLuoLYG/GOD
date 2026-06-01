@@ -111,6 +111,7 @@ export default {
             messages: "{{count}} messages total",
             communications: "{{count}} communications this step",
             missingTiles: "{{count}} missing map coordinates",
+            exportExperiment: "Export Experiment",
         },
         step: {
             title: "What Happened",

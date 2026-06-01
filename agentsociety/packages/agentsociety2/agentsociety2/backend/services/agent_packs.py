@@ -14,9 +14,9 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 import yaml
 
+from agentsociety2.backend.services import package_archives
 from agentsociety2.backend.services.map_packages import (
     agentsociety_root,
-    generated_maps_root,
     is_within,
     maps_root,
     safe_resolve,
@@ -64,13 +64,11 @@ def map_agent_packs_roots(root: Path | None = None, map_id: str | None = None) -
     root = root or agentsociety_root()
     found: list[tuple[Path, str]] = []
     if map_id:
-        for base in (maps_root(root), generated_maps_root(root)):
-            found.append((base / map_id / "agent_packs", map_id))
+        found.append((maps_root(root) / map_id / "agent_packs", map_id))
         return tuple(found)
 
-    for base in (maps_root(root), generated_maps_root(root)):
-        if not base.exists():
-            continue
+    base = maps_root(root)
+    if base.exists():
         for package_dir in sorted(base.iterdir()):
             if package_dir.is_dir() and not package_dir.name.startswith(("_", ".")):
                 found.append((package_dir / "agent_packs", package_dir.name))
@@ -242,17 +240,18 @@ def import_agent_pack_zip(
     zip_path: Path,
     *,
     root: Path | None = None,
+    requested_pack_id: str | None = None,
     overwrite: bool = False,
 ) -> AgentPack:
     root = root or agentsociety_root()
     with tempfile.TemporaryDirectory(prefix="god-agent-pack-") as temp:
         temp_root = Path(temp)
-        _safe_extract_zip(zip_path, temp_root)
+        package_archives.safe_extract_zip(zip_path, temp_root)
         manifest_path = _find_manifest_in_extracted_root(temp_root)
         if manifest_path is None:
             raise ValueError("AgentPack archive must contain agent_pack.yaml")
         manifest = _load_structured(manifest_path)
-        pack_id = _sanitize_pack_id(str(manifest.get("pack_id") or manifest_path.parent.name))
+        pack_id = _sanitize_pack_id(str(requested_pack_id or manifest.get("pack_id") or manifest_path.parent.name))
         target = agent_packs_root(root) / pack_id
         if target.exists():
             if not overwrite:
@@ -260,6 +259,7 @@ def import_agent_pack_zip(
             shutil.rmtree(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(manifest_path.parent, target)
+        _rewrite_agent_pack_manifest_id(target, pack_id)
     pack = load_agent_pack_by_manifest(_manifest_path_for_dir(target) or target / "agent_pack.yaml")
     if not pack.validation.ok:
         shutil.rmtree(target, ignore_errors=True)
@@ -368,6 +368,68 @@ def save_agent_pack_from_agent(
     return load_agent_pack_by_manifest(package / "agent_pack.yaml")
 
 
+def save_agent_pack_from_agents(
+    *,
+    root: Path | None,
+    pack_id: str,
+    display_name: str,
+    agents: list[dict[str, Any]],
+    initial_locations: dict[str, str] | None = None,
+) -> AgentPack:
+    root = root or agentsociety_root()
+    safe_pack_id = _sanitize_pack_id(pack_id or display_name or "agent-pack")
+    package = agent_packs_root(root) / safe_pack_id
+    if package.exists():
+        shutil.rmtree(package)
+    package.mkdir(parents=True)
+    manifest_agents: list[dict[str, Any]] = []
+    copied_character_names: set[str] = set()
+
+    for agent in agents:
+        agent_id = str(agent.get("agent_id") or agent.get("id") or len(manifest_agents) + 1)
+        temp_pack_id = f"{safe_pack_id}__tmp__{agent_id}"
+        saved = save_agent_pack_from_agent(
+            root=root,
+            pack_id=temp_pack_id,
+            display_name=str(agent.get("name") or agent_id),
+            agent=agent,
+            initial_location=(initial_locations or {}).get(agent_id),
+        )
+        saved_agent = saved.agents[0]
+        source_dir = saved.package_path / "agents" / str(saved_agent["id"])
+        target_agent_dir = package / "agents" / str(saved_agent["id"])
+        target_agent_dir.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source_dir, target_agent_dir)
+
+        char_dir = saved.package_path / "characters"
+        if char_dir.exists():
+            (package / "characters").mkdir(exist_ok=True)
+            for path in char_dir.iterdir():
+                if path.is_file() and path.name not in copied_character_names:
+                    shutil.copy2(path, package / "characters" / path.name)
+                    copied_character_names.add(path.name)
+
+        manifest_agent = {
+            key: value
+            for key, value in saved.manifest["agents"][0].items()
+            if key not in {"profile", "runtime"}
+        }
+        manifest_agents.append(manifest_agent)
+        shutil.rmtree(saved.package_path, ignore_errors=True)
+
+    manifest = {
+        "schema_version": 1,
+        "pack_id": safe_pack_id,
+        "display_name": display_name or safe_pack_id,
+        "agents": manifest_agents,
+    }
+    (package / "agent_pack.yaml").write_text(
+        yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    return load_agent_pack_by_manifest(package / "agent_pack.yaml")
+
+
 def _load_structured(path: Path) -> dict[str, Any]:
     text = path.read_text(encoding="utf-8")
     if path.suffix.lower() in {".yaml", ".yml"}:
@@ -458,16 +520,7 @@ def _zip_directory(source_dir: Path, zip_path: Path) -> None:
 
 
 def _safe_extract_zip(zip_path: Path, target_dir: Path) -> None:
-    with ZipFile(zip_path) as archive:
-        for member in archive.infolist():
-            if member.is_dir():
-                continue
-            destination = (target_dir / member.filename).resolve()
-            if not is_within(destination, target_dir):
-                raise ValueError(f"Archive member escapes extract root: {member.filename}")
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            with archive.open(member) as source, destination.open("wb") as target:
-                shutil.copyfileobj(source, target)
+    package_archives.safe_extract_zip(zip_path, target_dir)
 
 
 def _find_manifest_in_extracted_root(root: Path) -> Path | None:
@@ -487,6 +540,19 @@ def _find_manifest_in_extracted_root(root: Path) -> Path | None:
 def _sanitize_pack_id(value: str) -> str:
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip()).strip("-._")
     return safe or "agent-pack"
+
+
+def _rewrite_agent_pack_manifest_id(package: Path, pack_id: str) -> None:
+    manifest_path = _manifest_path_for_dir(package)
+    if manifest_path is None:
+        return
+    manifest = _load_structured(manifest_path)
+    manifest["pack_id"] = pack_id
+    manifest.setdefault("display_name", pack_id)
+    if manifest_path.suffix.lower() in {".yaml", ".yml"}:
+        manifest_path.write_text(yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    else:
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _strip_preview_data(value: Any) -> Any:

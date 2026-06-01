@@ -66,6 +66,43 @@ const Page = () => {
         }
     };
 
+    const parseExperimentIds = (record: Experiment) => {
+        const parts = String(record.id || '').split('/').filter(Boolean);
+        const rawHypothesis = parts[0] || record.id;
+        const rawExperiment = parts[1] || '1';
+        return {
+            hypothesis_id: rawHypothesis.replace(/^hypothesis_/, ''),
+            experiment_id: rawExperiment.replace(/^experiment_/, ''),
+        };
+    };
+
+    const exportExperimentPack = async (record: Experiment) => {
+        try {
+            const statusResponse = await fetchCustom('/api/v1/god/setup/status');
+            if (!statusResponse.ok) throw new Error(await statusResponse.text());
+            const status = await statusResponse.json();
+            const ids = parseExperimentIds(record);
+            const response = await fetchCustom('/api/v1/god/experiment-packs/export', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    workspace_path: status.workspace_path,
+                    ...ids,
+                }),
+            });
+            if (!response.ok) throw new Error(await response.text());
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `${ids.hypothesis_id}-experiment-pack.zip`;
+            link.click();
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : String(error));
+        }
+    };
+
     const columns: ProColumns<Experiment>[] = [
         { title: t('console.table.id'), dataIndex: 'id', width: '10%' },
         { title: t('console.table.name'), dataIndex: 'name', width: '5%' },
@@ -160,6 +197,13 @@ const Page = () => {
                                     label: t('console.buttons.export'),
                                     onClick: () => {
                                         postDownloadCustom(`/api/experiments/${record.id}/export`)
+                                    }
+                                },
+                                {
+                                    key: 'exportExperimentPack',
+                                    label: t('console.buttons.exportExperimentPack'),
+                                    onClick: () => {
+                                        void exportExperimentPack(record);
                                     }
                                 },
                                 {

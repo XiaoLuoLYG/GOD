@@ -393,7 +393,7 @@
     justify-content: flex-end;
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1320px) {
     .map-studio-shell {
         width: min(100vw - 20px, 1440px);
         padding-top: 18px;

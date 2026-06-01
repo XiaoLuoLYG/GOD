@@ -111,6 +111,7 @@ export default {
             messages: "累计 {{count}} 条消息",
             communications: "本步 {{count}} 条通信",
             missingTiles: "{{count}} 人缺少地图坐标",
+            exportExperiment: "导出实验",
         },
         step: {
             title: "发生了什么",

@@ -20,6 +20,7 @@ import yaml
 
 from agentsociety2.backend.services.map_packages import (
     generated_maps_root,
+    maps_root,
     safe_resolve,
     validate_manifest_path,
 )
@@ -977,7 +978,7 @@ def validate_draft(*, root: Path, draft_id: str) -> dict[str, Any]:
 
 def _unique_publish_path(root: Path, requested_map_id: str) -> tuple[str, Path]:
     base = sanitize_map_id(requested_map_id, "generated_map")
-    published_root = generated_maps_root(root)
+    published_root = maps_root(root)
     published_root.mkdir(parents=True, exist_ok=True)
     map_id = base
     suffix = 2

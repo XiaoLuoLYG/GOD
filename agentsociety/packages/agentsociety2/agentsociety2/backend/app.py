@@ -43,6 +43,9 @@ from agentsociety2.backend.routers import (
     god_setup,
     map_studio,
     agent_packs,
+    map_packs,
+    experiment_packs,
+    package_imports,
 )
 
 # 加载环境变量
@@ -129,6 +132,9 @@ app.include_router(experiment_configs.router)
 app.include_router(god_setup.router)
 app.include_router(map_studio.router)
 app.include_router(agent_packs.router)
+app.include_router(map_packs.router)
+app.include_router(experiment_packs.router)
+app.include_router(package_imports.router)
 
 
 @app.get("/")
@@ -150,6 +156,9 @@ async def root():
             "god_setup": "/api/v1/god/setup/*",
             "map_studio": "/api/v1/god/map-studio/*",
             "agent_packs": "/api/v1/god/agent-packs/*",
+            "map_packs": "/api/v1/god/map-packs/*",
+            "experiment_packs": "/api/v1/god/experiment-packs/*",
+            "package_imports": "/api/v1/god/packages/*",
         },
     }
 

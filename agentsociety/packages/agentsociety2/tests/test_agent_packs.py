@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from io import BytesIO
 import json
 from pathlib import Path
 from zipfile import ZipFile
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 import pytest
 
+from agentsociety2.backend.routers import agent_packs as agent_packs_router
 from agentsociety2.backend.services import agent_packs
 
 
@@ -147,3 +151,79 @@ def test_import_agent_pack_zip_rejects_archives_without_manifest(tmp_path: Path)
 
     with pytest.raises(ValueError, match="agent_pack.yaml"):
         agent_packs.import_agent_pack_zip(zip_path, root=tmp_path / "agentsociety")
+
+
+def test_import_agent_pack_zip_save_as_uses_new_id(tmp_path: Path) -> None:
+    root = tmp_path / "agentsociety"
+    package = _write_agent_pack(root, "alice_pack")
+    pack = agent_packs.load_agent_pack_by_manifest(package / "agent_pack.yaml")
+    zip_path = tmp_path / "alice_pack.zip"
+    agent_packs.export_agent_pack(pack, zip_path)
+
+    imported = agent_packs.import_agent_pack_zip(
+        zip_path,
+        root=root,
+        requested_pack_id="alice_pack_2",
+        overwrite=False,
+    )
+
+    assert imported.pack_id == "alice_pack_2"
+    assert (root / "custom" / "agent_packs" / "alice_pack_2" / "agent_pack.yaml").exists()
+
+
+def test_export_agent_pack_from_agents_writes_all_profiles(tmp_path: Path) -> None:
+    root = tmp_path / "agentsociety"
+    agents = [
+        {
+            "agent_id": 1,
+            "agent_type": "JiuwenClawAgent",
+            "kwargs": {"id": 1, "name": "Alice", "profile": {"name": "Alice"}},
+        },
+        {
+            "agent_id": 2,
+            "agent_type": "JiuwenClawAgent",
+            "kwargs": {"id": 2, "name": "Bob", "profile": {"name": "Bob"}},
+        },
+    ]
+
+    pack = agent_packs.save_agent_pack_from_agents(
+        root=root,
+        pack_id="selected_cast",
+        display_name="Selected Cast",
+        agents=agents,
+        initial_locations={"1": "plaza", "2": "library"},
+    )
+
+    assert pack.pack_id == "selected_cast"
+    assert [agent["name"] for agent in pack.agents] == ["Alice", "Bob"]
+    assert pack.agents[0]["profile"]["routine"]["initial_location"] == "plaza"
+
+
+def test_export_agents_endpoint_does_not_install_generated_pack(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("GOD_ROOT", str(tmp_path))
+    (tmp_path / "agentsociety" / "custom" / "maps").mkdir(parents=True)
+    app = FastAPI()
+    app.include_router(agent_packs_router.router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/god/agent-packs/export",
+        json={
+            "pack_id": "selected_cast",
+            "display_name": "Selected Cast",
+            "agents": [
+                {
+                    "agent_id": 1,
+                    "agent_type": "JiuwenClawAgent",
+                    "kwargs": {"id": 1, "name": "Alice", "profile": {"name": "Alice"}},
+                }
+            ],
+            "initial_locations": {"1": "plaza"},
+        },
+    )
+
+    assert response.status_code == 200
+    with ZipFile(BytesIO(response.content)) as archive:
+        assert "agent_pack.yaml" in archive.namelist()
+    assert not (tmp_path / "agentsociety" / "custom" / "agent_packs" / "selected_cast").exists()
+    assert list((tmp_path / ".god" / "exports" / "agent_packs").glob("selected_cast-*-agent-pack.zip"))

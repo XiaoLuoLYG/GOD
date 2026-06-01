@@ -550,6 +550,22 @@
     line-height: 1.18;
 }
 
+.pixel-overview-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+}
+
+.pixel-overview-header > div {
+    min-width: 0;
+}
+
+.pixel-overview-header .ant-btn {
+    flex: 0 0 auto;
+}
+
 .pixel-replay-stats {
     display: flex;
     flex-wrap: wrap;
@@ -988,6 +1004,7 @@
         justify-self: center;
     }
 
+    .pixel-overview-header,
     .pixel-command-header,
     .pixel-command-footer,
     .pixel-live-console-header {
