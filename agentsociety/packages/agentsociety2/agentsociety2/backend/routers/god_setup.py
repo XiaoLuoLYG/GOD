@@ -26,6 +26,7 @@ from PIL import Image, UnidentifiedImageError
 
 from agentsociety2.config import extract_json
 from agentsociety2.backend.services import agent_packs as agent_pack_service
+from agentsociety2.backend.services import experiment_registry
 from agentsociety2.backend.services.map_packages import (
     DEFAULT_MAP_ID,
     MapPackage,
@@ -50,25 +51,7 @@ ENV_DEFAULTS = {
     "GOD_FRONTEND_PORT": "5174",
 }
 
-DEFAULT_EXPERIMENT_KEY = "god_town"
-DEFAULT_EXPERIMENTS: dict[str, dict[str, str]] = {
-    "god_town": {
-        "key": "god_town",
-        "label": "GOD Town",
-        "description": "A normal weekday in The Ville.",
-        "hypothesis_id": "god_town",
-        "experiment_id": "1",
-        "map_id": DEFAULT_MAP_ID,
-    },
-    "pku_trump_visit": {
-        "key": "pku_trump_visit",
-        "label": "PKU Trump Visit",
-        "description": "A PKU campus visit and public-situation experiment.",
-        "hypothesis_id": "pku_trump_visit",
-        "experiment_id": "1",
-        "map_id": "pku",
-    },
-}
+DEFAULT_EXPERIMENT_KEY = experiment_registry.DEFAULT_EXPERIMENT_KEY
 
 MODEL_KEYS = (
     "GOD_LLM_API_KEY",
@@ -432,15 +415,7 @@ def _experiment_path(workspace: Path, hypothesis_id: str, experiment_id: str) ->
 
 
 def _default_experiment_status(workspace: Path) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
-    for item in DEFAULT_EXPERIMENTS.values():
-        config_path = (
-            _experiment_path(workspace, item["hypothesis_id"], item["experiment_id"])
-            / "init"
-            / "init_config.json"
-        )
-        items.append({**item, "workspace_path": str(workspace), "config_exists": config_path.exists()})
-    return items
+    return experiment_registry.status_entries(workspace)
 
 
 def _map_service_root() -> Path | None:
@@ -1914,7 +1889,7 @@ def _current_map_id(current: dict[str, Any] | None) -> str:
         return str(current["map_id"])
     hypothesis_id = str(current.get("hypothesis_id") or "")
     experiment_id = str(current.get("experiment_id") or "1")
-    for item in DEFAULT_EXPERIMENTS.values():
+    for item in experiment_registry.load_registry_entries(_workspace_path()):
         if item["hypothesis_id"] == hypothesis_id and item["experiment_id"] == experiment_id:
             return str(item["map_id"])
     workspace = Path(current.get("workspace_path") or _workspace_path()).expanduser().resolve()
@@ -1946,6 +1921,37 @@ def _write_start_request(hypothesis_id: str, experiment_id: str, workspace_path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     return payload
+
+
+def activate_current_experiment(
+    *,
+    hypothesis_id: str,
+    experiment_id: str,
+    workspace_path: Path,
+    map_id: str | None = None,
+    label: str | None = None,
+    start_immediately: bool = False,
+) -> dict[str, Any]:
+    current = _write_current_experiment(
+        hypothesis_id,
+        experiment_id,
+        workspace_path,
+        map_id=map_id,
+        label=label,
+    )
+    start_request = (
+        _write_start_request(hypothesis_id, experiment_id, workspace_path)
+        if start_immediately
+        else None
+    )
+    return {
+        "hypothesis_id": hypothesis_id,
+        "experiment_id": experiment_id,
+        "workspace_path": str(workspace_path),
+        "map_id": map_id,
+        "current_experiment": current,
+        "start_request": start_request,
+    }
 
 
 def _write_latest_draft(basics: DraftBasics, draft: dict[str, Any]) -> None:
@@ -2299,25 +2305,21 @@ async def publish_experiment(request: PublishRequest) -> dict[str, Any]:
             }
         )
     _write_model_env_values(env_values)
-    current = _write_current_experiment(
-        hypothesis_id,
-        experiment_id,
-        workspace,
+    activation = activate_current_experiment(
+        hypothesis_id=hypothesis_id,
+        experiment_id=experiment_id,
+        workspace_path=workspace,
         map_id=str(draft["experiment_context"].get("map_id", DEFAULT_MAP_ID)),
         label=str(draft["experiment_context"].get("title") or hypothesis_id),
-    )
-    start_request = (
-        _write_start_request(hypothesis_id, experiment_id, workspace)
-        if request.start_immediately
-        else None
+        start_immediately=request.start_immediately,
     )
     return {
         "hypothesis_id": hypothesis_id,
         "experiment_id": experiment_id,
         "workspace_path": str(workspace),
         "experiment_path": str(exp_dir),
-        "current_experiment": current,
-        "start_request": start_request,
+        "current_experiment": activation["current_experiment"],
+        "start_request": activation["start_request"],
         "warnings": draft["warnings"],
     }
 
@@ -2336,32 +2338,32 @@ async def create_start_request(payload: StartRequestPayload) -> dict[str, Any]:
 @router.post("/start-default")
 async def start_default_experiment(request: StartDefaultRequest | None = None) -> dict[str, Any]:
     experiment_key = (request.experiment_key if request else DEFAULT_EXPERIMENT_KEY) or DEFAULT_EXPERIMENT_KEY
-    default_experiment = DEFAULT_EXPERIMENTS.get(experiment_key)
+    workspace = _workspace_path()
+    default_experiment = experiment_registry.load_registry_by_key(workspace).get(experiment_key)
     if default_experiment is None:
         raise HTTPException(status_code=404, detail=f"Unknown default experiment: {experiment_key}")
     hypothesis_id = default_experiment["hypothesis_id"]
     experiment_id = default_experiment["experiment_id"]
-    workspace = _workspace_path()
     config_path = _experiment_path(workspace, hypothesis_id, experiment_id) / "init" / "init_config.json"
     if not config_path.exists():
         raise HTTPException(
             status_code=404,
             detail=f"Default experiment config not found: {config_path}",
         )
-    current = _write_current_experiment(
-        hypothesis_id,
-        experiment_id,
-        workspace,
+    activation = activate_current_experiment(
+        hypothesis_id=hypothesis_id,
+        experiment_id=experiment_id,
+        workspace_path=workspace,
         map_id=default_experiment["map_id"],
         label=default_experiment["label"],
+        start_immediately=True,
     )
-    start_request = _write_start_request(hypothesis_id, experiment_id, workspace)
     return {
         "experiment_key": experiment_key,
         "hypothesis_id": hypothesis_id,
         "experiment_id": experiment_id,
         "workspace_path": str(workspace),
         "map_id": default_experiment["map_id"],
-        "current_experiment": current,
-        "start_request": start_request,
+        "current_experiment": activation["current_experiment"],
+        "start_request": activation["start_request"],
     }

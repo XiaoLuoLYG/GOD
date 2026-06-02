@@ -7,6 +7,7 @@ from zipfile import ZipFile
 
 from agentsociety2.backend.services import package_imports
 from agentsociety2.backend.services.public_replay_export import (
+    export_curated_experiment_packs,
     export_public_replay,
     load_operator_commands,
 )
@@ -212,6 +213,100 @@ def test_export_public_replay_writes_static_bundle(tmp_path: Path) -> None:
     assert manifest["urls"]["map_pack"] == "../../map-packs/demo/map_pack.json"
     assert manifest["urls"]["agent_pack"] == "../../agent-packs/demo-world-agents/agent_pack.json"
     assert manifest["urls"]["experiment_pack"] == "../../experiments/demo-world-experiment/experiment.json"
+
+
+def test_export_curated_experiment_pack_without_replay(tmp_path: Path) -> None:
+    workspace = tmp_path / "quick_experiments"
+    experiment_root = workspace / "hypothesis_moon_role_study" / "experiment_1"
+    init_dir = experiment_root / "init"
+    init_dir.mkdir(parents=True)
+    init_dir.joinpath("init_config.json").write_text(
+        json.dumps(
+            {
+                "env_modules": [
+                    {
+                        "module_type": "PixelTownSocialEnv",
+                        "kwargs": {
+                            "map_id": "moon_base",
+                            "map_manifest_path": "/Users/example/GOD/agentsociety/custom/maps/moon_base/map.yaml",
+                        },
+                    }
+                ],
+                "agents": [
+                    {
+                        "agent_id": 1,
+                        "agent_type": "JiuwenClawAgent",
+                        "kwargs": {
+                            "id": 1,
+                            "name": "Lin",
+                            "profile": {"name": "Lin"},
+                            "session_id": "local-run-agent-1",
+                            "trusted_dirs": ["/Users/example/GOD"],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    init_dir.joinpath("steps.yaml").write_text(
+        "start_t: '2026-05-11T08:20:00+08:00'\nsteps:\n- type: run\n  num_steps: 2\n  tick: 900\n",
+        encoding="utf-8",
+    )
+    init_dir.joinpath("experiment_context.json").write_text(
+        json.dumps({"title": "Moon Role Study", "map_id": "moon_base"}),
+        encoding="utf-8",
+    )
+    experiment_root.joinpath("README.md").write_text("# Moon Role Study\n", encoding="utf-8")
+    output_root = tmp_path / "site-data"
+
+    manifests = export_curated_experiment_packs(
+        workspace_path=workspace,
+        output_root=output_root,
+        registry_entries=[
+            {
+                "key": "moon_role_study",
+                "label": "Moon Role Study",
+                "description": "A no-replay curated ExperimentPack.",
+                "hypothesis_id": "moon_role_study",
+                "experiment_id": "1",
+                "map_id": "moon_base",
+                "public_slug": "moon-role-study",
+                "image": "assets/screenshots/map-the-ville.png",
+                "tags": ["role study"],
+                "enabled": True,
+            }
+        ],
+    )
+
+    assert [item["pack_id"] for item in manifests] == ["moon-role-study"]
+    manifest = json.loads(output_root.joinpath("experiments", "moon-role-study", "experiment.json").read_text())
+    assert manifest["display_name"] == "Moon Role Study"
+    assert manifest["summary"] == "A no-replay curated ExperimentPack."
+    assert manifest["agent_count"] == 1
+    assert manifest["total_steps"] == 2
+    assert "agent_pack" not in manifest
+    assert "agent_pack" not in manifest["urls"]
+    assert "example_replay" not in manifest
+    assert "replay" not in manifest["urls"]
+    zip_path = output_root / "experiments" / "moon-role-study" / "downloads" / "moon-role-study-experiment-pack.zip"
+    with ZipFile(zip_path) as archive:
+        names = set(archive.namelist())
+        exported_config = json.loads(archive.read("init/init_config.json").decode("utf-8"))
+        exported_text = json.dumps(exported_config)
+    assert "init/init_config.json" in names
+    assert "init/steps.yaml" in names
+    assert "session_id" not in exported_text
+    assert "trusted_dirs" not in exported_text
+    assert "/Users/" not in exported_text
+    preview = package_imports.create_preview(
+        zip_path,
+        agentsociety_root=tmp_path,
+        workspace_root=tmp_path / "imports",
+        original_filename=zip_path.name,
+    )
+    assert preview.package_type == "experiment"
+    assert preview.validation["ok"] is True
 
 
 def _write_map_package(package_root: Path) -> Path:

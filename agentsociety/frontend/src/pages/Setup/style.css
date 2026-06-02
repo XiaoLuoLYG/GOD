@@ -60,8 +60,25 @@
     background: #fff;
 }
 
+.setup-choice-panel > .ant-space {
+    height: 100%;
+}
+
 .setup-choice-panel .ant-btn {
     margin-top: auto;
+}
+
+.setup-built-in-list {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+}
+
+.setup-built-in-item {
+    padding: 16px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #fff;
 }
 
 .setup-confirm-grid {

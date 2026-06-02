@@ -91,9 +91,20 @@
     var previewHref = item.previewHref || item.replayHref || item.href || item.download;
     var previewLabel = kind === "experiment" ? "View example replay" : "Preview";
     var downloadLabel = item.downloadLabel || (kind === "experiment" ? "Download ExperimentPack" : "Download");
+    var showPreview = Boolean(previewHref);
+    if (kind === "experiment" && !item.previewHref && !item.replayHref && !item.href) {
+      showPreview = false;
+    }
     var media = item.image
-      ? '<a class="library-card__media library-card__media--' + escapeHtml(kind) + '" href="' + url(previewHref) + '"><img src="' + url(item.image) + '" alt="' + escapeHtml(item.title) + ' preview" loading="lazy"></a>'
+      ? '<a class="library-card__media library-card__media--' + escapeHtml(kind) + '" href="' + url(showPreview ? previewHref : item.download) + '"><img src="' + url(item.image) + '" alt="' + escapeHtml(item.title) + ' preview" loading="lazy"></a>'
       : '<div class="library-card__glyph" aria-hidden="true">' + productIcon(kind) + '</div>';
+    var buttons = [];
+    if (showPreview) {
+      buttons.push('<a class="button button--small" href="' + url(previewHref) + '">' + escapeHtml(previewLabel) + '</a>');
+    }
+    if (item.download) {
+      buttons.push('<a class="button button--small button--ghost" href="' + url(item.download) + '">' + escapeHtml(downloadLabel) + '</a>');
+    }
     return [
       '<article class="library-card">',
       media,
@@ -103,8 +114,7 @@
       '    <p>' + escapeHtml(item.summary) + '</p>',
       metricLine(item),
       '    <div class="button-row">',
-      '      <a class="button button--small" href="' + url(previewHref) + '">' + escapeHtml(previewLabel) + '</a>',
-      '      <a class="button button--small button--ghost" href="' + url(item.download) + '">' + escapeHtml(downloadLabel) + '</a>',
+      buttons.join(""),
       '    </div>',
       '  </div>',
       '</article>'
@@ -119,6 +129,57 @@
     grid.innerHTML = items.map(function (item) {
       return libraryCard(item, kind);
     }).join("");
+  }
+
+  function experimentManifestToCard(item) {
+    var packId = item.pack_id || item.slug;
+    var download = "";
+    (item.downloads || []).forEach(function (entry) {
+      if (!download && entry.type === "experiment") {
+        download = "public-data/experiments/" + packId + "/" + entry.href;
+      }
+    });
+    var replayHref = item.replay_slug ? "replays/" + item.replay_slug + "/" : "";
+    return {
+      title: item.display_name || packId,
+      slug: packId,
+      summary: item.summary || "",
+      image: item.image || "",
+      replayHref: replayHref,
+      download: download,
+      downloadLabel: "Download ExperimentPack",
+      stats: [
+        item.map_pack ? item.map_pack + " map" : "",
+        item.agent_count ? item.agent_count + " agents" : "",
+        item.total_steps ? item.total_steps + " steps" : ""
+      ].filter(Boolean)
+    };
+  }
+
+  function renderExperimentLibrary() {
+    var grid = document.querySelector("[data-experiment-pack-grid]");
+    if (!grid) {
+      return;
+    }
+    var fallback = function () {
+      renderLibrary("[data-experiment-pack-grid]", catalog.experiments, "experiment");
+    };
+    if (!window.fetch) {
+      fallback();
+      return;
+    }
+    fetch(url("public-data/experiments/index.json"))
+      .then(function (response) {
+        return response.ok ? response.json() : null;
+      })
+      .then(function (items) {
+        if (!Array.isArray(items) || !items.length) {
+          fallback();
+          return;
+        }
+        renderLibrary("[data-experiment-pack-grid]", items.map(experimentManifestToCard), "experiment");
+      })
+      .catch(fallback);
   }
 
   function hydrateReplayStats() {
@@ -161,6 +222,6 @@
   renderReplays();
   renderLibrary("[data-map-pack-grid]", catalog.mapPacks, "map");
   renderLibrary("[data-agent-pack-grid]", catalog.agentPacks, "agent");
-  renderLibrary("[data-experiment-pack-grid]", catalog.experiments, "experiment");
+  renderExperimentLibrary();
   markActiveNav();
 })();

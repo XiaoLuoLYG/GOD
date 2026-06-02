@@ -15,6 +15,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import yaml
 
 from agentsociety2.backend.services.experiment_packs import sanitize_experiment_pack_config
+from agentsociety2.backend.services import experiment_registry
 from agentsociety2.backend.services.map_packages import (
     DEFAULT_MAP_ID,
     character_sprite_path,
@@ -215,6 +216,8 @@ def export_known_public_replays(
     specs: Iterable[dict[str, Any]] = PUBLIC_REPLAY_SPECS,
 ) -> list[dict[str, Any]]:
     manifests = []
+    workspace_path = Path(workspace_path)
+    output_root = Path(output_root)
     for spec in specs:
         manifests.append(
             export_public_replay(
@@ -232,10 +235,72 @@ def export_known_public_replays(
                 tags=spec.get("tags") or (),
             )
         )
+    replay_experiment_pack_ids = {str(item.get("experiment_pack") or "") for item in manifests}
+    curated_entries = [
+        entry
+        for entry in experiment_registry.load_registry_entries(workspace_path)
+        if experiment_registry.public_slug(entry) not in replay_experiment_pack_ids
+    ]
+    if curated_entries:
+        export_curated_experiment_packs(
+            workspace_path=workspace_path,
+            output_root=output_root,
+            registry_entries=curated_entries,
+        )
     _write_json(Path(output_root) / "replays" / "index.json", manifests)
     _write_collection_index(Path(output_root), "map-packs", "map_pack.json")
     _write_collection_index(Path(output_root), "agent-packs", "agent_pack.json")
     _write_collection_index(Path(output_root), "experiments", "experiment.json")
+    return manifests
+
+
+def export_curated_experiment_packs(
+    *,
+    workspace_path: Path,
+    output_root: Path,
+    registry_entries: Iterable[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Export curated playable ExperimentPacks, including entries without public replays."""
+
+    workspace_path = Path(workspace_path).resolve()
+    output_root = Path(output_root)
+    entries = list(
+        registry_entries
+        if registry_entries is not None
+        else experiment_registry.load_registry_entries(workspace_path)
+    )
+    manifests: list[dict[str, Any]] = []
+    for entry in entries:
+        if not entry.get("enabled", True):
+            continue
+        experiment_root = (
+            workspace_path
+            / f"hypothesis_{entry['hypothesis_id']}"
+            / f"experiment_{entry.get('experiment_id') or '1'}"
+        )
+        if not experiment_root.exists():
+            continue
+        stats = _experiment_pack_stats(experiment_root)
+        replay_slug = str(entry.get("replay_slug") or "").strip() or None
+        summary = str(entry.get("description") or f"Playable setup seed for {entry.get('label') or entry['key']}.")
+        manifests.append(
+            _export_experiment_pack(
+                output_root=output_root,
+                experiment_root=experiment_root,
+                pack_id=experiment_registry.public_slug(entry),
+                display_name=str(entry.get("label") or entry["key"]),
+                replay_slug=replay_slug,
+                map_pack_id=str(entry.get("map_id") or ""),
+                agent_pack_id=str(entry.get("agent_pack") or ""),
+                summary=summary,
+                tags=[str(item) for item in entry.get("tags", [])],
+                total_steps=stats["total_steps"],
+                agent_count=stats["agent_count"],
+                command_count=0,
+                image=str(entry.get("image") or ""),
+            )
+        )
+    _write_collection_index(output_root, "experiments", "experiment.json")
     return manifests
 
 
@@ -251,6 +316,22 @@ def _write_collection_index(output_root: Path, collection: str, manifest_name: s
             if isinstance(item, dict):
                 items.append(item)
     _write_json(collection_root / "index.json", items)
+
+
+def _experiment_pack_stats(experiment_root: Path) -> dict[str, int]:
+    init_config = _load_structured_file(experiment_root / "init" / "init_config.json")
+    steps_config = _load_structured_file(experiment_root / "init" / "steps.yaml")
+    agents = init_config.get("agents") if isinstance(init_config.get("agents"), list) else []
+    total_steps = 0
+    raw_steps = steps_config.get("steps") if isinstance(steps_config.get("steps"), list) else []
+    for step in raw_steps:
+        if not isinstance(step, dict):
+            continue
+        if step.get("type") == "run":
+            total_steps += int(step.get("num_steps") or 0)
+        else:
+            total_steps += 1
+    return {"agent_count": len(agents), "total_steps": total_steps}
 
 
 def _load_operator_commands_from_sqlite(db_path: Path) -> list[dict[str, Any]]:
@@ -785,7 +866,7 @@ def _export_experiment_pack(
     experiment_root: Path,
     pack_id: str,
     display_name: str,
-    replay_slug: str,
+    replay_slug: str | None,
     map_pack_id: str,
     agent_pack_id: str,
     summary: str,
@@ -793,6 +874,7 @@ def _export_experiment_pack(
     total_steps: int,
     agent_count: int,
     command_count: int,
+    image: str | None = None,
 ) -> dict[str, Any]:
     pack_root = output_root / "experiments" / pack_id
     if pack_root.exists():
@@ -801,32 +883,18 @@ def _export_experiment_pack(
     setup_summary = (
         f"Playable setup seed for {display_name}. "
         "Example replays are published separately as watchable results."
-    )
+    ) if replay_slug else (summary or f"Playable setup seed for {display_name}.")
     manifest = {
         "schema_version": 1,
         "kind": "experiment",
         "pack_id": pack_id,
         "display_name": display_name,
         "summary": setup_summary,
-        "replay_slug": replay_slug,
-        "map_pack": map_pack_id,
-        "agent_pack": agent_pack_id,
         "tags": tags,
         "total_steps": total_steps,
         "agent_count": agent_count,
         "command_count": command_count,
-        "example_replay": {
-            "slug": replay_slug,
-            "summary": summary,
-            "total_steps": total_steps,
-            "agent_count": agent_count,
-            "command_count": command_count,
-        },
-        "urls": {
-            "replay": f"../replays/{replay_slug}/manifest.json",
-            "map_pack": f"../map-packs/{map_pack_id}/map_pack.json",
-            "agent_pack": f"../agent-packs/{agent_pack_id}/agent_pack.json",
-        },
+        "urls": {},
         "downloads": [
             {
                 "type": "experiment",
@@ -836,13 +904,31 @@ def _export_experiment_pack(
             }
         ],
     }
+    if map_pack_id:
+        manifest["map_pack"] = map_pack_id
+        manifest["urls"]["map_pack"] = f"../map-packs/{map_pack_id}/map_pack.json"
+    if agent_pack_id:
+        manifest["agent_pack"] = agent_pack_id
+        manifest["urls"]["agent_pack"] = f"../agent-packs/{agent_pack_id}/agent_pack.json"
+    if image:
+        manifest["image"] = image
+    if replay_slug:
+        manifest["replay_slug"] = replay_slug
+        manifest["example_replay"] = {
+            "slug": replay_slug,
+            "summary": summary,
+            "total_steps": total_steps,
+            "agent_count": agent_count,
+            "command_count": command_count,
+        }
+        manifest["urls"]["replay"] = f"../replays/{replay_slug}/manifest.json"
     _write_json(pack_root / "experiment.json", manifest)
     downloads_dir = pack_root / "downloads"
     downloads_dir.mkdir()
     _zip_experiment_pack(
         experiment_root,
         downloads_dir / f"{pack_id}-experiment-pack.zip",
-        map_id=map_pack_id,
+        map_id=map_pack_id or None,
     )
     return {**manifest, "_package_path": str(pack_root)}
 

@@ -200,7 +200,7 @@ def test_missing_map_id_falls_back_to_default(tmp_path: Path) -> None:
     assert package_info.map_id == "the_ville"
 
 
-def test_generated_map_packages_are_not_discovered_from_legacy_registry(tmp_path: Path) -> None:
+def test_generated_map_packages_are_discovered_but_drafts_are_hidden(tmp_path: Path) -> None:
     agentsociety_root = tmp_path / "agentsociety"
     authored_package = _write_package(agentsociety_root)
     authored_package.rename(authored_package.parent / "the_ville")
@@ -219,12 +219,20 @@ def test_generated_map_packages_are_not_discovered_from_legacy_registry(tmp_path
         (legacy / "map.yaml").read_text(encoding="utf-8").replace("demo_map", "moon_tower"),
         encoding="utf-8",
     )
+    draft_package = _write_package(tmp_path / "draft_source")
+    draft = legacy_root / "_drafts" / "draft_123"
+    draft.parent.mkdir(parents=True)
+    draft_package.rename(draft)
+    (draft / "map.yaml").write_text(
+        (draft / "map.yaml").read_text(encoding="utf-8").replace("demo_map", "draft_123"),
+        encoding="utf-8",
+    )
 
     packages = map_packages.list_map_packages(agentsociety_root)
 
     by_id = {package.map_id: package for package in packages}
-    assert set(by_id) == {"the_ville"}
-    assert "moon_tower" not in by_id
+    assert set(by_id) == {"the_ville", "moon_tower"}
+    assert "draft_123" not in by_id
 
 
 def test_import_map_pack_zip_installs_into_custom_maps(tmp_path: Path) -> None:

@@ -23,7 +23,20 @@ export type PackageInstallResult = {
   status: string;
   package_type?: PackageType;
   resource_id?: string;
+  hypothesis_id?: string;
+  experiment_id?: string;
+  map_id?: string;
+  display_name?: string;
   install_path?: string;
+  workspace_path?: string;
+  current_experiment?: {
+    hypothesis_id?: string;
+    experiment_id?: string;
+    workspace_path?: string;
+    map_id?: string;
+    label?: string;
+  };
+  start_request?: Record<string, unknown> | null;
 };
 
 async function responseError(response: Response): Promise<Error> {
@@ -53,6 +66,7 @@ export async function installPackage(
   previewToken: string,
   conflictStrategy: 'save_as' | 'overwrite' | 'cancel',
   requestedId?: string,
+  options?: { startImmediately?: boolean },
 ): Promise<PackageInstallResult> {
   const response = await fetchCustom('/api/v1/god/packages/install', {
     method: 'POST',
@@ -61,6 +75,7 @@ export async function installPackage(
       preview_token: previewToken,
       conflict_strategy: conflictStrategy,
       requested_id: requestedId || undefined,
+      start_immediately: options?.startImmediately || undefined,
     }),
   });
   if (!response.ok) {

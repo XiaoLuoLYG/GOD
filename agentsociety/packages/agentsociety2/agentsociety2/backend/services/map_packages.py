@@ -103,7 +103,7 @@ def generated_maps_root(root: Path | None = None) -> Path:
 
 def map_package_roots(root: Path | None = None) -> tuple[Path, ...]:
     root = root or agentsociety_root()
-    return (maps_root(root),)
+    return (maps_root(root), generated_maps_root(root))
 
 
 def _load_structured(path: Path) -> dict[str, Any]:

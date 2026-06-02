@@ -223,6 +223,84 @@ def test_setup_status_exposes_setup_mode(monkeypatch, tmp_path):
     assert status["setup_mode"] is True
 
 
+def test_setup_status_loads_enabled_curated_experiments(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    workspace = tmp_path / "quick_experiments"
+    workspace.mkdir(parents=True)
+    (workspace / "experiment_registry.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "experiments": [
+                    {
+                        "key": "god_town",
+                        "label": "GOD Town",
+                        "description": "A normal weekday in The Ville.",
+                        "hypothesis_id": "god_town",
+                        "experiment_id": "1",
+                        "map_id": "the_ville",
+                        "public_slug": "god-town-daily-life",
+                        "image": "assets/screenshots/map-the-ville.png",
+                        "tags": ["daily life"],
+                        "agent_pack": "jiuwen-town-residents",
+                        "replay_slug": "god-town",
+                        "enabled": True,
+                    },
+                    {
+                        "key": "moon_role_study",
+                        "label": "Moon Role Study",
+                        "description": "A curated no-replay ExperimentPack.",
+                        "hypothesis_id": "moon_role_study",
+                        "experiment_id": "1",
+                        "map_id": "moon_base",
+                        "public_slug": "moon-role-study",
+                        "image": "assets/screenshots/map-the-ville.png",
+                        "tags": ["role study"],
+                        "agent_pack": "moon-role-cast",
+                        "enabled": True,
+                    },
+                    {
+                        "key": "stanford_role_pressure_moon_base",
+                        "label": "Stanford Role Pressure",
+                        "description": "A curated ExperimentPack stored in a localized hypothesis directory.",
+                        "hypothesis_id": "斯坦福监狱实验适配模拟",
+                        "experiment_id": "1",
+                        "map_id": "月球基地",
+                        "public_slug": "stanford-role-pressure-moon-base",
+                        "tags": ["role pressure"],
+                        "enabled": True,
+                    },
+                    {
+                        "key": "scratch",
+                        "label": "Scratch Draft",
+                        "description": "Not public.",
+                        "hypothesis_id": "scratch",
+                        "experiment_id": "1",
+                        "map_id": "the_ville",
+                        "public_slug": "scratch",
+                        "enabled": False,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    for hypothesis_id in ("god_town", "moon_role_study", "斯坦福监狱实验适配模拟"):
+        init_dir = workspace / f"hypothesis_{hypothesis_id}" / "experiment_1" / "init"
+        init_dir.mkdir(parents=True)
+        (init_dir / "init_config.json").write_text("{}", encoding="utf-8")
+
+    status = anyio.run(god_setup.setup_status)
+
+    by_key = {item["key"]: item for item in status["default_experiments"]}
+    assert set(by_key) == {"god_town", "moon_role_study", "stanford_role_pressure_moon_base"}
+    assert by_key["moon_role_study"]["public_slug"] == "moon-role-study"
+    assert by_key["moon_role_study"]["config_exists"] is True
+    assert by_key["stanford_role_pressure_moon_base"]["hypothesis_id"] == "斯坦福监狱实验适配模拟"
+    assert by_key["stanford_role_pressure_moon_base"]["config_exists"] is True
+    assert status["default_experiment"]["key"] == "god_town"
+
+
 def test_agent_studio_generate_keeps_location_on_current_map():
     response = anyio.run(
         god_setup.generate_agent_studio_options,
@@ -889,6 +967,52 @@ def test_start_default_experiment_can_select_pku_without_writing_env_map(monkeyp
     assert current["hypothesis_id"] == "pku_trump_visit"
     assert current["map_id"] == "pku"
     assert "GOD_MAP_ID=pku" not in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+def test_start_default_experiment_uses_curated_registry_entry(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    workspace = tmp_path / "quick_experiments"
+    workspace.mkdir(parents=True)
+    (workspace / "experiment_registry.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "experiments": [
+                    {
+                        "key": "moon_role_study",
+                        "label": "Moon Role Study",
+                        "description": "A curated built-in ExperimentPack.",
+                        "hypothesis_id": "moon_role_study",
+                        "experiment_id": "1",
+                        "map_id": "moon_base",
+                        "public_slug": "moon-role-study",
+                        "image": "assets/screenshots/map-the-ville.png",
+                        "tags": ["role study"],
+                        "agent_pack": "moon-role-cast",
+                        "enabled": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    init_dir = workspace / "hypothesis_moon_role_study" / "experiment_1" / "init"
+    init_dir.mkdir(parents=True)
+    (init_dir / "init_config.json").write_text("{}", encoding="utf-8")
+
+    result = anyio.run(
+        god_setup.start_default_experiment,
+        StartDefaultRequest(experiment_key="moon_role_study"),
+    )
+
+    assert result["hypothesis_id"] == "moon_role_study"
+    assert result["map_id"] == "moon_base"
+    current = json.loads((tmp_path / ".god" / "current_experiment.json").read_text(encoding="utf-8"))
+    start_request = json.loads((tmp_path / ".god" / "run" / "start-request.json").read_text(encoding="utf-8"))
+    assert current["hypothesis_id"] == "moon_role_study"
+    assert current["label"] == "Moon Role Study"
+    assert current["map_id"] == "moon_base"
+    assert start_request["hypothesis_id"] == "moon_role_study"
 
 
 def test_complete_role_visuals_updates_missing_agent_images(monkeypatch, tmp_path):

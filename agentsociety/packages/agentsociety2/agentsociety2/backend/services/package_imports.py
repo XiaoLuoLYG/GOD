@@ -134,6 +134,10 @@ def install_preview(
             return {
                 "package_type": "experiment",
                 "resource_id": package.hypothesis_id,
+                "hypothesis_id": package.hypothesis_id,
+                "experiment_id": package.experiment_id,
+                "map_id": package.map_id,
+                "display_name": package.display_name,
                 "install_path": str(package.package_path),
             }
         raise ValueError(f"Unsupported package type: {preview.package_type}")

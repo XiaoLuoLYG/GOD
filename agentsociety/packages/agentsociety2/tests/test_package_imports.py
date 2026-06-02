@@ -230,3 +230,66 @@ def test_experiment_import_warns_and_installs_setup_without_run(monkeypatch, tmp
     assert target.joinpath("run.sh").exists()
     assert not target.joinpath("run").exists()
     assert not target.joinpath("run_2").exists()
+
+
+def test_experiment_import_can_set_current_and_start(monkeypatch, tmp_path: Path) -> None:
+    client = _client(monkeypatch, tmp_path)
+    zip_path = tmp_path / "moon-role-study-experiment-pack.zip"
+    with ZipFile(zip_path, "w") as archive:
+        archive.writestr(
+            "init/init_config.json",
+            json.dumps(
+                {
+                    "env_modules": [
+                        {
+                            "module_type": "PixelTownSocialEnv",
+                            "kwargs": {"map_id": "moon_base"},
+                        }
+                    ],
+                    "agents": [
+                        {
+                            "agent_id": 1,
+                            "agent_type": "JiuwenClawAgent",
+                            "kwargs": {"id": 1, "name": "Lin", "profile": {"name": "Lin"}},
+                        }
+                    ],
+                }
+            ),
+        )
+        archive.writestr(
+            "init/steps.yaml",
+            "start_t: '2026-05-11T08:20:00+08:00'\nsteps:\n- type: run\n  num_steps: 1\n  tick: 600\n",
+        )
+        archive.writestr(
+            "init/experiment_context.json",
+            json.dumps({"title": "Moon Role Study", "map_id": "moon_base"}),
+        )
+
+    with zip_path.open("rb") as file:
+        preview = client.post(
+            "/api/v1/god/packages/import-preview",
+            files={"file": (zip_path.name, file, "application/zip")},
+        )
+    assert preview.status_code == 200
+    payload = preview.json()
+
+    install = client.post(
+        "/api/v1/god/packages/install",
+        json={
+            "preview_token": payload["preview_token"],
+            "conflict_strategy": "save_as",
+            "start_immediately": True,
+        },
+    )
+
+    assert install.status_code == 200
+    result = install.json()
+    assert result["package_type"] == "experiment"
+    assert result["hypothesis_id"] == "moon-role-study"
+    assert result["experiment_id"] == "1"
+    current = json.loads((tmp_path / ".god" / "current_experiment.json").read_text(encoding="utf-8"))
+    start_request = json.loads((tmp_path / ".god" / "run" / "start-request.json").read_text(encoding="utf-8"))
+    assert current["hypothesis_id"] == "moon-role-study"
+    assert current["map_id"] == "moon_base"
+    assert current["label"] == "Moon Role Study"
+    assert start_request["hypothesis_id"] == "moon-role-study"

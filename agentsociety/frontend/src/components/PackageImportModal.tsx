@@ -14,6 +14,7 @@ import {
 type PackageImportModalProps = {
   open: boolean;
   expectedType?: PackageType;
+  startExperimentOnInstall?: boolean;
   onCancel: () => void;
   onInstalled: (result: PackageInstallResult) => void;
 };
@@ -36,6 +37,7 @@ const cancelPreview = async (previewToken?: string | null) => {
 const PackageImportModal: React.FC<PackageImportModalProps> = ({
   open,
   expectedType,
+  startExperimentOnInstall = false,
   onCancel,
   onInstalled,
 }) => {
@@ -89,6 +91,7 @@ const PackageImportModal: React.FC<PackageImportModalProps> = ({
         preview.preview_token,
         strategy,
         strategy === 'save_as' ? requestedId : undefined,
+        { startImmediately: startExperimentOnInstall && preview.package_type === 'experiment' },
       );
       message.success(t('packageImport.installed', { id: result.resource_id || preview.resource_id }));
       reset();

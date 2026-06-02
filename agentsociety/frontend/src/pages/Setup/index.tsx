@@ -8,6 +8,7 @@ import {
     Form,
     Input,
     InputNumber,
+    Modal,
     Row,
     Select,
     Space,
@@ -128,11 +129,17 @@ type SetupStatus = {
         key: string;
         label: string;
         description?: string;
+        localized?: Record<string, { label?: string; description?: string }>;
         map_id: string;
         hypothesis_id: string;
         experiment_id: string;
         workspace_path: string;
         config_exists: boolean;
+        public_slug?: string;
+        image?: string;
+        tags?: string[];
+        agent_pack?: string;
+        replay_slug?: string;
     }>;
     needs_setup: boolean;
     selected_map_id: string;
@@ -350,6 +357,7 @@ export default function SetupPage() {
     const [generating, setGenerating] = useState(false);
     const [publishing, setPublishing] = useState(false);
     const [startingDefault, setStartingDefault] = useState<string | null>(null);
+    const [builtinModalOpen, setBuiltinModalOpen] = useState(false);
     const [latestDraftAvailable, setLatestDraftAvailable] = useState(false);
     const [launchPending, setLaunchPending] = useState<LaunchResult | null>(null);
     const [packageImportOpen, setPackageImportOpen] = useState<false | 'map' | 'experiment'>(false);
@@ -385,12 +393,19 @@ export default function SetupPage() {
     const locationDisplayName = (location: MapLocation) => (
         localizeMapLocationName(selectedMap?.map_id || selectedMapId, location, i18n.language)
     );
+    const defaultExperimentLocale = (item: NonNullable<SetupStatus['default_experiments']>[number]) => (
+        item.localized?.[i18n.language?.startsWith('zh') ? 'zh' : 'en'] || {}
+    );
     const defaultExperimentLabel = (item: NonNullable<SetupStatus['default_experiments']>[number]) => (
-        t(`setup.defaultExperiments.${item.key}.label`, { defaultValue: item.label }) as string
+        t(`setup.defaultExperiments.${item.key}.label`, {
+            defaultValue: defaultExperimentLocale(item).label || item.label,
+        }) as string
     );
     const defaultExperimentDescription = (item: NonNullable<SetupStatus['default_experiments']>[number]) => (
         t(`setup.defaultExperiments.${item.key}.description`, {
-            defaultValue: item.description || `${item.hypothesis_id} / ${item.experiment_id}`,
+            defaultValue: defaultExperimentLocale(item).description
+                || item.description
+                || `${item.hypothesis_id} / ${item.experiment_id}`,
         }) as string
     );
     const mapOptions = useMemo(() => (
@@ -549,6 +564,22 @@ export default function SetupPage() {
             if (nextStatus) {
                 setStatus(nextStatus);
             }
+            const hypothesisId = result.hypothesis_id || result.resource_id || result.current_experiment?.hypothesis_id;
+            if (hypothesisId) {
+                completeLaunch(
+                    {
+                        hypothesis_id: hypothesisId,
+                        experiment_id: result.experiment_id || result.current_experiment?.experiment_id || '1',
+                        workspace_path: result.workspace_path
+                            || result.current_experiment?.workspace_path
+                            || nextStatus?.workspace_path
+                            || status?.workspace_path
+                            || '',
+                    },
+                    Boolean(nextStatus?.setup_mode || status?.setup_mode),
+                    700,
+                );
+            }
         }
     };
 
@@ -651,6 +682,7 @@ export default function SetupPage() {
             });
             const setupMode = Boolean(nextStatus.setup_mode || status?.setup_mode);
             messageApi.success(setupMode ? copy('messages.defaultQueued') : copy('messages.defaultStarted'));
+            setBuiltinModalOpen(false);
             completeLaunch(result, setupMode, 700);
         } catch (error) {
             messageApi.error(copy('messages.defaultStartFailed', { error: errorText(error) }));
@@ -1087,23 +1119,22 @@ export default function SetupPage() {
         </Card>
     );
 
-    const renderExperimentChoiceStep = () => (
-        <Card className="setup-card" title={<Space><ExperimentOutlined />{copy('choice.title')}</Space>}>
-            {renderLaunchPendingAlert()}
-            <Alert
-                type="info"
-                showIcon
-                message={copy('choice.notice')}
-                description={copy('choice.description')}
-                style={{ marginBottom: 18 }}
-            />
-            <div className="setup-choice-grid">
+    const renderBuiltInExperimentModal = () => (
+        <Modal
+            title={copy('choice.builtinModalTitle')}
+            open={builtinModalOpen}
+            onCancel={() => setBuiltinModalOpen(false)}
+            footer={null}
+            width="min(860px, 92vw)"
+        >
+            <div className="setup-built-in-list">
                 {(status?.default_experiments || []).map((item) => (
-                    <div className="setup-choice-panel" key={item.key}>
+                    <div className="setup-built-in-item" key={item.key}>
                         <Space direction="vertical" size={10} style={{ width: '100%' }}>
                             <Space wrap>
                                 <Title level={4} style={{ margin: 0 }}>{defaultExperimentLabel(item)}</Title>
                                 <Tag>{mapDisplayName((status?.maps || []).find((map) => map.map_id === item.map_id), item.map_id)}</Tag>
+                                {item.replay_slug && <Tag color="blue">{copy('choice.hasReplay')}</Tag>}
                             </Space>
                             <Text type="secondary">{defaultExperimentDescription(item)}</Text>
                             <Text code>{item.hypothesis_id} / experiment_{item.experiment_id}</Text>
@@ -1119,15 +1150,49 @@ export default function SetupPage() {
                         </Space>
                     </div>
                 ))}
+            </div>
+        </Modal>
+    );
+
+    const renderExperimentChoiceStep = () => (
+        <Card className="setup-card" title={<Space><ExperimentOutlined />{copy('choice.title')}</Space>}>
+            {renderLaunchPendingAlert()}
+            <Alert
+                type="info"
+                showIcon
+                message={copy('choice.notice')}
+                description={copy('choice.description')}
+                style={{ marginBottom: 18 }}
+            />
+            <div className="setup-choice-grid">
+                <div className="setup-choice-panel">
+                    <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                        <Title level={4} style={{ margin: 0 }}>{copy('choice.builtinTitle')}</Title>
+                        <Text type="secondary">{copy('choice.builtinDescription')}</Text>
+                        <Button
+                            type="primary"
+                            icon={<ExperimentOutlined />}
+                            onClick={() => setBuiltinModalOpen(true)}
+                        >
+                            {copy('choice.chooseBuiltin')}
+                        </Button>
+                    </Space>
+                </div>
+                <div className="setup-choice-panel">
+                    <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                        <Title level={4} style={{ margin: 0 }}>{copy('choice.importTitle')}</Title>
+                        <Text type="secondary">{copy('choice.importDescription')}</Text>
+                        <Button icon={<ImportOutlined />} onClick={() => setPackageImportOpen('experiment')}>
+                            {copy('choice.importExperiment')}
+                        </Button>
+                    </Space>
+                </div>
                 <div className="setup-choice-panel">
                     <Space direction="vertical" size={10} style={{ width: '100%' }}>
                         <Title level={4} style={{ margin: 0 }}>{copy('choice.customTitle')}</Title>
                         <Text type="secondary">{copy('choice.customDescription')}</Text>
                         <Button icon={<EditOutlined />} onClick={() => setCurrentStep(2)}>
                             {copy('choice.createCustom')}
-                        </Button>
-                        <Button icon={<ImportOutlined />} onClick={() => setPackageImportOpen('experiment')}>
-                            {copy('choice.importExperiment')}
                         </Button>
                     </Space>
                 </div>
@@ -1670,9 +1735,11 @@ export default function SetupPage() {
                     onCancel={() => setAgentModalOpen(false)}
                 />
             )}
+            {renderBuiltInExperimentModal()}
             <PackageImportModal
                 open={Boolean(packageImportOpen)}
                 expectedType={packageImportOpen || undefined}
+                startExperimentOnInstall={packageImportOpen === 'experiment'}
                 onCancel={() => setPackageImportOpen(false)}
                 onInstalled={handlePackageInstalled}
             />

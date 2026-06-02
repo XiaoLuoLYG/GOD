@@ -19,6 +19,7 @@ class InstallPackageRequest(BaseModel):
     preview_token: str
     conflict_strategy: str = "save_as"
     requested_id: str | None = None
+    start_immediately: bool = False
 
 
 def _agentsociety_root() -> Path:
@@ -66,4 +67,14 @@ async def install_package(request: InstallPackageRequest) -> dict:
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if request.start_immediately and result.get("package_type") == "experiment":
+        activation = god_setup.activate_current_experiment(
+            hypothesis_id=str(result.get("hypothesis_id") or result.get("resource_id") or ""),
+            experiment_id=str(result.get("experiment_id") or "1"),
+            workspace_path=_workspace_root(),
+            map_id=str(result.get("map_id") or "") or None,
+            label=str(result.get("display_name") or result.get("resource_id") or "") or None,
+            start_immediately=True,
+        )
+        result.update(activation)
     return {"status": "installed", **result}

@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "experiments": [
+    {
+      "key": "god_town",
+      "label": "GOD Town",
+      "description": "A normal weekday in The Ville.",
+      "localized": {
+        "en": {
+          "label": "GOD Town",
+          "description": "A normal weekday in The Ville."
+        },
+        "zh": {
+          "label": "GOD 小镇",
+          "description": "维尔小镇里的普通工作日。"
+        }
+      },
+      "hypothesis_id": "god_town",
+      "experiment_id": "1",
+      "map_id": "the_ville",
+      "public_slug": "god-town-daily-life",
+      "image": "assets/screenshots/map-the-ville.png",
+      "tags": ["daily life", "baseline", "operator replay"],
+      "agent_pack": "jiuwen-town-residents",
+      "replay_slug": "god-town",
+      "enabled": true
+    },
+    {
+      "key": "pku_trump_visit",
+      "label": "PKU Trump Visit",
+      "description": "A PKU campus visit and public-situation experiment.",
+      "localized": {
+        "en": {
+          "label": "PKU Trump Visit",
+          "description": "A PKU campus visit and public-situation experiment."
+        },
+        "zh": {
+          "label": "北大访问实验",
+          "description": "北京大学校园访问与公共情境实验。"
+        }
+      },
+      "hypothesis_id": "pku_trump_visit",
+      "experiment_id": "1",
+      "map_id": "pku",
+      "public_slug": "pku-public-situation",
+      "image": "assets/screenshots/map-pku.png",
+      "tags": ["campus", "public event", "operator replay"],
+      "agent_pack": "pku-campus-cast",
+      "replay_slug": "pku-public-situation",
+      "enabled": true
+    }
+  ]
+}
