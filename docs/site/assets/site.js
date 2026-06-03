@@ -1,6 +1,9 @@
 (function () {
   var catalog = window.GOD_CATALOG || {};
   var root = document.body.dataset.siteRoot || "";
+  var assetPrefix = document.body.dataset.assetPrefix || root;
+  var detailBase = document.body.dataset.detailBase || "experiments/";
+  var locale = (document.documentElement.lang || "en").toLowerCase().indexOf("zh") === 0 ? "zh" : "en";
 
   function url(path) {
     if (!path) {
@@ -10,6 +13,16 @@
       return path;
     }
     return root + path;
+  }
+
+  function assetUrl(path) {
+    if (!path) {
+      return "";
+    }
+    if (/^https?:\/\//.test(path)) {
+      return path;
+    }
+    return assetPrefix + path;
   }
 
   function escapeHtml(value) {
@@ -182,6 +195,60 @@
       .catch(fallback);
   }
 
+  function localized(value) {
+    if (!value || typeof value !== "object") {
+      return value || "";
+    }
+    return value[locale] || value.en || value.zh || "";
+  }
+
+  function renderLegacyExperiments() {
+    var grid = document.querySelector("[data-experiment-grid]");
+    var experiments = window.GOD_EXPERIMENTS || [];
+    if (!grid || !experiments.length) {
+      return;
+    }
+    var labels = locale === "zh" ? {
+      open: "打开实验",
+      folder: "仓库目录",
+      repo: "仓库路径"
+    } : {
+      open: "Open experiment",
+      folder: "Repository folder",
+      repo: "Repository path"
+    };
+    grid.innerHTML = experiments.map(function (item) {
+      var title = localized(item.title);
+      var kicker = localized(item.kicker);
+      var summary = localized(item.summary);
+      var tryItems = localized(item.try) || [];
+      var detailHref = detailBase + item.slug + ".html";
+      var repoHref = "https://github.com/XiaoLuoLYG/GOD/tree/main/" + item.repoPath;
+      return [
+        '<article class="experiment-card">',
+        '  <a class="experiment-card__media" href="' + escapeHtml(detailHref) + '">',
+        '    <img src="' + escapeHtml(assetUrl(item.image)) + '" alt="' + escapeHtml(title) + ' map preview" loading="lazy">',
+        '  </a>',
+        '  <div class="experiment-card__body">',
+        '    <p class="eyebrow">' + escapeHtml(kicker) + '</p>',
+        '    <h3>' + escapeHtml(title) + '</h3>',
+        '    <p>' + escapeHtml(summary) + '</p>',
+        '    <ul class="experiment-card__list">',
+        tryItems.map(function (entry) {
+          return '<li>' + escapeHtml(entry) + '</li>';
+        }).join(""),
+        '    </ul>',
+        '    <code class="repo-path" aria-label="' + escapeHtml(labels.repo) + '">' + escapeHtml(item.repoPath) + '</code>',
+        '    <div class="button-row">',
+        '      <a class="button button--small" href="' + escapeHtml(detailHref) + '">' + labels.open + '</a>',
+        '      <a class="button button--small button--ghost" href="' + escapeHtml(repoHref) + '">' + labels.folder + '</a>',
+        '    </div>',
+        '  </div>',
+        '</article>'
+      ].join("");
+    }).join("");
+  }
+
   function hydrateReplayStats() {
     if (!catalog.replays || !window.fetch) {
       return;
@@ -223,5 +290,6 @@
   renderLibrary("[data-map-pack-grid]", catalog.mapPacks, "map");
   renderLibrary("[data-agent-pack-grid]", catalog.agentPacks, "agent");
   renderExperimentLibrary();
+  renderLegacyExperiments();
   markActiveNav();
 })();

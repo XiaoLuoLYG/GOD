@@ -1,10 +1,31 @@
 :root {
     font-weight: normal;
+    color: #26343a;
+    background: #f1f8f7;
+    font-family: "Avenir Next", "Geist", "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-variant-numeric: tabular-nums;
 
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    --god-ink: #26343a;
+    --god-ink-soft: #40545c;
+    --god-muted: #667982;
+    --god-paper: #fffdf8;
+    --god-paper-deep: #f1f8f7;
+    --god-surface: rgba(255, 253, 248, 0.9);
+    --god-line: #d4e7e5;
+    --god-accent: #2d91a3;
+    --god-accent-soft: rgba(45, 145, 163, 0.12);
+    --god-accent-strong: #237b8c;
+    --god-brass: #e8a33f;
+    --god-danger: #d85f67;
+    --god-sky: #78c9d8;
+    --god-leaf: #6fbd83;
+    --god-rose: #ee7d83;
+    --god-shadow: 0 22px 60px rgba(38, 52, 58, 0.13);
+    --god-shadow-soft: 0 12px 34px rgba(38, 52, 58, 0.08);
 }
 
 /* 滚动槽 */
@@ -15,27 +36,44 @@
 
 ::-webkit-scrollbar-track {
     border-radius: 3px;
-    background: rgba(0, 0, 0, 0.06);
-    -webkit-box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.08);
+    background: rgba(45, 145, 163, 0.08);
 }
 
 /* 滚动条滑块 */
 ::-webkit-scrollbar-thumb {
     border-radius: 3px;
-    background: rgba(0, 0, 0, 0.12);
-    -webkit-box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.2);
+    background: rgba(45, 145, 163, 0.36);
 }
 
 body {
     margin: 0px;
-    color: #FFFFFF;
+    color: var(--god-ink);
+    background:
+        linear-gradient(135deg, rgba(120, 201, 216, 0.24) 0%, transparent 36%),
+        linear-gradient(225deg, rgba(232, 163, 63, 0.16) 0%, transparent 34%),
+        linear-gradient(0deg, rgba(111, 189, 131, 0.13) 0%, transparent 42%),
+        var(--god-paper-deep);
     /* display: flex; */
+}
+
+body::before {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    content: "";
+    opacity: 0.38;
+    background-image:
+        linear-gradient(rgba(45, 145, 163, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(45, 145, 163, 0.03) 1px, transparent 1px);
+    background-size: 28px 28px;
 }
 
 /* New Version */
 
 .ant-layout {
-    color: #FFFFFF;
+    color: var(--god-ink);
+    background: transparent;
 }
 
 .ant-layout-header {
@@ -66,6 +104,91 @@ body {
 
 .ant-typography {
     margin: 10px 0px;
+    color: inherit;
+    text-wrap: pretty;
+}
+
+.ant-btn,
+.ant-input,
+.ant-input-number,
+.ant-select-selector,
+.ant-mentions,
+.ant-upload,
+.ant-card,
+.ant-modal-content,
+.ant-drawer-content {
+    border-radius: 8px;
+}
+
+.ant-btn {
+    font-weight: 600;
+    transition:
+        background-color 180ms ease,
+        border-color 180ms ease,
+        color 180ms ease,
+        box-shadow 180ms ease,
+        transform 180ms ease;
+}
+
+.ant-btn:not(:disabled):hover {
+    transform: translateY(-1px);
+}
+
+.ant-btn:not(:disabled):active {
+    transform: translateY(0) scale(0.985);
+}
+
+.ant-btn-primary {
+    box-shadow: 0 12px 26px rgba(45, 145, 163, 0.22);
+}
+
+.ant-btn:focus-visible,
+.ant-input:focus,
+.ant-input-focused,
+.ant-input-number-focused,
+.ant-select-focused .ant-select-selector,
+.ant-mentions-focused {
+    outline: 2px solid rgba(45, 145, 163, 0.34);
+    outline-offset: 2px;
+}
+
+.ant-card {
+    border-color: rgba(38, 52, 58, 0.1);
+    box-shadow: var(--god-shadow-soft);
+}
+
+.ant-tag {
+    border-radius: 5px;
+    font-weight: 600;
+}
+
+.ant-alert-info {
+    border-color: rgba(45, 145, 163, 0.2);
+    background: rgba(45, 145, 163, 0.08);
+}
+
+.ant-alert-success {
+    border-color: rgba(86, 166, 111, 0.22);
+    background: rgba(86, 166, 111, 0.1);
+}
+
+.ant-alert-warning {
+    border-color: rgba(232, 163, 63, 0.28);
+    background: rgba(232, 163, 63, 0.12);
+}
+
+.ant-alert-error {
+    border-color: rgba(216, 95, 103, 0.24);
+    background: rgba(216, 95, 103, 0.08);
+}
+
+.ant-table {
+    font-variant-numeric: tabular-nums;
+}
+
+.ant-table-wrapper .ant-table-thead > tr > th {
+    font-weight: 700;
+    letter-spacing: 0.01em;
 }
 
 .w-full {

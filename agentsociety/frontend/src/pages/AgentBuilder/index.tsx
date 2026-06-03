@@ -1024,25 +1024,26 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
     const content = (
         <>
             <Card
-                    title={t('agentBuilder.title')}
-                    extra={
-                        <Space wrap>
-                            <LanguageToggle />
-                            <Button icon={<FolderOpenOutlined />} onClick={loadConfig} loading={loading}>
-                                {t('agentBuilder.actions.load')}
-                            </Button>
-                            <Button
-                                type="primary"
-                                icon={<SaveOutlined />}
-                                onClick={saveConfig}
-                                disabled={!config || hasInvalidAgents}
-                                loading={saving}
-                            >
-                                {t('agentBuilder.actions.save')}
-                            </Button>
-                        </Space>
-                    }
-                >
+                className="agent-studio-shell-card"
+                title={t('agentBuilder.title')}
+                extra={
+                    <Space wrap>
+                        <LanguageToggle />
+                        <Button icon={<FolderOpenOutlined />} onClick={loadConfig} loading={loading}>
+                            {t('agentBuilder.actions.load')}
+                        </Button>
+                        <Button
+                            type="primary"
+                            icon={<SaveOutlined />}
+                            onClick={saveConfig}
+                            disabled={!config || hasInvalidAgents}
+                            loading={saving}
+                        >
+                            {t('agentBuilder.actions.save')}
+                        </Button>
+                    </Space>
+                }
+            >
                     <Row gutter={[12, 12]}>
                         <Col xs={24} lg={12}>
                             <Input
@@ -1076,7 +1077,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
 
                     <Divider />
 
-                    <Space wrap style={{ marginBottom: 12 }}>
+                    <Space wrap className="agent-studio-action-bar">
                         <Button type="primary" icon={<PlusOutlined />} onClick={openCreateAgent} disabled={!config}>
                             {t('agentBuilder.actions.addAgent')}
                         </Button>

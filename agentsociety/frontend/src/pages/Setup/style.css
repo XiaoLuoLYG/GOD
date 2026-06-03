@@ -1,5 +1,5 @@
 .setup-page {
-    min-height: 100vh;
+    min-height: 100dvh;
     background: #f6f8fb;
     color: #111827;
 }
@@ -121,9 +121,9 @@
 
 .setup-map-import-button.ant-btn:hover,
 .setup-map-import-button.ant-btn:focus-visible {
-    color: #0000cc;
-    border-color: rgba(0, 0, 204, 0.38);
-    background: rgba(0, 0, 204, 0.04);
+    color: #2d91a3;
+    border-color: rgba(45, 145, 163, 0.38);
+    background: rgba(45, 145, 163, 0.06);
 }
 
 .setup-page .ant-input,
@@ -160,4 +160,356 @@
     .setup-step-card .ant-steps-item-title {
         font-size: 12px;
     }
+}
+
+/* GOD setup workbench redesign */
+.setup-page {
+    min-height: 100dvh;
+    background:
+        linear-gradient(135deg, rgba(47, 95, 82, 0.12) 0%, transparent 38%),
+        linear-gradient(225deg, rgba(167, 107, 42, 0.1) 0%, transparent 34%),
+        linear-gradient(180deg, #f6f7f2 0%, #eef2ea 100%);
+    color: var(--god-ink);
+}
+
+.setup-page::before {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    content: "";
+    opacity: 0.56;
+    background-image:
+        linear-gradient(rgba(23, 33, 29, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(23, 33, 29, 0.03) 1px, transparent 1px);
+    background-size: 32px 32px;
+}
+
+.setup-shell {
+    position: relative;
+    z-index: 1;
+    width: min(1280px, calc(100vw - 40px));
+    padding: 28px 0 64px;
+}
+
+.setup-header {
+    min-height: 96px;
+    margin-bottom: 22px;
+    padding: 22px;
+    border: 1px solid rgba(23, 33, 29, 0.1);
+    border-radius: 10px;
+    background:
+        linear-gradient(135deg, rgba(23, 33, 29, 0.94), rgba(33, 50, 43, 0.9)),
+        #17211d;
+    color: #f7f6ef;
+    box-shadow: 0 24px 60px rgba(23, 33, 29, 0.2);
+}
+
+.setup-header .ant-typography {
+    color: inherit;
+}
+
+.setup-header h2.ant-typography {
+    margin: 0 0 6px;
+    font-size: clamp(30px, 4vw, 48px);
+    line-height: 0.98;
+    letter-spacing: 0;
+    text-wrap: balance;
+}
+
+.setup-header .ant-typography-secondary {
+    color: rgba(247, 246, 239, 0.68);
+}
+
+.setup-header .ant-btn {
+    border-color: rgba(247, 246, 239, 0.22);
+    background: rgba(247, 246, 239, 0.08);
+    color: #f7f6ef;
+}
+
+.setup-header .ant-btn:hover {
+    border-color: rgba(214, 207, 178, 0.58);
+    background: rgba(247, 246, 239, 0.14);
+    color: #ffffff;
+}
+
+.setup-step-card {
+    margin-bottom: 20px;
+    border: 1px solid rgba(23, 33, 29, 0.09);
+    border-radius: 10px;
+    background: rgba(251, 250, 246, 0.78);
+    box-shadow: 0 16px 40px rgba(23, 33, 29, 0.09);
+    backdrop-filter: blur(14px);
+}
+
+.setup-step-card .ant-card-body {
+    padding: 15px 18px;
+}
+
+.setup-card {
+    overflow: hidden;
+    border: 1px solid rgba(23, 33, 29, 0.1);
+    border-radius: 10px;
+    background: rgba(251, 250, 246, 0.88);
+    box-shadow: 0 20px 52px rgba(23, 33, 29, 0.11);
+}
+
+.setup-card .ant-card-head {
+    min-height: 54px;
+    border-bottom-color: rgba(23, 33, 29, 0.08);
+    background:
+        linear-gradient(90deg, rgba(47, 95, 82, 0.1), transparent 42%),
+        rgba(251, 250, 246, 0.94);
+}
+
+.setup-card .ant-card-head-title {
+    font-size: 17px;
+    font-weight: 800;
+}
+
+.setup-card .ant-card-body {
+    padding: 22px;
+}
+
+.setup-page .ant-alert {
+    border-radius: 8px;
+}
+
+.setup-page .ant-form-item-label > label {
+    color: var(--god-ink-soft);
+    font-weight: 700;
+}
+
+.setup-page .ant-input,
+.setup-page .ant-input-number,
+.setup-page .ant-select-selector,
+.setup-page .ant-input-password {
+    border-color: rgba(23, 33, 29, 0.13);
+    background: rgba(255, 255, 252, 0.82);
+}
+
+.setup-page textarea.ant-input {
+    line-height: 1.5;
+}
+
+.setup-choice-grid {
+    grid-template-columns: 1.1fr 1fr 1.18fr;
+    gap: 14px;
+}
+
+.setup-choice-panel {
+    position: relative;
+    min-height: 212px;
+    overflow: hidden;
+    border-color: rgba(23, 33, 29, 0.1);
+    border-radius: 10px;
+    background:
+        linear-gradient(160deg, rgba(47, 95, 82, 0.08), transparent 46%),
+        rgba(255, 255, 252, 0.78);
+    box-shadow: 0 14px 34px rgba(23, 33, 29, 0.07);
+    transition:
+        border-color 180ms ease,
+        box-shadow 180ms ease,
+        transform 180ms ease;
+}
+
+.setup-choice-panel::after {
+    position: absolute;
+    right: -32px;
+    bottom: -42px;
+    width: 120px;
+    height: 120px;
+    border: 1px solid rgba(47, 95, 82, 0.12);
+    border-radius: 999px;
+    content: "";
+}
+
+.setup-choice-panel:hover {
+    border-color: rgba(47, 95, 82, 0.28);
+    box-shadow: 0 20px 44px rgba(47, 95, 82, 0.12);
+    transform: translateY(-2px);
+}
+
+.setup-built-in-item {
+    border-color: rgba(23, 33, 29, 0.1);
+    border-radius: 10px;
+    background:
+        linear-gradient(90deg, rgba(47, 95, 82, 0.08), transparent 34%),
+        rgba(255, 255, 252, 0.86);
+    box-shadow: 0 10px 26px rgba(23, 33, 29, 0.06);
+}
+
+.setup-generate-panel {
+    min-height: 210px;
+    padding: 22px;
+    border: 1px solid rgba(47, 95, 82, 0.12);
+    border-radius: 10px;
+    background:
+        linear-gradient(135deg, rgba(47, 95, 82, 0.1), rgba(167, 107, 42, 0.06)),
+        rgba(255, 255, 252, 0.8);
+}
+
+.setup-generate-panel h4.ant-typography {
+    margin-top: 0;
+    font-size: 26px;
+    line-height: 1.08;
+    text-wrap: balance;
+}
+
+.setup-confirm-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(132px, 0.38fr) minmax(0, 1.3fr);
+    gap: 16px;
+}
+
+.setup-confirm-grid > div {
+    min-width: 0;
+    padding: 16px;
+    border: 1px solid rgba(23, 33, 29, 0.09);
+    border-radius: 8px;
+    background: rgba(255, 255, 252, 0.72);
+}
+
+.setup-confirm-grid h4.ant-typography {
+    margin-top: 4px;
+}
+
+.setup-map-picker {
+    gap: 7px;
+}
+
+.setup-map-import-button.ant-btn {
+    flex-basis: 36px;
+    width: 36px;
+    height: 36px;
+    border-color: rgba(47, 95, 82, 0.22);
+    background: rgba(47, 95, 82, 0.07);
+    color: var(--god-accent);
+}
+
+.setup-map-import-button.ant-btn:hover,
+.setup-map-import-button.ant-btn:focus-visible {
+    border-color: rgba(47, 95, 82, 0.42);
+    background: rgba(47, 95, 82, 0.12);
+    color: var(--god-accent-strong);
+}
+
+.setup-json-preview {
+    border-radius: 8px;
+    background: #111815;
+    color: #eef2ea;
+}
+
+@media (max-width: 760px) {
+    .setup-shell {
+        width: min(100vw - 20px, 1280px);
+        padding-top: 12px;
+    }
+
+    .setup-header {
+        padding: 18px;
+    }
+
+    .setup-header h2.ant-typography {
+        font-size: 32px;
+    }
+
+    .setup-header > .ant-space {
+        display: grid;
+        grid-template-columns: 1fr;
+    }
+
+    .setup-header > .ant-space .ant-btn,
+    .setup-header > .ant-space .ant-space-item {
+        width: 100%;
+    }
+
+    .setup-card .ant-card-body {
+        padding: 16px;
+    }
+}
+
+/* Brighter palette revision */
+.setup-page {
+    background:
+        linear-gradient(135deg, rgba(120, 201, 216, 0.28) 0%, transparent 36%),
+        linear-gradient(225deg, rgba(232, 163, 63, 0.16) 0%, transparent 32%),
+        linear-gradient(0deg, rgba(111, 189, 131, 0.14) 0%, transparent 42%),
+        linear-gradient(180deg, #fbfffd 0%, #eef9f7 100%);
+}
+
+.setup-page::before {
+    opacity: 0.5;
+    background-image:
+        linear-gradient(rgba(45, 145, 163, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(45, 145, 163, 0.03) 1px, transparent 1px);
+}
+
+.setup-header {
+    border-color: rgba(45, 145, 163, 0.22);
+    background:
+        linear-gradient(120deg, rgba(255, 255, 255, 0.76) 0%, transparent 46%),
+        linear-gradient(135deg, rgba(120, 201, 216, 0.38), rgba(255, 253, 248, 0.9) 48%, rgba(255, 220, 146, 0.34)),
+        #fffdf8;
+    color: var(--god-ink);
+    box-shadow: 0 22px 56px rgba(45, 145, 163, 0.16);
+}
+
+.setup-header .ant-typography-secondary {
+    color: rgba(64, 84, 92, 0.78);
+}
+
+.setup-header .ant-btn {
+    border-color: rgba(45, 145, 163, 0.24);
+    background: rgba(255, 253, 248, 0.72);
+    color: var(--god-accent-strong);
+}
+
+.setup-header .ant-btn:hover {
+    border-color: rgba(45, 145, 163, 0.44);
+    background: rgba(255, 253, 248, 0.92);
+    color: var(--god-accent-strong);
+}
+
+.setup-step-card,
+.setup-card {
+    border-color: rgba(45, 145, 163, 0.14);
+    background: rgba(255, 253, 248, 0.86);
+    box-shadow: 0 18px 46px rgba(38, 52, 58, 0.09);
+}
+
+.setup-card .ant-card-head {
+    background:
+        linear-gradient(90deg, rgba(120, 201, 216, 0.18), rgba(255, 253, 248, 0.94) 44%),
+        rgba(255, 253, 248, 0.96);
+}
+
+.setup-choice-panel,
+.setup-built-in-item,
+.setup-generate-panel,
+.setup-confirm-grid > div {
+    border-color: rgba(45, 145, 163, 0.14);
+    background:
+        linear-gradient(160deg, rgba(120, 201, 216, 0.12), transparent 48%),
+        rgba(255, 253, 248, 0.82);
+}
+
+.setup-choice-panel::after {
+    border-color: rgba(232, 163, 63, 0.2);
+}
+
+.setup-choice-panel:hover {
+    border-color: rgba(45, 145, 163, 0.34);
+    box-shadow: 0 20px 44px rgba(45, 145, 163, 0.13);
+}
+
+.setup-map-import-button.ant-btn {
+    border-color: rgba(45, 145, 163, 0.24);
+    background: rgba(45, 145, 163, 0.08);
+    color: var(--god-accent-strong);
+}
+
+.setup-map-import-button.ant-btn:hover,
+.setup-map-import-button.ant-btn:focus-visible {
+    border-color: rgba(45, 145, 163, 0.44);
+    background: rgba(45, 145, 163, 0.13);
 }

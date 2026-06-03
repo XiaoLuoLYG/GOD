@@ -1,5 +1,5 @@
 .agent-builder-page {
-    min-height: 100vh;
+    min-height: 100dvh;
     padding: 24px;
     overflow-x: hidden;
     background: #fff;
@@ -491,4 +491,308 @@
 .agent-studio-empty-state {
     border-radius: 8px;
     border: 1px solid #e5e7eb;
+}
+
+/* GOD role studio redesign */
+.agent-builder-page {
+    min-height: 100dvh;
+    padding: 24px;
+    background:
+        linear-gradient(135deg, rgba(47, 95, 82, 0.12) 0%, transparent 38%),
+        linear-gradient(225deg, rgba(167, 107, 42, 0.1) 0%, transparent 34%),
+        linear-gradient(180deg, #f6f7f2 0%, #eef2ea 100%);
+    color: var(--god-ink);
+}
+
+.agent-builder-page::before {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    content: "";
+    opacity: 0.48;
+    background-image:
+        linear-gradient(rgba(23, 33, 29, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(23, 33, 29, 0.028) 1px, transparent 1px);
+    background-size: 32px 32px;
+}
+
+.agent-builder-page > * {
+    position: relative;
+    z-index: 1;
+}
+
+.agent-studio-shell-card,
+.agent-studio-empty-state {
+    overflow: hidden;
+    border: 1px solid rgba(23, 33, 29, 0.1);
+    border-radius: 10px;
+    background: rgba(251, 250, 246, 0.9);
+    box-shadow: 0 22px 58px rgba(23, 33, 29, 0.13);
+}
+
+.agent-studio-shell-card > .ant-card-head,
+.agent-studio-empty-state > .ant-card-head {
+    min-height: 58px;
+    border-bottom-color: rgba(23, 33, 29, 0.08);
+    background:
+        linear-gradient(90deg, rgba(47, 95, 82, 0.12), transparent 44%),
+        rgba(251, 250, 246, 0.96);
+}
+
+.agent-studio-shell-card > .ant-card-head .ant-card-head-title,
+.agent-studio-empty-state > .ant-card-head .ant-card-head-title {
+    font-size: 22px;
+    font-weight: 850;
+    letter-spacing: 0;
+}
+
+.agent-studio-empty-state > .ant-card-head .ant-card-head-title {
+    overflow: visible;
+    line-height: 1.16;
+    text-overflow: clip;
+    white-space: normal;
+    text-wrap: balance;
+}
+
+.agent-studio-shell-card > .ant-card-body {
+    padding: 22px;
+}
+
+.agent-studio-shell-card .ant-input,
+.agent-studio-shell-card .ant-select-selector,
+.agent-studio-shell-card .ant-upload,
+.agent-studio .ant-input,
+.agent-studio .ant-input-number,
+.agent-studio .ant-select-selector,
+.agent-studio .ant-upload {
+    border-color: rgba(23, 33, 29, 0.13);
+    background: rgba(255, 255, 252, 0.84);
+}
+
+.agent-studio-action-bar {
+    margin-bottom: 14px;
+    padding: 12px;
+    border: 1px solid rgba(23, 33, 29, 0.09);
+    border-radius: 8px;
+    background:
+        linear-gradient(90deg, rgba(47, 95, 82, 0.08), transparent 50%),
+        rgba(255, 255, 252, 0.72);
+}
+
+.agent-studio-main,
+.agent-studio-side,
+.agent-studio-choice-group,
+.agent-studio-preview-card,
+.agent-studio-review-summary,
+.agent-studio-agent-hub,
+.agent-studio-sprite-panel {
+    border-color: rgba(23, 33, 29, 0.1);
+    border-radius: 8px;
+    background: rgba(255, 255, 252, 0.78);
+    box-shadow: 0 12px 30px rgba(23, 33, 29, 0.07);
+}
+
+.agent-studio-main {
+    padding: 18px;
+}
+
+.agent-studio-side {
+    padding: 16px;
+    background:
+        linear-gradient(180deg, rgba(47, 95, 82, 0.08), transparent 44%),
+        rgba(255, 255, 252, 0.78);
+}
+
+.agent-studio-steps {
+    margin-bottom: 20px;
+    padding: 12px;
+    border: 1px solid rgba(23, 33, 29, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 252, 0.7);
+}
+
+.agent-studio .ant-form-item-label > label {
+    color: var(--god-ink-soft);
+    font-weight: 750;
+}
+
+.agent-studio-context-title {
+    color: var(--god-accent-strong);
+    font-weight: 800;
+}
+
+.agent-studio-agent-hub,
+.agent-studio-sprite-panel {
+    background:
+        linear-gradient(135deg, rgba(47, 95, 82, 0.08), rgba(167, 107, 42, 0.04)),
+        rgba(255, 255, 252, 0.74);
+}
+
+.agent-studio-choice {
+    border-color: rgba(23, 33, 29, 0.12);
+    border-radius: 7px;
+    background: rgba(255, 255, 252, 0.82);
+    transition:
+        border-color 180ms ease,
+        background-color 180ms ease,
+        color 180ms ease,
+        box-shadow 180ms ease,
+        transform 180ms ease;
+}
+
+.agent-studio-choice:hover {
+    border-color: rgba(47, 95, 82, 0.34);
+    background: rgba(47, 95, 82, 0.08);
+    box-shadow: 0 10px 22px rgba(47, 95, 82, 0.1);
+    transform: translateY(-1px);
+}
+
+.agent-studio-choice.selected {
+    border-color: rgba(47, 95, 82, 0.48);
+    background: rgba(47, 95, 82, 0.13);
+    color: var(--god-accent-strong);
+}
+
+.agent-studio-choice.custom {
+    border-style: dashed;
+    background: rgba(255, 255, 252, 0.62);
+}
+
+.agent-studio-preview-card {
+    background:
+        linear-gradient(145deg, rgba(47, 95, 82, 0.08), transparent 54%),
+        rgba(255, 255, 252, 0.82);
+}
+
+.agent-studio-sprite-preview,
+.agent-studio-preview-placeholder,
+.agent-studio-preview-box img,
+.agent-studio-preview-empty {
+    border-color: rgba(23, 33, 29, 0.12);
+    border-radius: 8px;
+    background-color: rgba(255, 255, 252, 0.86);
+}
+
+.agent-studio-preview-head,
+.agent-studio-preview-body-shape,
+.agent-studio-preview-leg {
+    border-color: #17211d;
+    background: var(--god-accent);
+}
+
+.agent-studio-preview-head {
+    background: #b8cdbf;
+}
+
+.agent-studio-review-summary {
+    background:
+        linear-gradient(90deg, rgba(47, 95, 82, 0.1), rgba(167, 107, 42, 0.06)),
+        rgba(255, 255, 252, 0.78);
+}
+
+.agent-studio-empty-state {
+    max-width: 760px;
+    margin: 8vh auto 0;
+}
+
+.agent-studio-empty-state .ant-card-body {
+    padding: 22px;
+}
+
+@media (max-width: 860px) {
+    .agent-builder-page {
+        padding: 12px;
+    }
+
+    .agent-studio-shell-card > .ant-card-body {
+        padding: 16px;
+    }
+
+    .agent-studio-empty-state > .ant-card-head {
+        min-height: auto;
+        padding: 14px 18px;
+    }
+
+    .agent-studio-action-bar {
+        align-items: stretch;
+    }
+
+    .agent-studio-action-bar .ant-btn,
+    .agent-studio-action-bar .ant-space-item {
+        width: 100%;
+    }
+}
+
+/* Brighter palette revision */
+.agent-builder-page {
+    background:
+        linear-gradient(135deg, rgba(120, 201, 216, 0.28) 0%, transparent 36%),
+        linear-gradient(225deg, rgba(232, 163, 63, 0.16) 0%, transparent 34%),
+        linear-gradient(0deg, rgba(111, 189, 131, 0.15) 0%, transparent 42%),
+        linear-gradient(180deg, #fbfffd 0%, #eef9f7 100%);
+}
+
+.agent-builder-page::before {
+    opacity: 0.5;
+    background-image:
+        linear-gradient(rgba(45, 145, 163, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(45, 145, 163, 0.03) 1px, transparent 1px);
+}
+
+.agent-studio-shell-card,
+.agent-studio-empty-state {
+    border-color: rgba(45, 145, 163, 0.14);
+    background: rgba(255, 253, 248, 0.9);
+    box-shadow: 0 22px 54px rgba(38, 52, 58, 0.1);
+}
+
+.agent-studio-shell-card > .ant-card-head,
+.agent-studio-empty-state > .ant-card-head {
+    background:
+        linear-gradient(90deg, rgba(120, 201, 216, 0.18), rgba(255, 253, 248, 0.95) 45%),
+        rgba(255, 253, 248, 0.96);
+}
+
+.agent-studio-action-bar,
+.agent-studio-main,
+.agent-studio-side,
+.agent-studio-choice-group,
+.agent-studio-preview-card,
+.agent-studio-review-summary,
+.agent-studio-agent-hub,
+.agent-studio-sprite-panel,
+.agent-studio-steps {
+    border-color: rgba(45, 145, 163, 0.14);
+    background:
+        linear-gradient(135deg, rgba(120, 201, 216, 0.11), rgba(255, 253, 248, 0.84)),
+        rgba(255, 253, 248, 0.82);
+    box-shadow: 0 12px 28px rgba(38, 52, 58, 0.07);
+}
+
+.agent-studio-choice {
+    border-color: rgba(45, 145, 163, 0.14);
+    background: rgba(255, 253, 248, 0.88);
+}
+
+.agent-studio-choice:hover {
+    border-color: rgba(45, 145, 163, 0.36);
+    background: rgba(45, 145, 163, 0.08);
+    box-shadow: 0 10px 22px rgba(45, 145, 163, 0.1);
+}
+
+.agent-studio-choice.selected {
+    border-color: rgba(45, 145, 163, 0.5);
+    background: rgba(45, 145, 163, 0.13);
+    color: var(--god-accent-strong);
+}
+
+.agent-studio-preview-head,
+.agent-studio-preview-body-shape,
+.agent-studio-preview-leg {
+    background: var(--god-accent);
+}
+
+.agent-studio-preview-head {
+    background: #a9dbe2;
 }

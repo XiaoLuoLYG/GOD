@@ -1,5 +1,5 @@
 .map-studio-page {
-    min-height: 100vh;
+    min-height: 100dvh;
     background: #f5f7fb;
     color: #111827;
 }
@@ -423,4 +423,307 @@
     .map-studio-validation-actions .ant-space {
         justify-content: flex-start;
     }
+}
+
+/* GOD map studio redesign */
+.map-studio-page {
+    min-height: 100dvh;
+    background:
+        linear-gradient(135deg, rgba(47, 95, 82, 0.12) 0%, transparent 38%),
+        linear-gradient(225deg, rgba(167, 107, 42, 0.1) 0%, transparent 34%),
+        linear-gradient(180deg, #f6f7f2 0%, #edf2ea 100%);
+    color: var(--god-ink);
+}
+
+.map-studio-page::before {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    content: "";
+    opacity: 0.5;
+    background-image:
+        linear-gradient(rgba(23, 33, 29, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(23, 33, 29, 0.028) 1px, transparent 1px);
+    background-size: 32px 32px;
+}
+
+.map-studio-shell {
+    position: relative;
+    z-index: 1;
+    width: min(1720px, calc(100vw - 32px));
+    padding: 16px 0 20px;
+}
+
+.map-studio-header {
+    min-height: 86px;
+    margin-bottom: 14px;
+    padding: 20px 22px;
+    border: 1px solid rgba(23, 33, 29, 0.1);
+    border-radius: 10px;
+    background:
+        linear-gradient(135deg, rgba(23, 33, 29, 0.94), rgba(33, 50, 43, 0.9)),
+        #17211d;
+    color: #f7f6ef;
+    box-shadow: 0 22px 56px rgba(23, 33, 29, 0.2);
+}
+
+.map-studio-header .ant-typography {
+    color: inherit;
+}
+
+.map-studio-header h2.ant-typography {
+    font-size: clamp(30px, 3.2vw, 46px);
+    line-height: 0.98;
+    letter-spacing: 0;
+}
+
+.map-studio-header .ant-typography-secondary {
+    color: rgba(247, 246, 239, 0.68);
+}
+
+.map-studio-header .ant-btn {
+    border-color: rgba(247, 246, 239, 0.22);
+    background: rgba(247, 246, 239, 0.08);
+    color: #f7f6ef;
+}
+
+.map-studio-layout {
+    grid-template-columns: minmax(640px, 1fr) minmax(430px, 500px);
+    gap: 14px;
+}
+
+.map-studio-card {
+    overflow: hidden;
+    border-color: rgba(23, 33, 29, 0.1);
+    border-radius: 10px;
+    background: rgba(251, 250, 246, 0.9);
+    box-shadow: 0 18px 48px rgba(23, 33, 29, 0.12);
+}
+
+.map-studio-card .ant-card-head {
+    min-height: 50px;
+    border-bottom-color: rgba(23, 33, 29, 0.08);
+    background:
+        linear-gradient(90deg, rgba(47, 95, 82, 0.1), transparent 45%),
+        rgba(251, 250, 246, 0.94);
+}
+
+.map-studio-card .ant-card-head-title {
+    font-weight: 800;
+}
+
+.map-studio-card .ant-card-body {
+    padding: 14px;
+}
+
+.map-studio-canvas {
+    max-height: min(70vh, 720px);
+    border: 1px solid rgba(23, 33, 29, 0.18);
+    border-radius: 10px;
+    background:
+        linear-gradient(135deg, #0f1714, #17211d);
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+        0 18px 48px rgba(23, 33, 29, 0.2);
+}
+
+.map-studio-canvas::after {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    content: "";
+    background:
+        linear-gradient(180deg, rgba(10, 15, 13, 0.08), transparent 35%, rgba(10, 15, 13, 0.1)),
+        linear-gradient(90deg, rgba(10, 15, 13, 0.12), transparent 27%, transparent 73%, rgba(10, 15, 13, 0.14));
+}
+
+.map-studio-marker {
+    z-index: 3;
+    border-color: #fbfaf6;
+    background: var(--god-accent);
+    box-shadow:
+        0 12px 24px rgba(0, 0, 0, 0.24),
+        0 0 0 5px rgba(47, 95, 82, 0.18);
+}
+
+.map-studio-marker.active {
+    background: var(--god-brass);
+    box-shadow:
+        0 12px 24px rgba(0, 0, 0, 0.24),
+        0 0 0 6px rgba(167, 107, 42, 0.2);
+}
+
+.map-studio-empty {
+    border-color: rgba(47, 95, 82, 0.22);
+    border-radius: 10px;
+    background:
+        linear-gradient(135deg, rgba(47, 95, 82, 0.09), rgba(167, 107, 42, 0.05)),
+        rgba(255, 255, 252, 0.78);
+}
+
+.map-studio-empty .anticon {
+    color: var(--god-accent);
+}
+
+.map-studio-image-config {
+    border-color: rgba(47, 95, 82, 0.18);
+    border-radius: 8px;
+    background: rgba(47, 95, 82, 0.06);
+}
+
+.map-studio-image-config-summary {
+    padding: 11px 12px;
+}
+
+.map-studio-field-grid {
+    gap: 11px;
+}
+
+.map-studio-page .ant-input,
+.map-studio-page .ant-input-number,
+.map-studio-page .ant-select-selector,
+.map-studio-page .ant-upload,
+.map-studio-page .ant-mentions {
+    border-color: rgba(23, 33, 29, 0.13);
+    background: rgba(255, 255, 252, 0.82);
+}
+
+.map-studio-workflow-stack {
+    gap: 11px;
+}
+
+.map-studio-workflow-controls,
+.map-studio-calibration-footer {
+    padding: 10px;
+    border: 1px solid rgba(23, 33, 29, 0.09);
+    border-radius: 8px;
+    background: rgba(255, 255, 252, 0.7);
+}
+
+.map-studio-location-table .ant-table {
+    border-radius: 8px;
+}
+
+.map-studio-validation-panel {
+    padding: 12px;
+    border: 1px solid rgba(23, 33, 29, 0.09);
+    border-radius: 8px;
+    background: rgba(255, 255, 252, 0.7);
+}
+
+.map-studio-validation-actions {
+    grid-template-columns: minmax(0, 1fr) auto;
+}
+
+@media (max-width: 1320px) {
+    .map-studio-shell {
+        width: min(100vw - 20px, 1440px);
+    }
+
+    .map-studio-header {
+        padding: 18px;
+    }
+
+    .map-studio-header h2.ant-typography {
+        font-size: 34px;
+    }
+
+    .map-studio-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Brighter palette revision */
+.map-studio-page {
+    background:
+        linear-gradient(135deg, rgba(120, 201, 216, 0.29) 0%, transparent 37%),
+        linear-gradient(225deg, rgba(232, 163, 63, 0.16) 0%, transparent 34%),
+        linear-gradient(0deg, rgba(111, 189, 131, 0.15) 0%, transparent 42%),
+        linear-gradient(180deg, #fbfffd 0%, #eef9f7 100%);
+}
+
+.map-studio-page::before {
+    opacity: 0.5;
+    background-image:
+        linear-gradient(rgba(45, 145, 163, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(45, 145, 163, 0.03) 1px, transparent 1px);
+}
+
+.map-studio-header {
+    border-color: rgba(45, 145, 163, 0.22);
+    background:
+        linear-gradient(120deg, rgba(255, 255, 255, 0.74) 0%, transparent 46%),
+        linear-gradient(135deg, rgba(120, 201, 216, 0.4), rgba(255, 253, 248, 0.92) 48%, rgba(255, 220, 146, 0.34)),
+        #fffdf8;
+    color: var(--god-ink);
+    box-shadow: 0 22px 56px rgba(45, 145, 163, 0.16);
+}
+
+.map-studio-header .ant-typography-secondary {
+    color: rgba(64, 84, 92, 0.78);
+}
+
+.map-studio-header .ant-btn {
+    border-color: rgba(45, 145, 163, 0.24);
+    background: rgba(255, 253, 248, 0.74);
+    color: var(--god-accent-strong);
+}
+
+.map-studio-header .ant-btn:hover {
+    border-color: rgba(45, 145, 163, 0.44);
+    background: rgba(255, 253, 248, 0.92);
+}
+
+.map-studio-card {
+    border-color: rgba(45, 145, 163, 0.14);
+    background: rgba(255, 253, 248, 0.88);
+    box-shadow: 0 18px 46px rgba(38, 52, 58, 0.09);
+}
+
+.map-studio-card .ant-card-head {
+    background:
+        linear-gradient(90deg, rgba(120, 201, 216, 0.18), rgba(255, 253, 248, 0.95) 45%),
+        rgba(255, 253, 248, 0.96);
+}
+
+.map-studio-canvas {
+    border-color: rgba(45, 145, 163, 0.22);
+    background:
+        linear-gradient(135deg, rgba(120, 201, 216, 0.08), rgba(255, 253, 248, 0.78)),
+        #f7fcfa;
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.62),
+        0 16px 42px rgba(45, 145, 163, 0.13);
+}
+
+.map-studio-canvas::after {
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.14), transparent 42%, rgba(45, 145, 163, 0.05)),
+        linear-gradient(90deg, rgba(45, 145, 163, 0.06), transparent 28%, transparent 72%, rgba(45, 145, 163, 0.06));
+}
+
+.map-studio-empty,
+.map-studio-image-config,
+.map-studio-workflow-controls,
+.map-studio-calibration-footer,
+.map-studio-validation-panel {
+    border-color: rgba(45, 145, 163, 0.14);
+    background:
+        linear-gradient(135deg, rgba(120, 201, 216, 0.11), rgba(255, 253, 248, 0.82)),
+        rgba(255, 253, 248, 0.8);
+}
+
+.map-studio-marker {
+    background: var(--god-accent);
+    box-shadow:
+        0 12px 24px rgba(38, 52, 58, 0.2),
+        0 0 0 5px rgba(45, 145, 163, 0.18);
+}
+
+.map-studio-marker.active {
+    background: var(--god-brass);
+    box-shadow:
+        0 12px 24px rgba(38, 52, 58, 0.2),
+        0 0 0 6px rgba(232, 163, 63, 0.2);
 }
