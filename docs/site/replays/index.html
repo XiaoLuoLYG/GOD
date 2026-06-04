@@ -5,27 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Replays - GOD</title>
     <meta name="description" content="Browse public GOD example replays.">
-    <link rel="stylesheet" href="../assets/site.css?v=20260531f">
+    <link rel="stylesheet" href="../assets/site.css?v=20260603-lang-toggle">
   </head>
-  <body data-site-root="../">
+  <body data-site-root="../" data-title-i18n="replays.metaTitle">
     <header class="site-header">
       <nav class="nav" aria-label="Main navigation">
         <a class="brand" href="../index.html"><img src="../assets/logo_no_bg.png" alt="">GOD</a>
         <div class="nav-links">
-          <a data-nav href="../replays/">Replays</a>
-          <a data-nav href="../map-packs/">Map Packs</a>
-          <a data-nav href="../agent-packs/">Agent Packs</a>
-          <a data-nav href="../experiments/">Experiments</a>
-          <a class="nav-cta" href="https://github.com/XiaoLuoLYG/GOD">GitHub</a>
+          <a data-nav data-i18n="nav.replays" href="../replays/">Replays</a>
+          <a data-nav data-i18n="nav.maps" href="../map-packs/">Map Packs</a>
+          <a data-nav data-i18n="nav.agents" href="../agent-packs/">Agent Packs</a>
+          <a data-nav data-i18n="nav.experiments" href="../experiments/">Experiments</a>
+          <a class="nav-cta" data-i18n="nav.github" href="https://github.com/XiaoLuoLYG/GOD">GitHub</a>
         </div>
       </nav>
     </header>
 
     <main>
       <section class="page-hero">
-        <p class="mini-label">Example replay</p>
-        <h1>Open a finished world.</h1>
-        <p>These replays are static example results: timeline frames, map assets, agent profiles, and the recorded operator flow. Use ExperimentPacks when you want a playable setup.</p>
+        <p class="mini-label" data-i18n="replays.eyebrow">Example replay</p>
+        <h1 data-i18n="replays.title">Open a finished world.</h1>
+        <p data-i18n="replays.summary">These replays are static example results: timeline frames, map assets, agent profiles, and the recorded operator flow. Use ExperimentPacks when you want a playable setup.</p>
       </section>
 
       <section class="section section--tight">
@@ -35,11 +35,11 @@
 
     <footer class="footer">
       <div class="footer-inner">
-        <span>GOD Replays</span>
-        <span><a href="../index.html">Home</a> · <a href="../developer/">Developer docs</a></span>
+        <span data-i18n="replays.footer">GOD Replays</span>
+        <span><a data-i18n="replays.home" href="../index.html">Home</a> · <a data-i18n="replays.developerDocs" href="../developer/">Developer docs</a></span>
       </div>
     </footer>
-    <script src="../data/catalog.js?v=20260531"></script>
-    <script src="../assets/site.js?v=20260531"></script>
+    <script src="../data/catalog.js?v=20260603-lang-toggle"></script>
+    <script src="../assets/site.js?v=20260603-lang-toggle"></script>
   </body>
 </html>

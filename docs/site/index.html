@@ -5,22 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>GOD - Govern, Observe, Direct</title>
     <meta name="description" content="GOD is a public Experiment, Replay, MapPack, and AgentPack library for controllable agent societies.">
-    <meta property="og:title" content="GOD - Govern, Observe, Direct">
-    <meta property="og:description" content="Create, run, and replay controllable agent societies from a public library of experiments, maps, and casts.">
-    <meta property="og:image" content="assets/screenshots/00-hero.png">
-    <link rel="stylesheet" href="assets/site.css?v=20260603">
+    <link rel="stylesheet" href="assets/site.css?v=20260603-lang-toggle">
   </head>
-  <body data-site-root="">
+  <body data-site-root="" data-title-i18n="home.metaTitle">
     <header class="site-header">
       <nav class="nav" aria-label="Main navigation">
         <a class="brand" href="index.html"><img src="assets/logo_no_bg.png" alt="">GOD</a>
         <div class="nav-links">
-          <a data-nav href="replays/">Replays</a>
-          <a data-nav href="map-packs/">Map Packs</a>
-          <a data-nav href="agent-packs/">Agent Packs</a>
-          <a data-nav href="experiments/">Experiments</a>
-          <a data-nav href="start.html">Start</a>
-          <a class="nav-cta" href="https://github.com/XiaoLuoLYG/GOD">GitHub</a>
+          <a data-nav data-i18n="nav.replays" href="replays/">Replays</a>
+          <a data-nav data-i18n="nav.maps" href="map-packs/">Map Packs</a>
+          <a data-nav data-i18n="nav.agents" href="agent-packs/">Agent Packs</a>
+          <a data-nav data-i18n="nav.experiments" href="experiments/">Experiments</a>
+          <a class="nav-cta" data-i18n="nav.github" href="https://github.com/XiaoLuoLYG/GOD">GitHub</a>
         </div>
       </nav>
     </header>
@@ -29,33 +25,27 @@
       <section class="hero">
         <div class="hero-inner">
           <div class="hero-copy">
-            <p class="hero-badge">Govern - Observe - Direct</p>
+            <p class="hero-badge" data-i18n="home.badge">Govern - Observe - Direct</p>
             <h1>GOD</h1>
-            <p class="hero-subtitle">Make your agents dance in a virtual Eden.</p>
-            <p class="hero-line">Build a small world, run it, intervene, and replay what changed.</p>
+            <p class="hero-subtitle" data-i18n="home.subtitle">Make your agents dance in a virtual Eden.</p>
+            <p class="hero-line" data-i18n="home.line">Create your own world.</p>
             <div class="hero-actions">
-              <a class="button" href="experiments/">Browse experiment packs</a>
-              <a class="button button--ghost" href="replays/">Open public replays</a>
+              <a class="button" data-i18n="home.primaryCta" href="experiments/">Create your own world</a>
+              <a class="button button--ghost" data-i18n="home.githubCta" href="https://github.com/XiaoLuoLYG/GOD">View on GitHub</a>
             </div>
-            <div class="hero-metrics" aria-label="GOD public library">
-              <span><strong>4</strong> public hubs</span>
-              <span><strong>2</strong> replay examples</span>
-              <span><strong>32</strong> bundled agents</span>
-              <span><strong>2</strong> reusable maps</span>
-            </div>
-            <p class="hero-contact">Contact: <a href="mailto:scofieldlyg@gmail.com">scofieldlyg@gmail.com</a></p>
+            <p class="hero-contact"><span data-i18n="home.contact">Contact:</span> <a href="mailto:scofieldlyg@gmail.com">scofieldlyg@gmail.com</a></p>
           </div>
         </div>
-        <div class="scroll-cue">Scroll down to enter the world</div>
+        <div class="scroll-cue" data-i18n="home.scrollCue">Scroll down to enter the world</div>
       </section>
 
       <section class="section section--tight">
         <div class="section-heading">
           <div>
-            <p class="mini-label">Public product surfaces</p>
-            <h2>Four public hubs.</h2>
+            <p class="mini-label" data-i18n="home.productsEyebrow">Public product surfaces</p>
+            <h2 data-i18n="home.productsTitle">Four public hubs.</h2>
           </div>
-          <p>ExperimentPacks are playable setup seeds. Example replays are watchable results. MapPacks and AgentPacks remain reusable dependencies.</p>
+          <p data-i18n="home.productsSummary">ExperimentPacks are playable setup seeds. Example replays are watchable results. MapPacks and AgentPacks remain reusable dependencies.</p>
         </div>
         <div class="product-grid" data-product-grid></div>
       </section>
@@ -64,10 +54,10 @@
         <div class="section-inner">
           <div class="section-heading">
             <div>
-            <p class="mini-label">Featured replays</p>
-            <h2>Open a world that already happened.</h2>
+            <p class="mini-label" data-i18n="home.replaysEyebrow">Featured replays</p>
+            <h2 data-i18n="home.replaysTitle">Open a world that already happened.</h2>
           </div>
-            <p>Timeline, map assets, agent profiles, and operator traces are browser-readable; download the ExperimentPack when you want to play from the same setup.</p>
+            <p data-i18n="home.replaysSummary">Timeline, map assets, agent profiles, and operator traces are browser-readable; download the ExperimentPack when you want to play from the same setup.</p>
           </div>
           <div class="feature-grid" data-replay-grid></div>
         </div>
@@ -77,11 +67,11 @@
 
     <footer class="footer">
       <div class="footer-inner">
-        <span>GOD - Govern, Observe, Direct</span>
-        <span><a href="developer/">Developer docs</a> · <a href="https://github.com/XiaoLuoLYG/GOD">GitHub</a></span>
+        <span data-i18n="home.footer">GOD - Govern, Observe, Direct</span>
+        <span><a data-i18n="replays.developerDocs" href="developer/">Developer docs</a> · <a data-i18n="nav.github" href="https://github.com/XiaoLuoLYG/GOD">GitHub</a></span>
       </div>
     </footer>
-    <script src="data/catalog.js?v=20260531"></script>
-    <script src="assets/site.js?v=20260603"></script>
+    <script src="data/catalog.js?v=20260603-lang-toggle"></script>
+    <script src="assets/site.js?v=20260603-lang-toggle"></script>
   </body>
 </html>

@@ -5,12 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>GOD - Govern, Observe, Direct</title>
     <meta name="description" content="通过场景和实验探索可操作的 agent society。">
-    <meta property="og:title" content="GOD - Govern, Observe, Direct">
-    <meta property="og:description" content="创建、运行、干预并回放一个可被你触碰的 agent 小世界。">
-    <meta property="og:image" content="../assets/screenshots/00-hero.png">
-    <link rel="stylesheet" href="../assets/site.css?v=20260603">
+    <link rel="stylesheet" href="../assets/site.css?v=20260603-en-only">
   </head>
-  <body data-asset-prefix="../" data-detail-base="experiments/">
+  <body data-site-root="../" data-asset-prefix="../" data-detail-base="experiments/">
     <header class="site-header">
       <nav class="nav" aria-label="主导航">
         <a class="brand" href="index.html"><img src="../assets/logo_no_bg.png" alt="">GOD</a>
@@ -26,25 +23,21 @@
 
     <main>
       <section class="hero">
-        <div class="hero-inner">
-          <div class="hero-copy">
-            <p class="hero-badge">Govern - Observe - Direct</p>
-            <h1>GOD</h1>
-            <p class="hero-subtitle">运行一个可以被你触碰的小世界。</p>
-            <p class="hero-line">创建地图和居民，运行场景，写入干预，再回放变化。</p>
-            <div class="hero-actions">
+        <div class="hero-grid">
+          <div>
+            <p class="eyebrow">Govern · Observe · Direct</p>
+            <h1>运行一个可以被你触碰的小世界。</h1>
+            <p class="lede">GOD 把 agent society simulation 变成 live scenario：观察日常生活，向任意居民提问，干预下一步，再回放变化。</p>
+            <div class="actions">
               <a class="button" href="experiments/index.html">查看实验</a>
-              <a class="button button--ghost" href="start.html">本地启动</a>
-            </div>
-            <div class="hero-metrics" aria-label="GOD 公开资源">
-              <span><strong>2</strong> 内置实验</span>
-              <span><strong>2</strong> 示例回放</span>
-              <span><strong>32</strong> 公开角色</span>
-              <span><strong>2</strong> 可复用地图</span>
+              <a class="button secondary" href="start.html">本地启动</a>
             </div>
           </div>
+          <figure class="hero-shot">
+            <img src="../assets/screenshots/00-hero.png" alt="GOD 控制台预览">
+            <figcaption>实时控制台、配置向导、地图、居民和操作员命令。</figcaption>
+          </figure>
         </div>
-        <div class="scroll-cue">向下进入实验展厅</div>
       </section>
 
       <section class="section" id="use-cases">
@@ -91,7 +84,7 @@
           </div>
           <p>每个实验都是可复现目录，包含地图、角色、配置和操作说明。之后新增实验只需要继续补卡片。</p>
         </div>
-        <div class="experiment-grid" data-experiment-grid></div>
+        <div class="library-grid" data-experiment-pack-grid></div>
       </section>
 
       <section class="section">
@@ -116,7 +109,7 @@
         <span><a href="https://github.com/XiaoLuoLYG/GOD">GitHub</a> · <a href="../developer/zh/">开发者文档</a></span>
       </div>
     </footer>
-    <script src="../data/experiments.js"></script>
-    <script src="../assets/site.js?v=20260603"></script>
+    <script src="../data/catalog.js?v=20260603-en-only"></script>
+    <script src="../assets/site.js?v=20260603-en-only"></script>
   </body>
 </html>
