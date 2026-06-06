@@ -161,6 +161,10 @@ def test_export_public_replay_writes_static_bundle(tmp_path: Path) -> None:
     assert "agent_pack.yaml" in names
     assert "characters/Alice.png" in names
     assert "downloads/demo-world-agents-agent-pack.zip" not in names
+    with ZipFile(map_pack_root.joinpath("downloads", "demo-map-pack.zip")) as archive:
+        names = set(archive.namelist())
+    assert "map.yaml" in names
+    assert "downloads/stale-map-pack.zip" not in names
     for zip_path in (
         experiment_pack_root.joinpath("downloads", "demo-world-experiment-experiment-pack.zip"),
         replay_root.joinpath("downloads", "demo-world-experiment-pack.zip"),
@@ -309,8 +313,54 @@ def test_export_curated_experiment_pack_without_replay(tmp_path: Path) -> None:
     assert preview.validation["ok"] is True
 
 
+def test_curated_experiment_release_download_urls(tmp_path: Path) -> None:
+    workspace = tmp_path / "quick_experiments"
+    experiment_root = workspace / "hypothesis_moon_role_study" / "experiment_1"
+    init_dir = experiment_root / "init"
+    init_dir.mkdir(parents=True)
+    init_dir.joinpath("init_config.json").write_text(
+        json.dumps(
+            {
+                "agents": [{"id": 1, "name": "Alice"}],
+                "env_modules": [
+                    {"module_type": "PixelTownSocialEnv", "kwargs": {"map_id": "moon_base"}}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    init_dir.joinpath("steps.yaml").write_text("steps:\n- type: run\n  num_steps: 2\n", encoding="utf-8")
+    output_root = tmp_path / "site-data"
+
+    export_curated_experiment_packs(
+        workspace_path=workspace,
+        output_root=output_root,
+        registry_entries=[
+            {
+                "key": "moon_role_study",
+                "label": "Moon Role Study",
+                "description": "A no-replay curated ExperimentPack.",
+                "hypothesis_id": "moon_role_study",
+                "experiment_id": "1",
+                "public_slug": "moon-role-study",
+                "enabled": True,
+            }
+        ],
+        download_base_url="https://github.com/XiaoLuoLYG/GOD/releases/download/public-site-packs/",
+    )
+
+    manifest = json.loads(output_root.joinpath("experiments", "moon-role-study", "experiment.json").read_text())
+    assert manifest["downloads"][0]["href"] == (
+        "https://github.com/XiaoLuoLYG/GOD/releases/download/public-site-packs/"
+        "moon-role-study-experiment-pack.zip"
+    )
+
+
 def _write_map_package(package_root: Path) -> Path:
     package_root.mkdir(parents=True)
+    downloads = package_root / "downloads"
+    downloads.mkdir()
+    downloads.joinpath("stale-map-pack.zip").write_bytes(b"stale nested archive")
     visuals = package_root / "visuals"
     visuals.mkdir()
     characters = package_root / "characters"

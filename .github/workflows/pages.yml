@@ -42,6 +42,24 @@ jobs:
           cp -R docs/site/. _site/
           sphinx-build -W -b html docs/developer _site/developer
 
+      - name: Guard release asset boundary
+        run: |
+          set -euo pipefail
+          banned="$(
+            find _site/public-data \( \
+              -path '*/downloads/*' -o \
+              -path '*/map-packs/*/assets/*' -o \
+              -path '*/map-packs/*/characters/*' -o \
+              -path '*/map-packs/*/location-assets/*' -o \
+              -name '*.zip' \
+            \) -print 2>/dev/null | head -50
+          )"
+          if [[ -n "${banned}" ]]; then
+            echo "Large public pack assets must be uploaded as GitHub Release assets, not deployed from Git:"
+            echo "${banned}"
+            exit 1
+          fi
+
       - name: Configure Pages
         uses: actions/configure-pages@v6
 

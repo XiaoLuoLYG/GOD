@@ -1,0 +1,136 @@
+schema_version: 1
+pack_id: idol-rift-variety-cast
+display_name: 女团峡谷生存综艺 Cast
+agents:
+- id: '1'
+  name: 张元英
+  profile_path: agents/1/profile.json
+  runtime_path: agents/1/runtime.json
+  sprite:
+    path: characters/Agent_01_张元英.png
+    frame_width: 32
+    frame_height: 32
+- id: '2'
+  name: 柳智敏
+  profile_path: agents/2/profile.json
+  runtime_path: agents/2/runtime.json
+  sprite:
+    path: characters/Agent_02_柳智敏.png
+    frame_width: 32
+    frame_height: 32
+- id: '3'
+  name: Jisoo
+  profile_path: agents/3/profile.json
+  runtime_path: agents/3/runtime.json
+  sprite:
+    path: characters/Agent_03_Jisoo.png
+    frame_width: 32
+    frame_height: 32
+- id: '4'
+  name: Jennie
+  profile_path: agents/4/profile.json
+  runtime_path: agents/4/runtime.json
+  sprite:
+    path: characters/Agent_04_Jennie.png
+    frame_width: 32
+    frame_height: 32
+- id: '5'
+  name: Rosé
+  profile_path: agents/5/profile.json
+  runtime_path: agents/5/runtime.json
+  sprite:
+    path: characters/Agent_05_Rosé.png
+    frame_width: 32
+    frame_height: 32
+- id: '6'
+  name: Lisa
+  profile_path: agents/6/profile.json
+  runtime_path: agents/6/runtime.json
+  sprite:
+    path: characters/Agent_06_Lisa.png
+    frame_width: 32
+    frame_height: 32
+- id: '7'
+  name: Faker
+  profile_path: agents/7/profile.json
+  runtime_path: agents/7/runtime.json
+  sprite:
+    path: characters/Agent_07_Faker.png
+    frame_width: 32
+    frame_height: 32
+- id: '8'
+  name: Keria
+  profile_path: agents/8/profile.json
+  runtime_path: agents/8/runtime.json
+  sprite:
+    path: characters/Agent_08_Keria.png
+    frame_width: 32
+    frame_height: 32
+- id: '9'
+  name: Oner
+  profile_path: agents/9/profile.json
+  runtime_path: agents/9/runtime.json
+  sprite:
+    path: characters/Agent_09_Oner.png
+    frame_width: 32
+    frame_height: 32
+- id: '10'
+  name: Zeus
+  profile_path: agents/10/profile.json
+  runtime_path: agents/10/runtime.json
+  sprite:
+    path: characters/Agent_10_Zeus.png
+    frame_width: 32
+    frame_height: 32
+- id: '11'
+  name: 节目 PD
+  profile_path: agents/11/profile.json
+  runtime_path: agents/11/runtime.json
+  sprite:
+    path: characters/Agent_11_节目_PD.png
+    frame_width: 32
+    frame_height: 32
+- id: '12'
+  name: 解说 Mina
+  profile_path: agents/12/profile.json
+  runtime_path: agents/12/runtime.json
+  sprite:
+    path: characters/Agent_12_解说_Mina.png
+    frame_width: 32
+    frame_height: 32
+- id: '13'
+  name: 粉丝站长
+  profile_path: agents/13/profile.json
+  runtime_path: agents/13/runtime.json
+  sprite:
+    path: characters/Agent_13_粉丝站长.png
+    frame_width: 32
+    frame_height: 32
+- id: '14'
+  name: 黑粉账号
+  profile_path: agents/14/profile.json
+  runtime_path: agents/14/runtime.json
+  sprite:
+    path: characters/Agent_14_黑粉账号.png
+    frame_width: 32
+    frame_height: 32
+- id: '15'
+  name: 剪辑师
+  profile_path: agents/15/profile.json
+  runtime_path: agents/15/runtime.json
+  sprite:
+    path: characters/Agent_15_剪辑师.png
+    frame_width: 32
+    frame_height: 32
+- id: '16'
+  name: 品牌协调人
+  profile_path: agents/16/profile.json
+  runtime_path: agents/16/runtime.json
+  sprite:
+    path: characters/Agent_16_品牌协调人.png
+    frame_width: 32
+    frame_height: 32
+downloads:
+- type: agent
+  label: Agent pack
+  href: https://github.com/XiaoLuoLYG/GOD/releases/download/public-site-packs/idol-rift-variety-cast-agent-pack.zip

@@ -181,4 +181,4 @@ agents:
 downloads:
 - type: agent
   label: Agent pack
-  href: downloads/pku-campus-cast-agent-pack.zip
+  href: https://github.com/XiaoLuoLYG/GOD/releases/download/public-site-packs/pku-campus-cast-agent-pack.zip

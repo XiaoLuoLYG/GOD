@@ -6,6 +6,14 @@
 .god/
 .live/
 
+# Public site download assets are published to GitHub Releases, not Git.
+docs/site/public-data/**/*.zip
+docs/site/public-data/**/downloads/
+docs/site/public-data/map-packs/*/assets/
+docs/site/public-data/map-packs/*/characters/
+docs/site/public-data/map-packs/*/location-assets/
+docs/site/public-data/map-packs/*/tiled-map.json
+
 # Python
 .venv/
 __pycache__/

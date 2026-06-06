@@ -1,1 +1,1803 @@
-[{"schema_version":1,"pack_id":"jiuwen-town-residents","display_name":"jiuwen-town-residents","agents":[{"id":"1","name":"Jiuwen Alice","profile_path":"agents/1/profile.json","runtime_path":"agents/1/runtime.json","sprite":{"path":"characters/Abigail_Chen.png","frame_width":32,"frame_height":32}},{"id":"2","name":"Jiuwen Bob","profile_path":"agents/2/profile.json","runtime_path":"agents/2/runtime.json","sprite":{"path":"characters/Adam_Smith.png","frame_width":32,"frame_height":32}},{"id":"3","name":"Jiuwen Charlie","profile_path":"agents/3/profile.json","runtime_path":"agents/3/runtime.json","sprite":{"path":"characters/Arthur_Burton.png","frame_width":32,"frame_height":32}},{"id":"4","name":"Jiuwen Dana","profile_path":"agents/4/profile.json","runtime_path":"agents/4/runtime.json","sprite":{"path":"characters/Ayesha_Khan.png","frame_width":32,"frame_height":32}},{"id":"5","name":"Jiuwen Elena","profile_path":"agents/5/profile.json","runtime_path":"agents/5/runtime.json","sprite":{"path":"characters/Carlos_Gomez.png","frame_width":32,"frame_height":32}},{"id":"6","name":"Jiuwen Farah","profile_path":"agents/6/profile.json","runtime_path":"agents/6/runtime.json","sprite":{"path":"characters/Carmen_Ortiz.png","frame_width":32,"frame_height":32}},{"id":"7","name":"Jiuwen George","profile_path":"agents/7/profile.json","runtime_path":"agents/7/runtime.json","sprite":{"path":"characters/Eddy_Lin.png","frame_width":32,"frame_height":32}},{"id":"8","name":"Jiuwen Hana","profile_path":"agents/8/profile.json","runtime_path":"agents/8/runtime.json","sprite":{"path":"characters/Francisco_Lopez.png","frame_width":32,"frame_height":32}},{"id":"9","name":"Jiuwen Ivan","profile_path":"agents/9/profile.json","runtime_path":"agents/9/runtime.json","sprite":{"path":"characters/Giorgio_Rossi.png","frame_width":32,"frame_height":32}},{"id":"10","name":"Jiuwen Mei","profile_path":"agents/10/profile.json","runtime_path":"agents/10/runtime.json","sprite":{"path":"characters/Hailey_Johnson.png","frame_width":32,"frame_height":32}}],"downloads":[{"type":"agent","label":"Agent pack","href":"downloads/jiuwen-town-residents-agent-pack.zip"}]},{"schema_version":1,"pack_id":"pku-campus-cast","display_name":"pku-campus-cast","agents":[{"id":"1","name":"罗同学","profile_path":"agents/1/profile.json","runtime_path":"agents/1/runtime.json","sprite":{"path":"characters/PKU_Agent_01.png","frame_width":32,"frame_height":32}},{"id":"2","name":"王助教","profile_path":"agents/2/profile.json","runtime_path":"agents/2/runtime.json","sprite":{"path":"characters/PKU_Agent_02.png","frame_width":32,"frame_height":32}},{"id":"3","name":"李同学","profile_path":"agents/3/profile.json","runtime_path":"agents/3/runtime.json","sprite":{"path":"characters/PKU_Agent_03.png","frame_width":32,"frame_height":32}},{"id":"4","name":"陈老师","profile_path":"agents/4/profile.json","runtime_path":"agents/4/runtime.json","sprite":{"path":"characters/PKU_Agent_04.png","frame_width":32,"frame_height":32}},{"id":"5","name":"张老师","profile_path":"agents/5/profile.json","runtime_path":"agents/5/runtime.json","sprite":{"path":"characters/PKU_Agent_05.png","frame_width":32,"frame_height":32}},{"id":"6","name":"周老师","profile_path":"agents/6/profile.json","runtime_path":"agents/6/runtime.json","sprite":{"path":"characters/PKU_Agent_06.png","frame_width":32,"frame_height":32}},{"id":"7","name":"赵校友","profile_path":"agents/7/profile.json","runtime_path":"agents/7/runtime.json","sprite":{"path":"characters/PKU_Agent_07.png","frame_width":32,"frame_height":32}},{"id":"8","name":"刘阿姨","profile_path":"agents/8/profile.json","runtime_path":"agents/8/runtime.json","sprite":{"path":"characters/PKU_Agent_08.png","frame_width":32,"frame_height":32}},{"id":"9","name":"王同学","profile_path":"agents/9/profile.json","runtime_path":"agents/9/runtime.json","sprite":{"path":"characters/PKU_Agent_09.png","frame_width":32,"frame_height":32}},{"id":"10","name":"孙同学","profile_path":"agents/10/profile.json","runtime_path":"agents/10/runtime.json","sprite":{"path":"characters/PKU_Agent_10.png","frame_width":32,"frame_height":32}},{"id":"11","name":"何同学","profile_path":"agents/11/profile.json","runtime_path":"agents/11/runtime.json","sprite":{"path":"characters/PKU_Agent_11.png","frame_width":32,"frame_height":32}},{"id":"12","name":"林记者","profile_path":"agents/12/profile.json","runtime_path":"agents/12/runtime.json","sprite":{"path":"characters/PKU_Agent_12.png","frame_width":32,"frame_height":32}},{"id":"13","name":"郑同学","profile_path":"agents/13/profile.json","runtime_path":"agents/13/runtime.json","sprite":{"path":"characters/PKU_Agent_13.png","frame_width":32,"frame_height":32}},{"id":"14","name":"沈同学","profile_path":"agents/14/profile.json","runtime_path":"agents/14/runtime.json","sprite":{"path":"characters/PKU_Agent_14.png","frame_width":32,"frame_height":32}},{"id":"15","name":"陈同学","profile_path":"agents/15/profile.json","runtime_path":"agents/15/runtime.json","sprite":{"path":"characters/PKU_Agent_15.png","frame_width":32,"frame_height":32}},{"id":"16","name":"梁同学","profile_path":"agents/16/profile.json","runtime_path":"agents/16/runtime.json","sprite":{"path":"characters/PKU_Agent_16.png","frame_width":32,"frame_height":32}},{"id":"17","name":"马同学","profile_path":"agents/17/profile.json","runtime_path":"agents/17/runtime.json","sprite":{"path":"characters/PKU_Agent_17.png","frame_width":32,"frame_height":32}},{"id":"18","name":"刘同学","profile_path":"agents/18/profile.json","runtime_path":"agents/18/runtime.json","sprite":{"path":"characters/PKU_Agent_18.png","frame_width":32,"frame_height":32}},{"id":"19","name":"Donald Trump","profile_path":"agents/19/profile.json","runtime_path":"agents/19/runtime.json","sprite":{"path":"characters/PKU_Agent_19_Donald_Trump.png","frame_width":32,"frame_height":32}},{"id":"20","name":"Elon Musk","profile_path":"agents/20/profile.json","runtime_path":"agents/20/runtime.json","sprite":{"path":"characters/PKU_Agent_20_Elon_Musk.png","frame_width":32,"frame_height":32}},{"id":"21","name":"Jensen Huang","profile_path":"agents/21/profile.json","runtime_path":"agents/21/runtime.json","sprite":{"path":"characters/PKU_Agent_21_Jensen_Huang.png","frame_width":32,"frame_height":32}},{"id":"22","name":"王协调员","profile_path":"agents/22/profile.json","runtime_path":"agents/22/runtime.json","sprite":{"path":"characters/PKU_Agent_22_Coordinator.png","frame_width":32,"frame_height":32}}],"downloads":[{"type":"agent","label":"Agent pack","href":"downloads/pku-campus-cast-agent-pack.zip"}]}]
+[
+  {
+    "schema_version": 1,
+    "pack_id": "empty-city-gate-cast",
+    "display_name": "After the Empty City Gate Opens Cast",
+    "agents": [
+      {
+        "id": "1",
+        "name": "诸葛亮",
+        "profile_path": "agents/1/profile.json",
+        "runtime_path": "agents/1/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_01_诸葛亮.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "2",
+        "name": "司马懿",
+        "profile_path": "agents/2/profile.json",
+        "runtime_path": "agents/2/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_02_司马懿.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "3",
+        "name": "姜维",
+        "profile_path": "agents/3/profile.json",
+        "runtime_path": "agents/3/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_03_姜维.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "4",
+        "name": "老军侯",
+        "profile_path": "agents/4/profile.json",
+        "runtime_path": "agents/4/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_04_老军侯.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "5",
+        "name": "魏先锋校尉",
+        "profile_path": "agents/5/profile.json",
+        "runtime_path": "agents/5/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_05_魏先锋校尉.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "6",
+        "name": "魏斥候",
+        "profile_path": "agents/6/profile.json",
+        "runtime_path": "agents/6/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_06_魏斥候.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "7",
+        "name": "传令兵阿青",
+        "profile_path": "agents/7/profile.json",
+        "runtime_path": "agents/7/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_07_传令兵阿青.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "8",
+        "name": "主和士绅",
+        "profile_path": "agents/8/profile.json",
+        "runtime_path": "agents/8/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_08_主和士绅.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "9",
+        "name": "死守队长",
+        "profile_path": "agents/9/profile.json",
+        "runtime_path": "agents/9/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_09_死守队长.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "10",
+        "name": "织布妇",
+        "profile_path": "agents/10/profile.json",
+        "runtime_path": "agents/10/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_10_织布妇.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "11",
+        "name": "伤兵小赵",
+        "profile_path": "agents/11/profile.json",
+        "runtime_path": "agents/11/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_11_伤兵小赵.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "12",
+        "name": "粮仓管事",
+        "profile_path": "agents/12/profile.json",
+        "runtime_path": "agents/12/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_12_粮仓管事.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "13",
+        "name": "隐蔽鼓手",
+        "profile_path": "agents/13/profile.json",
+        "runtime_path": "agents/13/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_13_隐蔽鼓手.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      }
+    ],
+    "downloads": [
+      {
+        "type": "agent",
+        "label": "Agent pack",
+        "href": "https://github.com/XiaoLuoLYG/GOD/releases/download/public-site-packs/empty-city-gate-cast-agent-pack.zip"
+      }
+    ],
+    "summary": "13 scenario-specific agents with profiles and sprites.",
+    "localized": {
+      "en": {
+        "display_name": "After the Empty City Gate Opens Cast",
+        "summary": "13 scenario-specific agents with profiles and sprites."
+      },
+      "zh": {
+        "display_name": "空城门开之后角色包",
+        "summary": "13 个场景专属角色，包含档案和 sprite。"
+      }
+    }
+  },
+  {
+    "schema_version": 1,
+    "pack_id": "fuji-ash-town-cast",
+    "display_name": "Fuji Ashfall Town Cast",
+    "agents": [
+      {
+        "id": "1",
+        "name": "森田镇长",
+        "profile_path": "agents/1/profile.json",
+        "runtime_path": "agents/1/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_01_森田镇长.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "2",
+        "name": "小林真由",
+        "profile_path": "agents/2/profile.json",
+        "runtime_path": "agents/2/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_02_小林真由.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "3",
+        "name": "佐藤老师",
+        "profile_path": "agents/3/profile.json",
+        "runtime_path": "agents/3/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_03_佐藤老师.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "4",
+        "name": "中村队长",
+        "profile_path": "agents/4/profile.json",
+        "runtime_path": "agents/4/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_04_中村队长.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "5",
+        "name": "高桥医生",
+        "profile_path": "agents/5/profile.json",
+        "runtime_path": "agents/5/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_05_高桥医生.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "6",
+        "name": "山口奶奶",
+        "profile_path": "agents/6/profile.json",
+        "runtime_path": "agents/6/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_06_山口奶奶.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "7",
+        "name": "艾米",
+        "profile_path": "agents/7/profile.json",
+        "runtime_path": "agents/7/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_07_艾米.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "8",
+        "name": "丹尼尔",
+        "profile_path": "agents/8/profile.json",
+        "runtime_path": "agents/8/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_08_丹尼尔.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "9",
+        "name": "莉娜",
+        "profile_path": "agents/9/profile.json",
+        "runtime_path": "agents/9/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_09_莉娜.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "10",
+        "name": "青木莲",
+        "profile_path": "agents/10/profile.json",
+        "runtime_path": "agents/10/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_10_青木莲.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "11",
+        "name": "白石巡查",
+        "profile_path": "agents/11/profile.json",
+        "runtime_path": "agents/11/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_11_白石巡查.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "12",
+        "name": "远藤技师",
+        "profile_path": "agents/12/profile.json",
+        "runtime_path": "agents/12/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_12_远藤技师.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "13",
+        "name": "藤原遥",
+        "profile_path": "agents/13/profile.json",
+        "runtime_path": "agents/13/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_13_藤原遥.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "14",
+        "name": "清水面包师",
+        "profile_path": "agents/14/profile.json",
+        "runtime_path": "agents/14/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_14_清水面包师.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      }
+    ],
+    "downloads": [
+      {
+        "type": "agent",
+        "label": "Agent pack",
+        "href": "https://github.com/XiaoLuoLYG/GOD/releases/download/public-site-packs/fuji-ash-town-cast-agent-pack.zip"
+      }
+    ],
+    "summary": "14 scenario-specific agents with profiles and sprites.",
+    "localized": {
+      "en": {
+        "display_name": "Fuji Ashfall Town Cast",
+        "summary": "14 scenario-specific agents with profiles and sprites."
+      },
+      "zh": {
+        "display_name": "富士山灰落小镇角色包",
+        "summary": "14 个场景专属角色，包含档案和 sprite。"
+      }
+    }
+  },
+  {
+    "schema_version": 1,
+    "pack_id": "gaokao-blackout-cast",
+    "display_name": "Citywide Blackout Before Gaokao Cast",
+    "agents": [
+      {
+        "id": "1",
+        "name": "林予",
+        "profile_path": "agents/1/profile.json",
+        "runtime_path": "agents/1/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_01_林予.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "2",
+        "name": "陈老师",
+        "profile_path": "agents/2/profile.json",
+        "runtime_path": "agents/2/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_02_陈老师.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "3",
+        "name": "王妈妈",
+        "profile_path": "agents/3/profile.json",
+        "runtime_path": "agents/3/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_03_王妈妈.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "4",
+        "name": "王辰",
+        "profile_path": "agents/4/profile.json",
+        "runtime_path": "agents/4/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_04_王辰.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "5",
+        "name": "酒店老板老赵",
+        "profile_path": "agents/5/profile.json",
+        "runtime_path": "agents/5/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_05_酒店老板老赵.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "6",
+        "name": "交警小许",
+        "profile_path": "agents/6/profile.json",
+        "runtime_path": "agents/6/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_06_交警小许.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "7",
+        "name": "电力队长马工",
+        "profile_path": "agents/7/profile.json",
+        "runtime_path": "agents/7/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_07_电力队长马工.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "8",
+        "name": "教育局周科长",
+        "profile_path": "agents/8/profile.json",
+        "runtime_path": "agents/8/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_08_教育局周科长.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "9",
+        "name": "自媒体号风向标",
+        "profile_path": "agents/9/profile.json",
+        "runtime_path": "agents/9/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_09_自媒体号风向标.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "10",
+        "name": "打印店阿姨",
+        "profile_path": "agents/10/profile.json",
+        "runtime_path": "agents/10/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_10_打印店阿姨.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "11",
+        "name": "住校生阿哲",
+        "profile_path": "agents/11/profile.json",
+        "runtime_path": "agents/11/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_11_住校生阿哲.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "12",
+        "name": "邻居爷爷",
+        "profile_path": "agents/12/profile.json",
+        "runtime_path": "agents/12/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_12_邻居爷爷.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "13",
+        "name": "巡考老师杜敏",
+        "profile_path": "agents/13/profile.json",
+        "runtime_path": "agents/13/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_13_巡考老师杜敏.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "14",
+        "name": "出租车司机胖刘",
+        "profile_path": "agents/14/profile.json",
+        "runtime_path": "agents/14/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_14_出租车司机胖刘.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      }
+    ],
+    "downloads": [
+      {
+        "type": "agent",
+        "label": "Agent pack",
+        "href": "https://github.com/XiaoLuoLYG/GOD/releases/download/public-site-packs/gaokao-blackout-cast-agent-pack.zip"
+      }
+    ],
+    "summary": "14 scenario-specific agents with profiles and sprites.",
+    "localized": {
+      "en": {
+        "display_name": "Citywide Blackout Before Gaokao Cast",
+        "summary": "14 scenario-specific agents with profiles and sprites."
+      },
+      "zh": {
+        "display_name": "高考前夜全城停电角色包",
+        "summary": "14 个场景专属角色，包含档案和 sprite。"
+      }
+    }
+  },
+  {
+    "schema_version": 1,
+    "pack_id": "hogwarts-parent-meeting-cast",
+    "display_name": "Hogwarts Parent Meeting Cast",
+    "agents": [
+      {
+        "id": "1",
+        "name": "林小舟",
+        "profile_path": "agents/1/profile.json",
+        "runtime_path": "agents/1/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_01_林小舟.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "2",
+        "name": "林妈妈",
+        "profile_path": "agents/2/profile.json",
+        "runtime_path": "agents/2/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_02_林妈妈.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "3",
+        "name": "格雷家长",
+        "profile_path": "agents/3/profile.json",
+        "runtime_path": "agents/3/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_03_格雷家长.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "4",
+        "name": "艾达教授",
+        "profile_path": "agents/4/profile.json",
+        "runtime_path": "agents/4/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_04_艾达教授.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "5",
+        "name": "伯恩教授",
+        "profile_path": "agents/5/profile.json",
+        "runtime_path": "agents/5/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_05_伯恩教授.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "6",
+        "name": "校董罗威尔",
+        "profile_path": "agents/6/profile.json",
+        "runtime_path": "agents/6/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_06_校董罗威尔.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "7",
+        "name": "校医梅芙",
+        "profile_path": "agents/7/profile.json",
+        "runtime_path": "agents/7/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_07_校医梅芙.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "8",
+        "name": "校报记者诺拉",
+        "profile_path": "agents/8/profile.json",
+        "runtime_path": "agents/8/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_08_校报记者诺拉.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "9",
+        "name": "家长会主持人",
+        "profile_path": "agents/9/profile.json",
+        "runtime_path": "agents/9/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_09_家长会主持人.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "10",
+        "name": "麻瓜父亲 David",
+        "profile_path": "agents/10/profile.json",
+        "runtime_path": "agents/10/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_10_麻瓜父亲_David.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "11",
+        "name": "纯血学生艾文",
+        "profile_path": "agents/11/profile.json",
+        "runtime_path": "agents/11/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_11_纯血学生艾文.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "12",
+        "name": "学生社团会长米拉",
+        "profile_path": "agents/12/profile.json",
+        "runtime_path": "agents/12/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_12_学生社团会长米拉.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "13",
+        "name": "猫头鹰管理员",
+        "profile_path": "agents/13/profile.json",
+        "runtime_path": "agents/13/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_13_猫头鹰管理员.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "14",
+        "name": "画像门卫",
+        "profile_path": "agents/14/profile.json",
+        "runtime_path": "agents/14/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_14_画像门卫.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      }
+    ],
+    "downloads": [
+      {
+        "type": "agent",
+        "label": "Agent pack",
+        "href": "https://github.com/XiaoLuoLYG/GOD/releases/download/public-site-packs/hogwarts-parent-meeting-cast-agent-pack.zip"
+      }
+    ],
+    "summary": "14 scenario-specific agents with profiles and sprites.",
+    "localized": {
+      "en": {
+        "display_name": "Hogwarts Parent Meeting Cast",
+        "summary": "14 scenario-specific agents with profiles and sprites."
+      },
+      "zh": {
+        "display_name": "霍格沃茨开家长会角色包",
+        "summary": "14 个场景专属角色，包含档案和 sprite。"
+      }
+    }
+  },
+  {
+    "schema_version": 1,
+    "pack_id": "idol-rift-variety-cast",
+    "display_name": "Idol Rift Variety Show Cast",
+    "agents": [
+      {
+        "id": "1",
+        "name": "张元英",
+        "profile_path": "agents/1/profile.json",
+        "runtime_path": "agents/1/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_01_张元英.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "2",
+        "name": "柳智敏",
+        "profile_path": "agents/2/profile.json",
+        "runtime_path": "agents/2/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_02_柳智敏.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "3",
+        "name": "Jisoo",
+        "profile_path": "agents/3/profile.json",
+        "runtime_path": "agents/3/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_03_Jisoo.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "4",
+        "name": "Jennie",
+        "profile_path": "agents/4/profile.json",
+        "runtime_path": "agents/4/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_04_Jennie.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "5",
+        "name": "Rosé",
+        "profile_path": "agents/5/profile.json",
+        "runtime_path": "agents/5/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_05_Rosé.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "6",
+        "name": "Lisa",
+        "profile_path": "agents/6/profile.json",
+        "runtime_path": "agents/6/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_06_Lisa.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "7",
+        "name": "Faker",
+        "profile_path": "agents/7/profile.json",
+        "runtime_path": "agents/7/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_07_Faker.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "8",
+        "name": "Keria",
+        "profile_path": "agents/8/profile.json",
+        "runtime_path": "agents/8/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_08_Keria.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "9",
+        "name": "Oner",
+        "profile_path": "agents/9/profile.json",
+        "runtime_path": "agents/9/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_09_Oner.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "10",
+        "name": "Zeus",
+        "profile_path": "agents/10/profile.json",
+        "runtime_path": "agents/10/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_10_Zeus.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "11",
+        "name": "节目 PD",
+        "profile_path": "agents/11/profile.json",
+        "runtime_path": "agents/11/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_11_节目_PD.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "12",
+        "name": "解说 Mina",
+        "profile_path": "agents/12/profile.json",
+        "runtime_path": "agents/12/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_12_解说_Mina.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "13",
+        "name": "粉丝站长",
+        "profile_path": "agents/13/profile.json",
+        "runtime_path": "agents/13/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_13_粉丝站长.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "14",
+        "name": "黑粉账号",
+        "profile_path": "agents/14/profile.json",
+        "runtime_path": "agents/14/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_14_黑粉账号.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "15",
+        "name": "剪辑师",
+        "profile_path": "agents/15/profile.json",
+        "runtime_path": "agents/15/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_15_剪辑师.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "16",
+        "name": "品牌协调人",
+        "profile_path": "agents/16/profile.json",
+        "runtime_path": "agents/16/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_16_品牌协调人.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      }
+    ],
+    "downloads": [
+      {
+        "type": "agent",
+        "label": "Agent pack",
+        "href": "https://github.com/XiaoLuoLYG/GOD/releases/download/public-site-packs/idol-rift-variety-cast-agent-pack.zip"
+      }
+    ],
+    "summary": "16 scenario-specific agents with profiles and sprites.",
+    "localized": {
+      "en": {
+        "display_name": "Idol Rift Variety Show Cast",
+        "summary": "16 scenario-specific agents with profiles and sprites."
+      },
+      "zh": {
+        "display_name": "女团峡谷生存综艺角色包",
+        "summary": "16 个场景专属角色，包含档案和 sprite。"
+      }
+    }
+  },
+  {
+    "schema_version": 1,
+    "pack_id": "jiuwen-town-residents",
+    "display_name": "Jiuwen Town Residents",
+    "agents": [
+      {
+        "id": "1",
+        "name": "Jiuwen Alice",
+        "profile_path": "agents/1/profile.json",
+        "runtime_path": "agents/1/runtime.json",
+        "sprite": {
+          "path": "characters/Abigail_Chen.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "2",
+        "name": "Jiuwen Bob",
+        "profile_path": "agents/2/profile.json",
+        "runtime_path": "agents/2/runtime.json",
+        "sprite": {
+          "path": "characters/Adam_Smith.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "3",
+        "name": "Jiuwen Charlie",
+        "profile_path": "agents/3/profile.json",
+        "runtime_path": "agents/3/runtime.json",
+        "sprite": {
+          "path": "characters/Arthur_Burton.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "4",
+        "name": "Jiuwen Dana",
+        "profile_path": "agents/4/profile.json",
+        "runtime_path": "agents/4/runtime.json",
+        "sprite": {
+          "path": "characters/Ayesha_Khan.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "5",
+        "name": "Jiuwen Elena",
+        "profile_path": "agents/5/profile.json",
+        "runtime_path": "agents/5/runtime.json",
+        "sprite": {
+          "path": "characters/Carlos_Gomez.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "6",
+        "name": "Jiuwen Farah",
+        "profile_path": "agents/6/profile.json",
+        "runtime_path": "agents/6/runtime.json",
+        "sprite": {
+          "path": "characters/Carmen_Ortiz.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "7",
+        "name": "Jiuwen George",
+        "profile_path": "agents/7/profile.json",
+        "runtime_path": "agents/7/runtime.json",
+        "sprite": {
+          "path": "characters/Eddy_Lin.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "8",
+        "name": "Jiuwen Hana",
+        "profile_path": "agents/8/profile.json",
+        "runtime_path": "agents/8/runtime.json",
+        "sprite": {
+          "path": "characters/Francisco_Lopez.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "9",
+        "name": "Jiuwen Ivan",
+        "profile_path": "agents/9/profile.json",
+        "runtime_path": "agents/9/runtime.json",
+        "sprite": {
+          "path": "characters/Giorgio_Rossi.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "10",
+        "name": "Jiuwen Mei",
+        "profile_path": "agents/10/profile.json",
+        "runtime_path": "agents/10/runtime.json",
+        "sprite": {
+          "path": "characters/Hailey_Johnson.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      }
+    ],
+    "downloads": [
+      {
+        "type": "agent",
+        "label": "Agent pack",
+        "href": "https://github.com/XiaoLuoLYG/GOD/releases/download/public-site-packs/jiuwen-town-residents-agent-pack.zip"
+      }
+    ],
+    "summary": "10 scenario-specific agents with profiles and sprites.",
+    "localized": {
+      "en": {
+        "display_name": "Jiuwen Town Residents",
+        "summary": "10 scenario-specific agents with profiles and sprites."
+      },
+      "zh": {
+        "display_name": "九问小镇居民",
+        "summary": "10 个场景专属角色，包含档案和 sprite。"
+      }
+    }
+  },
+  {
+    "schema_version": 1,
+    "pack_id": "lunar-condo-hoa-cast",
+    "display_name": "Lunar Condo HOA Chat Cast",
+    "agents": [
+      {
+        "id": "1",
+        "name": "梁管理员",
+        "profile_path": "agents/1/profile.json",
+        "runtime_path": "agents/1/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_01_梁管理员.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "2",
+        "name": "程工程师",
+        "profile_path": "agents/2/profile.json",
+        "runtime_path": "agents/2/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_02_程工程师.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "3",
+        "name": "顾医生",
+        "profile_path": "agents/3/profile.json",
+        "runtime_path": "agents/3/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_03_顾医生.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "4",
+        "name": "周妈妈",
+        "profile_path": "agents/4/profile.json",
+        "runtime_path": "agents/4/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_04_周妈妈.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "5",
+        "name": "小周",
+        "profile_path": "agents/5/profile.json",
+        "runtime_path": "agents/5/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_05_小周.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "6",
+        "name": "秦赞助人",
+        "profile_path": "agents/6/profile.json",
+        "runtime_path": "agents/6/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_06_秦赞助人.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "7",
+        "name": "地球指挥官 Nora",
+        "profile_path": "agents/7/profile.json",
+        "runtime_path": "agents/7/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_07_地球指挥官_Nora.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "8",
+        "name": "AI 管家 Luna",
+        "profile_path": "agents/8/profile.json",
+        "runtime_path": "agents/8/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_08_AI_管家_Luna.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "9",
+        "name": "宠物仓鼠豆豆",
+        "profile_path": "agents/9/profile.json",
+        "runtime_path": "agents/9/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_09_宠物仓鼠豆豆.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "10",
+        "name": "安保员老韩",
+        "profile_path": "agents/10/profile.json",
+        "runtime_path": "agents/10/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_10_安保员老韩.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "11",
+        "name": "厨师阿麦",
+        "profile_path": "agents/11/profile.json",
+        "runtime_path": "agents/11/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_11_厨师阿麦.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "12",
+        "name": "心理顾问叶安",
+        "profile_path": "agents/12/profile.json",
+        "runtime_path": "agents/12/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_12_心理顾问叶安.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      }
+    ],
+    "downloads": [
+      {
+        "type": "agent",
+        "label": "Agent pack",
+        "href": "https://github.com/XiaoLuoLYG/GOD/releases/download/public-site-packs/lunar-condo-hoa-cast-agent-pack.zip"
+      }
+    ],
+    "summary": "12 scenario-specific agents with profiles and sprites.",
+    "localized": {
+      "en": {
+        "display_name": "Lunar Condo HOA Chat Cast",
+        "summary": "12 scenario-specific agents with profiles and sprites."
+      },
+      "zh": {
+        "display_name": "月球小区业主群角色包",
+        "summary": "12 个场景专属角色，包含档案和 sprite。"
+      }
+    }
+  },
+  {
+    "schema_version": 1,
+    "pack_id": "pku-campus-cast",
+    "display_name": "PKU Campus Cast",
+    "agents": [
+      {
+        "id": "1",
+        "name": "罗同学",
+        "profile_path": "agents/1/profile.json",
+        "runtime_path": "agents/1/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_01.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "2",
+        "name": "王助教",
+        "profile_path": "agents/2/profile.json",
+        "runtime_path": "agents/2/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_02.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "3",
+        "name": "李同学",
+        "profile_path": "agents/3/profile.json",
+        "runtime_path": "agents/3/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_03.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "4",
+        "name": "陈老师",
+        "profile_path": "agents/4/profile.json",
+        "runtime_path": "agents/4/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_04.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "5",
+        "name": "张老师",
+        "profile_path": "agents/5/profile.json",
+        "runtime_path": "agents/5/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_05.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "6",
+        "name": "周老师",
+        "profile_path": "agents/6/profile.json",
+        "runtime_path": "agents/6/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_06.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "7",
+        "name": "赵校友",
+        "profile_path": "agents/7/profile.json",
+        "runtime_path": "agents/7/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_07.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "8",
+        "name": "刘阿姨",
+        "profile_path": "agents/8/profile.json",
+        "runtime_path": "agents/8/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_08.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "9",
+        "name": "王同学",
+        "profile_path": "agents/9/profile.json",
+        "runtime_path": "agents/9/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_09.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "10",
+        "name": "孙同学",
+        "profile_path": "agents/10/profile.json",
+        "runtime_path": "agents/10/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_10.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "11",
+        "name": "何同学",
+        "profile_path": "agents/11/profile.json",
+        "runtime_path": "agents/11/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_11.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "12",
+        "name": "林记者",
+        "profile_path": "agents/12/profile.json",
+        "runtime_path": "agents/12/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_12.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "13",
+        "name": "郑同学",
+        "profile_path": "agents/13/profile.json",
+        "runtime_path": "agents/13/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_13.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "14",
+        "name": "沈同学",
+        "profile_path": "agents/14/profile.json",
+        "runtime_path": "agents/14/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_14.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "15",
+        "name": "陈同学",
+        "profile_path": "agents/15/profile.json",
+        "runtime_path": "agents/15/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_15.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "16",
+        "name": "梁同学",
+        "profile_path": "agents/16/profile.json",
+        "runtime_path": "agents/16/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_16.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "17",
+        "name": "马同学",
+        "profile_path": "agents/17/profile.json",
+        "runtime_path": "agents/17/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_17.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "18",
+        "name": "刘同学",
+        "profile_path": "agents/18/profile.json",
+        "runtime_path": "agents/18/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_18.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "19",
+        "name": "Donald Trump",
+        "profile_path": "agents/19/profile.json",
+        "runtime_path": "agents/19/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_19_Donald_Trump.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "20",
+        "name": "Elon Musk",
+        "profile_path": "agents/20/profile.json",
+        "runtime_path": "agents/20/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_20_Elon_Musk.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "21",
+        "name": "Jensen Huang",
+        "profile_path": "agents/21/profile.json",
+        "runtime_path": "agents/21/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_21_Jensen_Huang.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "22",
+        "name": "王协调员",
+        "profile_path": "agents/22/profile.json",
+        "runtime_path": "agents/22/runtime.json",
+        "sprite": {
+          "path": "characters/PKU_Agent_22_Coordinator.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      }
+    ],
+    "downloads": [
+      {
+        "type": "agent",
+        "label": "Agent pack",
+        "href": "https://github.com/XiaoLuoLYG/GOD/releases/download/public-site-packs/pku-campus-cast-agent-pack.zip"
+      }
+    ],
+    "summary": "22 scenario-specific agents with profiles and sprites.",
+    "localized": {
+      "en": {
+        "display_name": "PKU Campus Cast",
+        "summary": "22 scenario-specific agents with profiles and sprites."
+      },
+      "zh": {
+        "display_name": "北大校园角色包",
+        "summary": "22 个场景专属角色，包含档案和 sprite。"
+      }
+    }
+  },
+  {
+    "schema_version": 1,
+    "pack_id": "sunblade-palace-cast",
+    "display_name": "Sunblade in the Palace Cast",
+    "agents": [
+      {
+        "id": "1",
+        "name": "炭治郎",
+        "profile_path": "agents/1/profile.json",
+        "runtime_path": "agents/1/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_01_炭治郎.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "2",
+        "name": "皇帝",
+        "profile_path": "agents/2/profile.json",
+        "runtime_path": "agents/2/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_02_皇帝.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "3",
+        "name": "皇后娘娘",
+        "profile_path": "agents/3/profile.json",
+        "runtime_path": "agents/3/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_03_皇后娘娘.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "4",
+        "name": "甄嬛",
+        "profile_path": "agents/4/profile.json",
+        "runtime_path": "agents/4/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_04_甄嬛.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "5",
+        "name": "华妃",
+        "profile_path": "agents/5/profile.json",
+        "runtime_path": "agents/5/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_05_华妃.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "6",
+        "name": "温太医",
+        "profile_path": "agents/6/profile.json",
+        "runtime_path": "agents/6/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_06_温太医.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "7",
+        "name": "槿汐",
+        "profile_path": "agents/7/profile.json",
+        "runtime_path": "agents/7/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_07_槿汐.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "8",
+        "name": "苏培盛",
+        "profile_path": "agents/8/profile.json",
+        "runtime_path": "agents/8/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_08_苏培盛.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "9",
+        "name": "剪秋",
+        "profile_path": "agents/9/profile.json",
+        "runtime_path": "agents/9/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_09_剪秋.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "10",
+        "name": "颂芝",
+        "profile_path": "agents/10/profile.json",
+        "runtime_path": "agents/10/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_10_颂芝.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "11",
+        "name": "冷宫弃妃",
+        "profile_path": "agents/11/profile.json",
+        "runtime_path": "agents/11/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_11_冷宫弃妃.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "12",
+        "name": "小厦子",
+        "profile_path": "agents/12/profile.json",
+        "runtime_path": "agents/12/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_12_小厦子.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "13",
+        "name": "宝鹃",
+        "profile_path": "agents/13/profile.json",
+        "runtime_path": "agents/13/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_13_宝鹃.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "14",
+        "name": "夜行鬼",
+        "profile_path": "agents/14/profile.json",
+        "runtime_path": "agents/14/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_14_夜行鬼.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      }
+    ],
+    "downloads": [
+      {
+        "type": "agent",
+        "label": "Agent pack",
+        "href": "https://github.com/XiaoLuoLYG/GOD/releases/download/public-site-packs/sunblade-palace-cast-agent-pack.zip"
+      }
+    ],
+    "summary": "14 scenario-specific agents with profiles and sprites.",
+    "localized": {
+      "en": {
+        "display_name": "Sunblade in the Palace Cast",
+        "summary": "14 scenario-specific agents with profiles and sprites."
+      },
+      "zh": {
+        "display_name": "日轮刀入宫角色包",
+        "summary": "14 个场景专属角色，包含档案和 sprite。"
+      }
+    }
+  },
+  {
+    "schema_version": 1,
+    "pack_id": "taohuayuan-online-cast",
+    "display_name": "Taohuayuan Goes Online Cast",
+    "agents": [
+      {
+        "id": "1",
+        "name": "陶村长",
+        "profile_path": "agents/1/profile.json",
+        "runtime_path": "agents/1/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_01_陶村长.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "2",
+        "name": "阿澄",
+        "profile_path": "agents/2/profile.json",
+        "runtime_path": "agents/2/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_02_阿澄.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "3",
+        "name": "阿梨",
+        "profile_path": "agents/3/profile.json",
+        "runtime_path": "agents/3/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_03_阿梨.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "4",
+        "name": "外来博主小岚",
+        "profile_path": "agents/4/profile.json",
+        "runtime_path": "agents/4/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_04_外来博主小岚.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "5",
+        "name": "文旅经理周越",
+        "profile_path": "agents/5/profile.json",
+        "runtime_path": "agents/5/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_05_文旅经理周越.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "6",
+        "name": "民俗学者孟教授",
+        "profile_path": "agents/6/profile.json",
+        "runtime_path": "agents/6/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_06_民俗学者孟教授.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "7",
+        "name": "基层干部许宁",
+        "profile_path": "agents/7/profile.json",
+        "runtime_path": "agents/7/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_07_基层干部许宁.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "8",
+        "name": "守旧派陶伯",
+        "profile_path": "agents/8/profile.json",
+        "runtime_path": "agents/8/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_08_守旧派陶伯.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "9",
+        "name": "织染匠阿绣",
+        "profile_path": "agents/9/profile.json",
+        "runtime_path": "agents/9/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_09_织染匠阿绣.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "10",
+        "name": "返乡青年阿远",
+        "profile_path": "agents/10/profile.json",
+        "runtime_path": "agents/10/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_10_返乡青年阿远.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "11",
+        "name": "游客林川",
+        "profile_path": "agents/11/profile.json",
+        "runtime_path": "agents/11/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_11_游客林川.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      },
+      {
+        "id": "12",
+        "name": "平台运营 Ada",
+        "profile_path": "agents/12/profile.json",
+        "runtime_path": "agents/12/runtime.json",
+        "sprite": {
+          "path": "characters/Agent_12_平台运营_Ada.png",
+          "frame_width": 32,
+          "frame_height": 32
+        }
+      }
+    ],
+    "downloads": [
+      {
+        "type": "agent",
+        "label": "Agent pack",
+        "href": "https://github.com/XiaoLuoLYG/GOD/releases/download/public-site-packs/taohuayuan-online-cast-agent-pack.zip"
+      }
+    ],
+    "summary": "12 scenario-specific agents with profiles and sprites.",
+    "localized": {
+      "en": {
+        "display_name": "Taohuayuan Goes Online Cast",
+        "summary": "12 scenario-specific agents with profiles and sprites."
+      },
+      "zh": {
+        "display_name": "桃花源接入互联网角色包",
+        "summary": "12 个场景专属角色，包含档案和 sprite。"
+      }
+    }
+  }
+]

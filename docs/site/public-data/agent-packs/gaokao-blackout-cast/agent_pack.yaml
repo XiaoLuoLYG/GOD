@@ -1,0 +1,120 @@
+schema_version: 1
+pack_id: gaokao-blackout-cast
+display_name: 高考前夜全城停电 Cast
+agents:
+- id: '1'
+  name: 林予
+  profile_path: agents/1/profile.json
+  runtime_path: agents/1/runtime.json
+  sprite:
+    path: characters/Agent_01_林予.png
+    frame_width: 32
+    frame_height: 32
+- id: '2'
+  name: 陈老师
+  profile_path: agents/2/profile.json
+  runtime_path: agents/2/runtime.json
+  sprite:
+    path: characters/Agent_02_陈老师.png
+    frame_width: 32
+    frame_height: 32
+- id: '3'
+  name: 王妈妈
+  profile_path: agents/3/profile.json
+  runtime_path: agents/3/runtime.json
+  sprite:
+    path: characters/Agent_03_王妈妈.png
+    frame_width: 32
+    frame_height: 32
+- id: '4'
+  name: 王辰
+  profile_path: agents/4/profile.json
+  runtime_path: agents/4/runtime.json
+  sprite:
+    path: characters/Agent_04_王辰.png
+    frame_width: 32
+    frame_height: 32
+- id: '5'
+  name: 酒店老板老赵
+  profile_path: agents/5/profile.json
+  runtime_path: agents/5/runtime.json
+  sprite:
+    path: characters/Agent_05_酒店老板老赵.png
+    frame_width: 32
+    frame_height: 32
+- id: '6'
+  name: 交警小许
+  profile_path: agents/6/profile.json
+  runtime_path: agents/6/runtime.json
+  sprite:
+    path: characters/Agent_06_交警小许.png
+    frame_width: 32
+    frame_height: 32
+- id: '7'
+  name: 电力队长马工
+  profile_path: agents/7/profile.json
+  runtime_path: agents/7/runtime.json
+  sprite:
+    path: characters/Agent_07_电力队长马工.png
+    frame_width: 32
+    frame_height: 32
+- id: '8'
+  name: 教育局周科长
+  profile_path: agents/8/profile.json
+  runtime_path: agents/8/runtime.json
+  sprite:
+    path: characters/Agent_08_教育局周科长.png
+    frame_width: 32
+    frame_height: 32
+- id: '9'
+  name: 自媒体号风向标
+  profile_path: agents/9/profile.json
+  runtime_path: agents/9/runtime.json
+  sprite:
+    path: characters/Agent_09_自媒体号风向标.png
+    frame_width: 32
+    frame_height: 32
+- id: '10'
+  name: 打印店阿姨
+  profile_path: agents/10/profile.json
+  runtime_path: agents/10/runtime.json
+  sprite:
+    path: characters/Agent_10_打印店阿姨.png
+    frame_width: 32
+    frame_height: 32
+- id: '11'
+  name: 住校生阿哲
+  profile_path: agents/11/profile.json
+  runtime_path: agents/11/runtime.json
+  sprite:
+    path: characters/Agent_11_住校生阿哲.png
+    frame_width: 32
+    frame_height: 32
+- id: '12'
+  name: 邻居爷爷
+  profile_path: agents/12/profile.json
+  runtime_path: agents/12/runtime.json
+  sprite:
+    path: characters/Agent_12_邻居爷爷.png
+    frame_width: 32
+    frame_height: 32
+- id: '13'
+  name: 巡考老师杜敏
+  profile_path: agents/13/profile.json
+  runtime_path: agents/13/runtime.json
+  sprite:
+    path: characters/Agent_13_巡考老师杜敏.png
+    frame_width: 32
+    frame_height: 32
+- id: '14'
+  name: 出租车司机胖刘
+  profile_path: agents/14/profile.json
+  runtime_path: agents/14/runtime.json
+  sprite:
+    path: characters/Agent_14_出租车司机胖刘.png
+    frame_width: 32
+    frame_height: 32
+downloads:
+- type: agent
+  label: Agent pack
+  href: https://github.com/XiaoLuoLYG/GOD/releases/download/public-site-packs/gaokao-blackout-cast-agent-pack.zip

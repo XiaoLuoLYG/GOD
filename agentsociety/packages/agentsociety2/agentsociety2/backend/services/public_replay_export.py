@@ -92,6 +92,7 @@ def export_public_replay(
     agent_pack: str | None = None,
     experiment_pack: str | None = None,
     tags: Iterable[str] = (),
+    download_base_url: str | None = None,
 ) -> dict[str, Any]:
     """Export one local replay run into static JSON/assets under ``output_root``."""
 
@@ -145,6 +146,7 @@ def export_public_replay(
         pack_id=map_pack_id,
         map_info=map_info,
         original_package_path=Path(str(map_info["_package_path"])),
+        download_base_url=download_base_url,
     )
     agent_pack_id = agent_pack or f"{slug}-agents"
     agent_pack_info = _export_agent_pack(
@@ -154,6 +156,7 @@ def export_public_replay(
         display_name=agent_pack_id,
         profiles=list(profiles.values()),
         map_info=map_info,
+        download_base_url=download_base_url,
     )
     experiment_pack_id = experiment_pack or f"{slug}-experiment"
     experiment_pack_info = _export_experiment_pack(
@@ -169,6 +172,7 @@ def export_public_replay(
         total_steps=len(timeline),
         agent_count=len(profiles),
         command_count=len(commands),
+        download_base_url=download_base_url,
     )
     manifest = {
         "schema_version": 1,
@@ -203,6 +207,7 @@ def export_public_replay(
             agent_pack_root=Path(str(agent_pack_info["_package_path"])),
             slug=slug,
             map_id=str(map_info.get("map_id") or "map"),
+            download_base_url=download_base_url,
         ),
     }
     _write_json(replay_root / "manifest.json", manifest)
@@ -214,6 +219,7 @@ def export_known_public_replays(
     workspace_path: Path,
     output_root: Path,
     specs: Iterable[dict[str, Any]] = PUBLIC_REPLAY_SPECS,
+    download_base_url: str | None = None,
 ) -> list[dict[str, Any]]:
     manifests = []
     workspace_path = Path(workspace_path)
@@ -233,6 +239,7 @@ def export_known_public_replays(
                 agent_pack=str(spec.get("agent_pack") or ""),
                 experiment_pack=str(spec.get("experiment_pack") or ""),
                 tags=spec.get("tags") or (),
+                download_base_url=download_base_url,
             )
         )
     replay_experiment_pack_ids = {str(item.get("experiment_pack") or "") for item in manifests}
@@ -246,6 +253,7 @@ def export_known_public_replays(
             workspace_path=workspace_path,
             output_root=output_root,
             registry_entries=curated_entries,
+            download_base_url=download_base_url,
         )
     _write_json(Path(output_root) / "replays" / "index.json", manifests)
     _write_collection_index(Path(output_root), "map-packs", "map_pack.json")
@@ -259,6 +267,7 @@ def export_curated_experiment_packs(
     workspace_path: Path,
     output_root: Path,
     registry_entries: Iterable[dict[str, Any]] | None = None,
+    download_base_url: str | None = None,
 ) -> list[dict[str, Any]]:
     """Export curated playable ExperimentPacks, including entries without public replays."""
 
@@ -298,6 +307,7 @@ def export_curated_experiment_packs(
                 agent_count=stats["agent_count"],
                 command_count=0,
                 image=str(entry.get("image") or ""),
+                download_base_url=download_base_url,
             )
         )
     _write_collection_index(output_root, "experiments", "experiment.json")
@@ -722,6 +732,7 @@ def _publish_map_pack(
     pack_id: str,
     map_info: dict[str, Any],
     original_package_path: Path,
+    download_base_url: str | None = None,
 ) -> dict[str, Any]:
     pack_root = output_root / "map-packs" / pack_id
     if pack_root.exists():
@@ -746,7 +757,7 @@ def _publish_map_pack(
             {
                 "type": "map",
                 "label": "Map pack",
-                "href": f"downloads/{pack_id}-map-pack.zip",
+                "href": _download_href(download_base_url, f"{pack_id}-map-pack.zip"),
             }
         ],
     }
@@ -769,6 +780,7 @@ def _export_agent_pack(
     display_name: str,
     profiles: list[dict[str, Any]],
     map_info: dict[str, Any],
+    download_base_url: str | None = None,
 ) -> dict[str, Any]:
     pack_root = output_root / "agent-packs" / pack_id
     if pack_root.exists():
@@ -841,7 +853,7 @@ def _export_agent_pack(
             {
                 "type": "agent",
                 "label": "Agent pack",
-                "href": f"downloads/{pack_id}-agent-pack.zip",
+                "href": _download_href(download_base_url, f"{pack_id}-agent-pack.zip"),
             }
         ],
     }
@@ -875,6 +887,7 @@ def _export_experiment_pack(
     agent_count: int,
     command_count: int,
     image: str | None = None,
+    download_base_url: str | None = None,
 ) -> dict[str, Any]:
     pack_root = output_root / "experiments" / pack_id
     if pack_root.exists():
@@ -900,7 +913,7 @@ def _export_experiment_pack(
                 "type": "experiment",
                 "label": "Playable Experiment Pack",
                 "description": "Scenario setup only; excludes replay history and local runtime state.",
-                "href": f"downloads/{pack_id}-experiment-pack.zip",
+                "href": _download_href(download_base_url, f"{pack_id}-experiment-pack.zip"),
             }
         ],
     }
@@ -990,6 +1003,7 @@ def _create_downloads(
     agent_pack_root: Path,
     slug: str,
     map_id: str,
+    download_base_url: str | None = None,
 ) -> list[dict[str, str]]:
     downloads = [
         {
@@ -997,23 +1011,23 @@ def _create_downloads(
             "label": "Replay archive",
             "description": "Static timeline, step frames, commands, profiles, and replay manifest.",
             "hidden": True,
-            "href": f"downloads/{slug}-replay-data.zip",
+            "href": _download_href(download_base_url, f"{slug}-replay-data.zip"),
         },
         {
             "type": "map",
             "label": "Map pack",
-            "href": f"downloads/{map_id}-map-pack.zip",
+            "href": _download_href(download_base_url, f"{map_id}-map-pack.zip"),
         },
         {
             "type": "agent",
             "label": "Agent pack",
-            "href": f"downloads/{slug}-agent-pack.zip",
+            "href": _download_href(download_base_url, f"{slug}-agent-pack.zip"),
         },
         {
             "type": "experiment",
             "label": "Playable Experiment Pack",
             "description": "Scenario setup only; excludes replay history and local runtime state.",
-            "href": f"downloads/{slug}-experiment-pack.zip",
+            "href": _download_href(download_base_url, f"{slug}-experiment-pack.zip"),
         },
     ]
     downloads_dir = replay_root / "downloads"
@@ -1087,6 +1101,12 @@ def _include_pack_file(path: Path, pack_root: Path) -> bool:
     return "downloads" not in parts
 
 
+def _download_href(download_base_url: str | None, filename: str) -> str:
+    if not download_base_url:
+        return f"downloads/{filename}"
+    return download_base_url.rstrip("/") + "/" + filename
+
+
 def _zip_experiment_pack(source_dir: Path, zip_path: Path, *, map_id: str | None = None) -> None:
     with ZipFile(zip_path, "w", ZIP_DEFLATED) as archive:
         for path in sorted(source_dir.rglob("*")):
@@ -1121,6 +1141,8 @@ def _zip_directory(
             if path == zip_path:
                 continue
             if path.name.startswith("."):
+                continue
+            if "downloads" in path.relative_to(source_dir).parts:
                 continue
             if include is not None and not include(path):
                 continue

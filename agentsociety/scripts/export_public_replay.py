@@ -31,12 +31,32 @@ def main() -> None:
         action="store_true",
         help="Export curated ExperimentPack manifests and downloads without requiring replay databases.",
     )
+    parser.add_argument(
+        "--release-download-base",
+        help="Absolute base URL for published download assets, ending at the release tag path.",
+    )
+    parser.add_argument(
+        "--release-repo",
+        help="GitHub repo owner/name used to build release download URLs, for example XiaoLuoLYG/GOD.",
+    )
+    parser.add_argument(
+        "--release-tag",
+        default="public-site-packs",
+        help="GitHub release tag used with --release-repo. Defaults to public-site-packs.",
+    )
     args = parser.parse_args()
+    release_download_base = args.release_download_base
+    if args.release_repo:
+        release_download_base = (
+            f"https://github.com/{args.release_repo.strip('/')}/releases/download/"
+            f"{args.release_tag.strip('/')}/"
+        )
 
     if args.experiments_only:
         manifests = export_curated_experiment_packs(
             workspace_path=args.workspace,
             output_root=args.output,
+            download_base_url=release_download_base,
         )
         print(f"Exported {len(manifests)} curated ExperimentPack bundle(s) to {args.output}")
         for manifest in manifests:
@@ -46,6 +66,7 @@ def main() -> None:
     manifests = export_known_public_replays(
         workspace_path=args.workspace,
         output_root=args.output,
+        download_base_url=release_download_base,
     )
     print(f"Exported {len(manifests)} public replay bundle(s) and curated ExperimentPack index to {args.output}")
     for manifest in manifests:

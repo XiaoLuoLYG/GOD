@@ -47,6 +47,13 @@
     return dataRoot + path;
   }
 
+  function downloadUrl(path) {
+    if (/^https?:\/\//.test(path || "")) {
+      return path;
+    }
+    return dataUrl(path);
+  }
+
   function dataUrlBase(path) {
     var full = dataUrl(path);
     return full.slice(0, full.lastIndexOf("/") + 1);
@@ -264,7 +271,7 @@
       var description = item.description ? '<span>' + escapeHtml(item.description) + '</span>' : '<span>' + escapeHtml(item.type) + '</span>';
       var action = item.type === "experiment" ? "Download ExperimentPack" : "Download";
       return [
-        '<a class="download-row" href="' + dataUrl(item.href) + '">',
+        '<a class="download-row" href="' + downloadUrl(item.href) + '">',
         '  <span><strong>' + escapeHtml(item.label) + '</strong>' + description + '</span>',
         '  <span>' + escapeHtml(action) + '</span>',
         '</a>'

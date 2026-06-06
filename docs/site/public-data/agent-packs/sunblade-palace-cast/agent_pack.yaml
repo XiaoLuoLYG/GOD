@@ -1,0 +1,120 @@
+schema_version: 1
+pack_id: sunblade-palace-cast
+display_name: 日轮刀入宫 Cast
+agents:
+- id: '1'
+  name: 炭治郎
+  profile_path: agents/1/profile.json
+  runtime_path: agents/1/runtime.json
+  sprite:
+    path: characters/Agent_01_炭治郎.png
+    frame_width: 32
+    frame_height: 32
+- id: '2'
+  name: 皇帝
+  profile_path: agents/2/profile.json
+  runtime_path: agents/2/runtime.json
+  sprite:
+    path: characters/Agent_02_皇帝.png
+    frame_width: 32
+    frame_height: 32
+- id: '3'
+  name: 皇后娘娘
+  profile_path: agents/3/profile.json
+  runtime_path: agents/3/runtime.json
+  sprite:
+    path: characters/Agent_03_皇后娘娘.png
+    frame_width: 32
+    frame_height: 32
+- id: '4'
+  name: 甄嬛
+  profile_path: agents/4/profile.json
+  runtime_path: agents/4/runtime.json
+  sprite:
+    path: characters/Agent_04_甄嬛.png
+    frame_width: 32
+    frame_height: 32
+- id: '5'
+  name: 华妃
+  profile_path: agents/5/profile.json
+  runtime_path: agents/5/runtime.json
+  sprite:
+    path: characters/Agent_05_华妃.png
+    frame_width: 32
+    frame_height: 32
+- id: '6'
+  name: 温太医
+  profile_path: agents/6/profile.json
+  runtime_path: agents/6/runtime.json
+  sprite:
+    path: characters/Agent_06_温太医.png
+    frame_width: 32
+    frame_height: 32
+- id: '7'
+  name: 槿汐
+  profile_path: agents/7/profile.json
+  runtime_path: agents/7/runtime.json
+  sprite:
+    path: characters/Agent_07_槿汐.png
+    frame_width: 32
+    frame_height: 32
+- id: '8'
+  name: 苏培盛
+  profile_path: agents/8/profile.json
+  runtime_path: agents/8/runtime.json
+  sprite:
+    path: characters/Agent_08_苏培盛.png
+    frame_width: 32
+    frame_height: 32
+- id: '9'
+  name: 剪秋
+  profile_path: agents/9/profile.json
+  runtime_path: agents/9/runtime.json
+  sprite:
+    path: characters/Agent_09_剪秋.png
+    frame_width: 32
+    frame_height: 32
+- id: '10'
+  name: 颂芝
+  profile_path: agents/10/profile.json
+  runtime_path: agents/10/runtime.json
+  sprite:
+    path: characters/Agent_10_颂芝.png
+    frame_width: 32
+    frame_height: 32
+- id: '11'
+  name: 冷宫弃妃
+  profile_path: agents/11/profile.json
+  runtime_path: agents/11/runtime.json
+  sprite:
+    path: characters/Agent_11_冷宫弃妃.png
+    frame_width: 32
+    frame_height: 32
+- id: '12'
+  name: 小厦子
+  profile_path: agents/12/profile.json
+  runtime_path: agents/12/runtime.json
+  sprite:
+    path: characters/Agent_12_小厦子.png
+    frame_width: 32
+    frame_height: 32
+- id: '13'
+  name: 宝鹃
+  profile_path: agents/13/profile.json
+  runtime_path: agents/13/runtime.json
+  sprite:
+    path: characters/Agent_13_宝鹃.png
+    frame_width: 32
+    frame_height: 32
+- id: '14'
+  name: 夜行鬼
+  profile_path: agents/14/profile.json
+  runtime_path: agents/14/runtime.json
+  sprite:
+    path: characters/Agent_14_夜行鬼.png
+    frame_width: 32
+    frame_height: 32
+downloads:
+- type: agent
+  label: Agent pack
+  href: https://github.com/XiaoLuoLYG/GOD/releases/download/public-site-packs/sunblade-palace-cast-agent-pack.zip

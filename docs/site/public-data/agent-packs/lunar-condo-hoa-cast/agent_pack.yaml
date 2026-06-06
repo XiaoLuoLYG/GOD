@@ -1,0 +1,104 @@
+schema_version: 1
+pack_id: lunar-condo-hoa-cast
+display_name: 月球小区业主群 Cast
+agents:
+- id: '1'
+  name: 梁管理员
+  profile_path: agents/1/profile.json
+  runtime_path: agents/1/runtime.json
+  sprite:
+    path: characters/Agent_01_梁管理员.png
+    frame_width: 32
+    frame_height: 32
+- id: '2'
+  name: 程工程师
+  profile_path: agents/2/profile.json
+  runtime_path: agents/2/runtime.json
+  sprite:
+    path: characters/Agent_02_程工程师.png
+    frame_width: 32
+    frame_height: 32
+- id: '3'
+  name: 顾医生
+  profile_path: agents/3/profile.json
+  runtime_path: agents/3/runtime.json
+  sprite:
+    path: characters/Agent_03_顾医生.png
+    frame_width: 32
+    frame_height: 32
+- id: '4'
+  name: 周妈妈
+  profile_path: agents/4/profile.json
+  runtime_path: agents/4/runtime.json
+  sprite:
+    path: characters/Agent_04_周妈妈.png
+    frame_width: 32
+    frame_height: 32
+- id: '5'
+  name: 小周
+  profile_path: agents/5/profile.json
+  runtime_path: agents/5/runtime.json
+  sprite:
+    path: characters/Agent_05_小周.png
+    frame_width: 32
+    frame_height: 32
+- id: '6'
+  name: 秦赞助人
+  profile_path: agents/6/profile.json
+  runtime_path: agents/6/runtime.json
+  sprite:
+    path: characters/Agent_06_秦赞助人.png
+    frame_width: 32
+    frame_height: 32
+- id: '7'
+  name: 地球指挥官 Nora
+  profile_path: agents/7/profile.json
+  runtime_path: agents/7/runtime.json
+  sprite:
+    path: characters/Agent_07_地球指挥官_Nora.png
+    frame_width: 32
+    frame_height: 32
+- id: '8'
+  name: AI 管家 Luna
+  profile_path: agents/8/profile.json
+  runtime_path: agents/8/runtime.json
+  sprite:
+    path: characters/Agent_08_AI_管家_Luna.png
+    frame_width: 32
+    frame_height: 32
+- id: '9'
+  name: 宠物仓鼠豆豆
+  profile_path: agents/9/profile.json
+  runtime_path: agents/9/runtime.json
+  sprite:
+    path: characters/Agent_09_宠物仓鼠豆豆.png
+    frame_width: 32
+    frame_height: 32
+- id: '10'
+  name: 安保员老韩
+  profile_path: agents/10/profile.json
+  runtime_path: agents/10/runtime.json
+  sprite:
+    path: characters/Agent_10_安保员老韩.png
+    frame_width: 32
+    frame_height: 32
+- id: '11'
+  name: 厨师阿麦
+  profile_path: agents/11/profile.json
+  runtime_path: agents/11/runtime.json
+  sprite:
+    path: characters/Agent_11_厨师阿麦.png
+    frame_width: 32
+    frame_height: 32
+- id: '12'
+  name: 心理顾问叶安
+  profile_path: agents/12/profile.json
+  runtime_path: agents/12/runtime.json
+  sprite:
+    path: characters/Agent_12_心理顾问叶安.png
+    frame_width: 32
+    frame_height: 32
+downloads:
+- type: agent
+  label: Agent pack
+  href: https://github.com/XiaoLuoLYG/GOD/releases/download/public-site-packs/lunar-condo-hoa-cast-agent-pack.zip
