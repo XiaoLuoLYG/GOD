@@ -60,12 +60,3 @@ def test_cors_env_override_parser(monkeypatch):
         "https://god.example",
         "http://localhost:9999",
     ]
-
-
-def test_public_site_replay_viewer_is_served_locally():
-    client = TestClient(backend_app.app)
-
-    response = client.get("/public-site/replays/god-town/")
-
-    assert response.status_code == 200
-    assert 'data-replay-slug="god-town"' in response.text

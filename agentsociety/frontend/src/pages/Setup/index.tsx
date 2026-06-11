@@ -27,7 +27,6 @@ import {
     CompassOutlined,
     DeleteOutlined,
     EditOutlined,
-    EyeOutlined,
     ExperimentOutlined,
     ImportOutlined,
     PlayCircleOutlined,
@@ -693,21 +692,6 @@ export default function SetupPage() {
         }
     };
 
-    const openPublishedReplay = (replaySlug?: string) => {
-        if (!replaySlug) {
-            return;
-        }
-        const rawHost = status?.model_config.GOD_BACKEND_HOST?.value || window.location.hostname || '127.0.0.1';
-        const host = rawHost === '0.0.0.0' || rawHost === '::' ? '127.0.0.1' : rawHost;
-        const port = status?.model_config.GOD_BACKEND_PORT?.value || '8001';
-        const origin = `${window.location.protocol}//${host}:${port}`;
-        window.open(
-            `${origin}/public-site/replays/${encodeURIComponent(replaySlug)}/`,
-            '_blank',
-            'noopener,noreferrer',
-        );
-    };
-
     const validateContextJsonText = (text: string) => {
         try {
             parseJsonObject(text, 'experiment_context');
@@ -1159,21 +1143,10 @@ export default function SetupPage() {
                             <Space wrap>
                                 <Title level={4} style={{ margin: 0 }}>{defaultExperimentLabel(item)}</Title>
                                 <Tag>{mapDisplayName((status?.maps || []).find((map) => map.map_id === item.map_id), item.map_id)}</Tag>
-                                {item.replay_slug || item.replay_db_exists
-                                    ? <Tag color="blue">{copy('choice.hasReplay')}</Tag>
-                                    : <Tag>{copy('choice.needsFirstFrame')}</Tag>}
                             </Space>
                             <Text type="secondary">{defaultExperimentDescription(item)}</Text>
                             <Text code>{item.hypothesis_id} / experiment_{item.experiment_id}</Text>
                             <Space wrap>
-                                {item.replay_slug && (
-                                    <Button
-                                        icon={<EyeOutlined />}
-                                        onClick={() => openPublishedReplay(item.replay_slug)}
-                                    >
-                                        {copy('choice.previewReplay')}
-                                    </Button>
-                                )}
                                 <Button
                                     type="primary"
                                     icon={<PlayCircleOutlined />}
