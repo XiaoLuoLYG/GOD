@@ -103,6 +103,30 @@ def test_jiuwenclaw_agent_init_without_run_dir_does_not_create_workspace(tmp_pat
     anyio.run(run_case)
 
 
+def test_jiuwenclaw_runtime_path_stays_inside_agent_workspace(tmp_path):
+    JiuwenClawAgent = _load_jiuwenclaw_agent_class()
+    agent = JiuwenClawAgent(id=1, name="Runtime Tester", profile={"name": "Runtime Tester"})
+    agent._agent_work_dir = tmp_path / "agents" / "agent_0001"
+
+    target = agent._runtime_path("memory/state.json")
+
+    assert target == agent._agent_work_dir.resolve() / "memory" / "state.json"
+    assert target.parent.exists()
+
+
+def test_jiuwenclaw_runtime_path_rejects_workspace_escape(tmp_path):
+    JiuwenClawAgent = _load_jiuwenclaw_agent_class()
+    agent = JiuwenClawAgent(id=1, name="Runtime Tester", profile={"name": "Runtime Tester"})
+    agent._agent_work_dir = tmp_path / "agents" / "agent_0001"
+
+    try:
+        agent._runtime_path("../../outside.json")
+    except ValueError as exc:
+        assert "Path escapes agent workspace" in str(exc)
+    else:
+        raise AssertionError("workspace escape must be rejected")
+
+
 def test_jiuwenclaw_agent_accepts_mounted_skill_ids_from_config():
     JiuwenClawAgent = _load_jiuwenclaw_agent_class()
     agent = JiuwenClawAgent(

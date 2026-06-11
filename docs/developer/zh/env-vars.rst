@@ -17,11 +17,11 @@
      - ``https://api.openai.com/v1``
      - 任意 OpenAI 兼容 endpoint。
    * - ``GOD_LLM_MODEL``
-     - ``gpt-5.4``
-     - 主聊天模型。
+     - 空
+     - 必填主聊天模型。示例：``qwen-plus``、``gpt-4o-mini``。
    * - ``GOD_LLM_NANO_MODEL``
-     - 主模型为 ``gpt-5.4`` 时默认 ``gpt-5.4-nano``
-     - 高频小模型槽位。
+     - ``GOD_LLM_MODEL``
+     - 可选高频小模型槽位。
    * - ``GOD_EMBEDDING_API_KEY``
      - ``GOD_LLM_API_KEY``
      - 可选覆盖。

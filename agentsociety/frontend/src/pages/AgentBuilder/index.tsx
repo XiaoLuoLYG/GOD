@@ -492,7 +492,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
             setAgentPackLocationOverrides({});
             return;
         }
-        const fallbackLocation = mapLocations[0]?.id || 'park';
+        const fallbackLocation = mapLocations[0]?.id || '';
         setAgentPackLocationOverrides(Object.fromEntries(
             selectedAgentPack.agents.map((agent) => {
                 const routine = asRecord(agent.profile?.routine);
@@ -675,12 +675,16 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                 : {};
             const nextLocations = { ...currentLocations };
             if (touchedAgent) {
-                nextLocations[String(touchedAgent.agent_id)] = (
+                const nextLocation = (
                     meta?.initial_location
                     || nextLocations[String(touchedAgent.agent_id)]
                     || mapLocations[0]?.id
-                    || 'park'
                 );
+                if (nextLocation) {
+                    nextLocations[String(touchedAgent.agent_id)] = nextLocation;
+                } else {
+                    delete nextLocations[String(touchedAgent.agent_id)];
+                }
             }
             Object.keys(nextLocations).forEach((agentId) => {
                 if (!nextAgents.some((item) => String(item.agent_id) === agentId)) {
@@ -719,7 +723,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
         const overrideLocation = agentPackLocationOverrides[String(packAgent.id)];
         const initialLocation = overrideLocation || (knownLocations.has(rawInitialLocation)
             ? rawInitialLocation
-            : mapLocations[0]?.id || 'park');
+            : mapLocations[0]?.id || '');
         profile.routine = {
             ...routine,
             initial_location: initialLocation,
@@ -788,7 +792,9 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
             ? importedAgents
             : [...agents, ...importedAgents];
         const importedLocations = Object.fromEntries(
-            imported.map((item) => [String(item.agent.agent_id), item.initialLocation])
+            imported
+                .filter((item) => item.initialLocation)
+                .map((item) => [String(item.agent.agent_id), item.initialLocation])
         );
         const baseConfig = syncEnvForAgents(config, nextAgents);
         const nextConfig = {
@@ -1126,7 +1132,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                 mapLocations={mapLocations}
                 existingAgents={agents}
                 initialLocation={editingAgentId === null ? undefined : getEnvModule(config)?.kwargs?.initial_locations?.[String(editingAgentId)]}
-                defaultInitialLocation={mapLocations[0]?.id || 'park'}
+                defaultInitialLocation={mapLocations[0]?.id}
                 onSave={upsertAgent}
                 onCancel={() => setAgentModalOpen(false)}
             />
@@ -1249,11 +1255,13 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                                     render: (_, record) => (
                                         <Select
                                             style={{ width: '100%' }}
-                                            value={agentPackLocationOverrides[String(record.id)] || mapLocations[0]?.id || 'park'}
+                                            value={agentPackLocationOverrides[String(record.id)] || mapLocations[0]?.id}
                                             options={mapLocations.map((location) => ({
                                                 value: location.id,
                                                 label: location.name || location.id,
                                             }))}
+                                            disabled={!mapLocations.length}
+                                            placeholder={t('agentBuilder.studio.locationUnavailable')}
                                             onChange={(value) => setAgentPackLocationOverrides((current) => ({
                                                 ...current,
                                                 [String(record.id)]: value,

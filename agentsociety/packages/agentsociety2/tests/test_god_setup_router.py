@@ -223,6 +223,18 @@ def test_setup_status_exposes_setup_mode(monkeypatch, tmp_path):
     assert status["setup_mode"] is True
 
 
+def test_setup_status_does_not_invent_default_llm_model(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+
+    status = anyio.run(god_setup.setup_status)
+
+    assert status["model_config"]["GOD_LLM_MODEL"] == {
+        "configured": False,
+        "value": "",
+    }
+    assert status["needs_setup"] is True
+
+
 def test_setup_status_loads_enabled_curated_experiments(monkeypatch, tmp_path):
     _configure_tmp_god(monkeypatch, tmp_path)
     workspace = tmp_path / "quick_experiments"
@@ -353,6 +365,27 @@ def test_agent_studio_generate_localizes_known_context_and_locations():
     assert location_group.options[0].label == "Johnson Park (park)"
     assert "late-spring weekday morning" in response.profile_patch["scenario"]
     assert "晚春" not in response.profile_patch["persona"]
+
+
+def test_agent_studio_generate_does_not_fallback_to_fake_location():
+    response = anyio.run(
+        god_setup.generate_agent_studio_options,
+        AgentStudioGenerateRequest(
+            experiment_context={
+                "title": "Empty Map",
+                "background": "A map package has not defined locations yet.",
+            },
+            map_id="empty_map",
+            map_locations=[],
+            language="en",
+        ),
+    )
+
+    location_group = next(group for group in response.groups if group.id == "initial_location")
+    assert location_group.options == []
+    assert response.initial_location == ""
+    assert response.selected_choices["initial_location"] == ""
+    assert response.profile_patch["routine"]["initial_location"] == ""
 
 
 def test_agent_studio_generate_strips_preview_data_url_from_profile_patch():
@@ -616,6 +649,19 @@ def test_merged_env_prefers_saved_env_file_over_stale_process_env(monkeypatch, t
     assert env["GOD_LLM_MODEL"] == "qwen-plus"
 
 
+def test_save_model_config_does_not_write_empty_model_default(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+
+    anyio.run(
+        god_setup.save_model_config,
+        ModelConfigPayload(GOD_LLM_API_BASE="https://api.openai.com/v1"),
+    )
+
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "GOD_LLM_API_BASE=https://api.openai.com/v1" in env_text
+    assert "GOD_LLM_MODEL=" not in env_text
+
+
 def test_normalize_draft_uses_selected_map_package(monkeypatch, tmp_path):
     _configure_tmp_god(monkeypatch, tmp_path)
     _write_test_map_package(tmp_path, "the_ville")
@@ -651,7 +697,7 @@ def test_generate_draft_normalizes_model_output(monkeypatch, tmp_path):
     draft = anyio.run(
         god_setup.generate_draft,
         GenerateDraftRequest(
-            model_config=ModelConfigPayload(GOD_LLM_API_KEY="sk-test"),
+            model_config=ModelConfigPayload(GOD_LLM_API_KEY="sk-test", GOD_LLM_MODEL="qwen-plus"),
             basics=DraftBasics(
                 title="Stanford Prison Adaptation",
                 background="A bounded simulation about assigned authority roles.",
@@ -669,6 +715,22 @@ def test_generate_draft_normalizes_model_output(monkeypatch, tmp_path):
     latest = json.loads((tmp_path / ".god" / "run" / "latest-draft.json").read_text(encoding="utf-8"))
     assert latest["basics"]["background"] == "A bounded simulation about assigned authority roles."
     assert latest["draft"]["experiment_context"]["title"] == "Stanford Prison Adaptation"
+
+
+def test_generate_draft_requires_explicit_model(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+
+    with pytest.raises(HTTPException) as exc_info:
+        anyio.run(
+            god_setup.generate_draft,
+            GenerateDraftRequest(
+                model_config=ModelConfigPayload(GOD_LLM_API_KEY="sk-test"),
+                basics=DraftBasics(agent_count=2),
+            ),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "GOD_LLM_MODEL is required" in str(exc_info.value.detail)
 
 
 def test_latest_draft_route_returns_persisted_setup_draft(monkeypatch, tmp_path):
@@ -751,7 +813,7 @@ def test_generate_draft_falls_back_to_default_map_when_selected_missing(monkeypa
     draft = anyio.run(
         god_setup.generate_draft,
         GenerateDraftRequest(
-            model_config=ModelConfigPayload(GOD_LLM_API_KEY="sk-test"),
+            model_config=ModelConfigPayload(GOD_LLM_API_KEY="sk-test", GOD_LLM_MODEL="qwen-plus"),
             basics=DraftBasics(agent_count=2, map_id="missing_map"),
         ),
     )
@@ -872,7 +934,7 @@ def test_generate_draft_accepts_empty_basics_with_defaults(monkeypatch, tmp_path
     draft = anyio.run(
         god_setup.generate_draft,
         GenerateDraftRequest(
-            model_config=ModelConfigPayload(GOD_LLM_API_KEY="sk-test"),
+            model_config=ModelConfigPayload(GOD_LLM_API_KEY="sk-test", GOD_LLM_MODEL="qwen-plus"),
             basics={},
         ),
     )
@@ -895,7 +957,7 @@ def test_generate_draft_reports_timeout_as_gateway_timeout(monkeypatch, tmp_path
         anyio.run(
             god_setup.generate_draft,
             GenerateDraftRequest(
-                model_config=ModelConfigPayload(GOD_LLM_API_KEY="sk-test"),
+                model_config=ModelConfigPayload(GOD_LLM_API_KEY="sk-test", GOD_LLM_MODEL="qwen-plus"),
                 basics=DraftBasics(background="custom background"),
             ),
         )
@@ -912,7 +974,7 @@ def test_publish_writes_new_experiment_context_and_start_request(monkeypatch, tm
         god_setup.publish_experiment,
         PublishRequest(
             draft=_raw_draft(),
-            model_config=ModelConfigPayload(GOD_LLM_API_KEY="sk-test"),
+            model_config=ModelConfigPayload(GOD_LLM_API_KEY="sk-test", GOD_LLM_MODEL="qwen-plus"),
             requested_hypothesis_id="role_study",
             start_immediately=True,
         ),

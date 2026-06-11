@@ -205,12 +205,8 @@ export_internal_env() {
 
   local llm_key="${GOD_LLM_API_KEY:-}"
   local llm_base="${GOD_LLM_API_BASE:-https://api.openai.com/v1}"
-  local llm_model="${GOD_LLM_MODEL:-gpt-5.4}"
-  local nano_model="${GOD_LLM_NANO_MODEL:-${llm_model%.*}.*-nano}"
-  # Friendly default for the nano slot when GOD_LLM_MODEL is the canonical "gpt-5.4".
-  if [[ "$llm_model" == "gpt-5.4" ]]; then
-    nano_model="${GOD_LLM_NANO_MODEL:-gpt-5.4-nano}"
-  fi
+  local llm_model="${GOD_LLM_MODEL:-}"
+  local nano_model="${GOD_LLM_NANO_MODEL:-$llm_model}"
   local embed_key="${GOD_EMBEDDING_API_KEY:-$llm_key}"
   local embed_base="${GOD_EMBEDDING_API_BASE:-$llm_base}"
   local embed_model="${GOD_EMBEDDING_MODEL:-text-embedding-3-large}"
@@ -323,7 +319,6 @@ ensure_env_file() {
 
   if [[ "${GOD_SETUP_MODE:-0}" == "1" ]]; then
     set_env_value "GOD_LLM_API_BASE" "${GOD_LLM_API_BASE:-https://api.openai.com/v1}"
-    set_env_value "GOD_LLM_MODEL" "${GOD_LLM_MODEL:-gpt-5.4}"
     set_env_value "GOD_EMBEDDING_MODEL" "${GOD_EMBEDDING_MODEL:-text-embedding-3-large}"
     load_env
     return 0
@@ -345,19 +340,26 @@ ensure_env_file() {
 
   if [[ "$env_was_created" == "1" && -t 0 ]]; then
     local default_api_base="${GOD_LLM_API_BASE:-https://api.openai.com/v1}"
-    local default_model="${GOD_LLM_MODEL:-gpt-5.4}"
     local api_base_input
-    local model_input
     printf '[GOD] LLM API base URL [%s]: ' "$default_api_base"
     read -r api_base_input
-    printf '[GOD] LLM model [%s]: ' "$default_model"
-    read -r model_input
     set_env_value "GOD_LLM_API_BASE" "${api_base_input:-$default_api_base}"
-    set_env_value "GOD_LLM_MODEL" "${model_input:-$default_model}"
+    load_env
+  fi
+
+  if [[ -z "${GOD_LLM_MODEL:-}" ]]; then
+    if [[ -t 0 ]]; then
+      local model_input
+      printf '[GOD] LLM model is required (examples: qwen-plus, gpt-4o-mini): '
+      read -r model_input
+      [[ -n "$model_input" ]] || die "LLM model is empty"
+      set_env_value "GOD_LLM_MODEL" "$model_input"
+    else
+      die "GOD_LLM_MODEL is empty. Fill $ENV_FILE first."
+    fi
   fi
 
   set_env_value "GOD_LLM_API_BASE" "${GOD_LLM_API_BASE:-https://api.openai.com/v1}"
-  set_env_value "GOD_LLM_MODEL" "${GOD_LLM_MODEL:-gpt-5.4}"
   set_env_value "GOD_EMBEDDING_MODEL" "${GOD_EMBEDDING_MODEL:-text-embedding-3-large}"
 
   load_env
@@ -974,8 +976,8 @@ start_backend() {
   backend_cmd+=" && export LIVE_WORKSPACE_PATH=$(shell_quote "$LIVE_WORKSPACE_PATH")"
   backend_cmd+=" && export AGENTSOCIETY_LLM_API_KEY=\"\${GOD_LLM_API_KEY:-}\""
   backend_cmd+=" && export AGENTSOCIETY_LLM_API_BASE=\"\${GOD_LLM_API_BASE:-https://api.openai.com/v1}\""
-  backend_cmd+=" && export AGENTSOCIETY_LLM_MODEL=\"\${GOD_LLM_MODEL:-gpt-5.4}\""
-  backend_cmd+=" && export AGENTSOCIETY_NANO_LLM_MODEL=\"\${GOD_LLM_NANO_MODEL:-gpt-5.4-nano}\""
+  backend_cmd+=" && export AGENTSOCIETY_LLM_MODEL=\"\${GOD_LLM_MODEL:-}\""
+  backend_cmd+=" && export AGENTSOCIETY_NANO_LLM_MODEL=\"\${GOD_LLM_NANO_MODEL:-\${GOD_LLM_MODEL:-}}\""
   backend_cmd+=" && export AGENTSOCIETY_EMBEDDING_API_KEY=\"\${GOD_EMBEDDING_API_KEY:-\$AGENTSOCIETY_LLM_API_KEY}\""
   backend_cmd+=" && export AGENTSOCIETY_EMBEDDING_API_BASE=\"\${GOD_EMBEDDING_API_BASE:-\$AGENTSOCIETY_LLM_API_BASE}\""
   backend_cmd+=" && export AGENTSOCIETY_EMBEDDING_MODEL=\"\${GOD_EMBEDDING_MODEL:-text-embedding-3-large}\""

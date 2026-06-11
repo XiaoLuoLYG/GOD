@@ -464,7 +464,7 @@ export default function SetupPage() {
             }
             modelForm.setFieldsValue({
                 GOD_LLM_API_BASE: payload.model_config.GOD_LLM_API_BASE?.value || 'https://api.openai.com/v1',
-                GOD_LLM_MODEL: payload.model_config.GOD_LLM_MODEL?.value || 'gpt-5.4',
+                GOD_LLM_MODEL: payload.model_config.GOD_LLM_MODEL?.value || '',
                 GOD_EMBEDDING_API_BASE: payload.model_config.GOD_EMBEDDING_API_BASE?.value || '',
                 GOD_EMBEDDING_MODEL: payload.model_config.GOD_EMBEDDING_MODEL?.value || 'text-embedding-3-large',
                 GOD_BACKEND_HOST: payload.model_config.GOD_BACKEND_HOST?.value || '127.0.0.1',
@@ -887,10 +887,18 @@ export default function SetupPage() {
             : next.init_config.agents.map((item) => item.agent_id === editingAgentId ? agent : item);
         const env = getEnvModule(next);
         env.kwargs.agent_id_name_pairs = next.init_config.agents.map((item) => [item.agent_id, agentName(item)]);
+        const nextInitialLocation = meta?.initial_location
+            || env.kwargs.initial_locations?.[String(agent.agent_id)]
+            || locationOptions[0]?.value
+            || '';
         env.kwargs.initial_locations = {
             ...(env.kwargs.initial_locations || {}),
-            [String(agent.agent_id)]: meta?.initial_location || env.kwargs.initial_locations?.[String(agent.agent_id)] || locationOptions[0]?.value || 'park',
         };
+        if (nextInitialLocation) {
+            env.kwargs.initial_locations[String(agent.agent_id)] = nextInitialLocation;
+        } else {
+            delete env.kwargs.initial_locations[String(agent.agent_id)];
+        }
         setDraft(next);
         setAgentModalOpen(false);
     };
@@ -1063,9 +1071,9 @@ export default function SetupPage() {
                         <Form.Item
                             name="GOD_LLM_MODEL"
                             label={formLabel(copy('model.modelName'), copy('model.modelTooltip'))}
-                            rules={[{ required: true }]}
+                            rules={[{ required: true, message: copy('model.modelRequired') }]}
                         >
-                            <Input />
+                            <Input placeholder={copy('model.modelPlaceholder')} />
                         </Form.Item>
                     </Col>
                     <Col xs={24} lg={8}>
@@ -1730,7 +1738,7 @@ export default function SetupPage() {
                     mapLocations={mapLocations}
                     existingAgents={draft.init_config.agents}
                     initialLocation={editingAgentId === null ? undefined : getEnvModule(draft).kwargs.initial_locations?.[String(editingAgentId)]}
-                    defaultInitialLocation={locationOptions[0]?.value || 'park'}
+                    defaultInitialLocation={locationOptions[0]?.value}
                     onSave={saveAgent}
                     onCancel={() => setAgentModalOpen(false)}
                 />

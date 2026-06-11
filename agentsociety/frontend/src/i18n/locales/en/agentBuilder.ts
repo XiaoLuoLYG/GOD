@@ -106,6 +106,8 @@ export default {
         spritePending: 'No role image generated yet.',
         spritePhotoRequired: 'Choose a reference photo first.',
         spriteRequiredBeforeSave: 'Generate a role image from the selected reference photo before saving.',
+        locationRequired: 'Choose a valid starting location before saving this agent.',
+        locationUnavailable: 'This map has no available locations yet. Add locations in Map Studio before saving agents.',
         generateSprite: 'Generate Role Image',
         generate: 'Generate options',
         generated: 'Candidate options generated.',

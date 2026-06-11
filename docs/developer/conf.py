@@ -8,8 +8,8 @@ ROOT = Path(__file__).resolve().parents[2]
 project = "GOD"
 author = "GOD contributors"
 copyright = f"{datetime.now().year}, GOD contributors"
-release = "0.1"
-version = "0.1"
+release = "0.2.0"
+version = "0.2"
 
 extensions = [
     "myst_parser",

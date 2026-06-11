@@ -24,7 +24,7 @@ Required model settings:
      - ``https://api.openai.com/v1``
    * - ``GOD_LLM_MODEL``
      - Chat model used by GOD and the runtime
-     - ``gpt-5.4``
+     - empty; required before model-backed runs
    * - ``GOD_EMBEDDING_MODEL``
      - Embedding model
      - ``text-embedding-3-large``

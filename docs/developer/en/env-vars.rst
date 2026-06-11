@@ -17,11 +17,11 @@ User-facing variables
      - ``https://api.openai.com/v1``
      - Any OpenAI-compatible endpoint.
    * - ``GOD_LLM_MODEL``
-     - ``gpt-5.4``
-     - Main chat model.
+     - empty
+     - Required main chat model. Examples: ``qwen-plus``, ``gpt-4o-mini``.
    * - ``GOD_LLM_NANO_MODEL``
-     - ``gpt-5.4-nano`` when main model is ``gpt-5.4``
-     - High-frequency smaller model slot.
+     - ``GOD_LLM_MODEL``
+     - Optional high-frequency smaller model slot.
    * - ``GOD_EMBEDDING_API_KEY``
      - ``GOD_LLM_API_KEY``
      - Optional override.

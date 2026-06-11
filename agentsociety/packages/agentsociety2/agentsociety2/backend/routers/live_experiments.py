@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 from agentsociety2.env import CodeGenRouter
 from agentsociety2.logger import get_logger
 from agentsociety2.registry import scan_and_register_custom_modules
+from agentsociety2.backend.services.replay_catalog import _quote_identifier
 from agentsociety2.society.cli import ExperimentRunner
 from agentsociety2.society.models import RunStep
 from agentsociety2.society.society import AgentSociety
@@ -203,18 +204,21 @@ def _read_replay_tail(db_path: Path) -> tuple[int, datetime] | None:
         time_key = str(dataset["time_key"])
         if not table_name or not step_key or not time_key:
             continue
+        quoted_table = _quote_identifier(table_name)
+        quoted_step_key = _quote_identifier(step_key)
+        quoted_time_key = _quote_identifier(time_key)
         try:
             conn = sqlite3.connect(str(db_path))
             try:
                 max_step_row = conn.execute(
-                    f'SELECT MAX("{step_key}") FROM "{table_name}"'
+                    f"SELECT MAX({quoted_step_key}) FROM {quoted_table}"
                 ).fetchone()
                 if max_step_row is None or max_step_row[0] is None:
                     continue
                 latest_step = int(max_step_row[0])
                 time_row = conn.execute(
-                    f'SELECT MAX("{time_key}") FROM "{table_name}" '
-                    f'WHERE "{step_key}" = ?',
+                    f"SELECT MAX({quoted_time_key}) FROM {quoted_table} "
+                    f"WHERE {quoted_step_key} = ?",
                     (latest_step,),
                 ).fetchone()
             finally:

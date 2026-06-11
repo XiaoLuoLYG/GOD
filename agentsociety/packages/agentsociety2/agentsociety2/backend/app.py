@@ -1,7 +1,7 @@
 # ruff: noqa: E402
 
 """
-FastAPI backend service for AI Social Scientist VSCode extension
+FastAPI backend service for GOD.
 
 关联文件：
 - @packages/agentsociety2/agentsociety2/backend/run.py - 服务启动脚本
@@ -22,14 +22,15 @@ FastAPI backend service for AI Social Scientist VSCode extension
 
 from __future__ import annotations
 
-import os
 import logging
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
-from pathlib import Path
 
 from agentsociety2.backend.routers import (
     prefill_params,
@@ -89,35 +90,61 @@ from agentsociety2.logger import get_logger
 
 logger = get_logger()
 
+APP_TITLE = "GOD Backend API"
+APP_DESCRIPTION = (
+    "Backend API service for GOD setup, replay, packages, and live experiment control."
+)
+APP_VERSION = "0.2.0"
+
+
+def _split_csv_env(value: str | None) -> list[str]:
+    return [item.strip().rstrip("/") for item in (value or "").split(",") if item.strip()]
+
+
+def _cors_allow_origins() -> list[str]:
+    configured = _split_csv_env(os.getenv("GOD_CORS_ALLOW_ORIGINS"))
+    if configured:
+        return configured
+
+    frontend_port = (
+        os.getenv("GOD_FRONTEND_PORT")
+        or os.getenv("AGENTSOCIETY_FRONTEND_PORT")
+        or "5174"
+    )
+    return [
+        f"http://127.0.0.1:{frontend_port}",
+        f"http://localhost:{frontend_port}",
+    ]
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """FastAPI 应用生命周期管理（启动/关闭钩子）。"""
     # 启动时执行
-    logger.info("AI Social Scientist Backend Service 启动中...")
+    logger.info("GOD Backend Service 启动中...")
     logger.info(f"项目根目录: {_project_root}")
 
     yield
 
     # 关闭时执行
-    logger.info("AI Social Scientist Backend Service 关闭中...")
+    logger.info("GOD Backend Service 关闭中...")
 
 
 # 创建FastAPI应用
 app = FastAPI(
-    title="AI Social Scientist Backend API",
-    description="Backend API service for AI Social Scientist VSCode extension",
-    version="2.0.0",
+    title=APP_TITLE,
+    description=APP_DESCRIPTION,
+    version=APP_VERSION,
     lifespan=lifespan,
 )
 
-# 配置CORS（允许VSCode插件跨域访问）
+# 配置 CORS：credentials 不能安全地配合 "*"，发布默认只开放本地控制台。
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 生产环境应该限制为特定域名
+    allow_origins=_cors_allow_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
 )
 
 # 注册路由（仅保留必要的API）
@@ -141,8 +168,8 @@ app.include_router(package_imports.router)
 async def root():
     """:returns: 后端服务基本信息与 endpoints 列表。"""
     return {
-        "service": "AI Social Scientist Backend API",
-        "version": "2.0.0",
+        "service": APP_TITLE,
+        "version": APP_VERSION,
         "status": "running",
         "endpoints": {
             "prefill_params": "/api/v1/prefill-params",
@@ -194,7 +221,7 @@ if __name__ == "__main__":
 
     # 解析命令行参数
     parser = argparse.ArgumentParser(
-        description="启动 AI Social Scientist Backend API 服务"
+        description="启动 GOD Backend API 服务"
     )
     parser.add_argument(
         "--log-level",

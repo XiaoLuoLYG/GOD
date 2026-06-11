@@ -9,6 +9,8 @@ Supports ``--dotenv <path>`` for multi-instance isolation.
 
 from __future__ import annotations
 
+import os
+import socket
 import subprocess
 import sys
 import time
@@ -46,6 +48,53 @@ if not _config_file.exists() or (_old_workspace.exists() and not _new_workspace.
 
 load_dotenv(dotenv_path=get_env_file(), override=True)
 reset_free_search_runtime_flags()
+
+
+def _agent_server_endpoint() -> tuple[str, int]:
+    host = os.getenv("AGENT_SERVER_HOST", "127.0.0.1")
+    connect_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
+    port_raw = os.getenv("AGENT_SERVER_PORT") or os.getenv("AGENT_PORT") or "18092"
+    try:
+        port = int(port_raw)
+    except ValueError as exc:
+        raise RuntimeError(f"Invalid AGENT_SERVER_PORT/AGENT_PORT: {port_raw}") from exc
+    return connect_host, port
+
+
+def _terminate_process(process: subprocess.Popen, *, timeout: float = 5.0) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=timeout)
+
+
+def _wait_for_agent_server(
+    process: subprocess.Popen,
+    *,
+    host: str,
+    port: int,
+    timeout: float = 30.0,
+) -> None:
+    deadline = time.monotonic() + timeout
+    last_error: OSError | None = None
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError(
+                f"AgentServer exited before it became ready on {host}:{port} "
+                f"(exit code {process.returncode})."
+            )
+        try:
+            with socket.create_connection((host, port), timeout=0.5):
+                return
+        except OSError as exc:
+            last_error = exc
+            time.sleep(0.1)
+    detail = f": {last_error}" if last_error else ""
+    raise RuntimeError(f"AgentServer did not become ready on {host}:{port} within {timeout:.0f}s{detail}.")
 
 
 def main() -> None:
@@ -88,11 +137,14 @@ def main() -> None:
     agent = subprocess.Popen(agent_cmd)
     gateway = None
     try:
-        time.sleep(0.4)
+        host, port = _agent_server_endpoint()
+        _wait_for_agent_server(agent, host=host, port=port)
         gateway = subprocess.Popen(gateway_cmd)
-    except Exception:
-        if agent.poll() is None:
-            agent.terminate()
+    except Exception as exc:
+        _terminate_process(agent)
+        if isinstance(exc, RuntimeError):
+            raise
+        raise RuntimeError(f"Failed to start JiuwenClaw Gateway after AgentServer readiness check: {exc}") from exc
         raise
 
     procs: list[subprocess.Popen] = [agent] + ([gateway] if gateway else [])

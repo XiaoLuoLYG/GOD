@@ -24,7 +24,7 @@ GOD 把机器配置和实验选择分开管理。
      - ``https://api.openai.com/v1``
    * - ``GOD_LLM_MODEL``
      - GOD 和 runtime 使用的聊天模型
-     - ``gpt-5.4``
+     - 空；模型运行前必填
    * - ``GOD_EMBEDDING_MODEL``
      - embedding 模型
      - ``text-embedding-3-large``

@@ -233,7 +233,7 @@ const labelForChoice = (group: StudioGroup | undefined, value: string) => {
 };
 
 const firstLocationId = (locations: AgentStudioLocation[], fallback?: string) => (
-    fallback || locations[0]?.id || 'park'
+    fallback || locations[0]?.id || ''
 );
 
 const shortText = (value: unknown, max = 180) => {
@@ -939,8 +939,10 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         const nextInitialLocation = knownLocations.has(rawInitialLocation)
             ? rawInitialLocation
             : firstLocationId(mapLocations, defaultInitialLocation);
-        if (rawInitialLocation && rawInitialLocation !== nextInitialLocation) {
+        if (rawInitialLocation && rawInitialLocation !== nextInitialLocation && nextInitialLocation) {
             message.warning(copy('locationRemapped', { from: rawInitialLocation, to: nextInitialLocation }));
+        } else if (rawInitialLocation && !nextInitialLocation) {
+            message.warning(copy('locationUnavailable'));
         }
         importedProfile.routine = {
             ...routine,
@@ -1065,6 +1067,10 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
     const buildCurrentAgent = () => {
         if (photoFile && !characterAsset) {
             message.warning(copy('spriteRequiredBeforeSave'));
+            return null;
+        }
+        if (!initialLocationValue) {
+            message.warning(copy('locationRequired'));
             return null;
         }
         const baseProfile = parseJsonObject(profileJsonText, 'profile_json');
@@ -1387,6 +1393,9 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                     </Tooltip>
                 </div>
                 <div className="agent-studio-choice-list">
+                    {!group.options.length && group.id === 'initial_location' && (
+                        <Alert type="warning" showIcon message={copy('locationUnavailable')} />
+                    )}
                     {group.options.map((option) => {
                         const value = valueForOption(group, option);
                         return (

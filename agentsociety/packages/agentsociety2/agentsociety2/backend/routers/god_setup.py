@@ -44,7 +44,7 @@ router = APIRouter(prefix="/api/v1/god/setup", tags=["god-setup"])
 
 ENV_DEFAULTS = {
     "GOD_LLM_API_BASE": "https://api.openai.com/v1",
-    "GOD_LLM_MODEL": "gpt-5.4",
+    "GOD_LLM_MODEL": "",
     "GOD_EMBEDDING_MODEL": "text-embedding-3-large",
     "GOD_BACKEND_HOST": "127.0.0.1",
     "GOD_BACKEND_PORT": "8001",
@@ -209,7 +209,7 @@ class StartDefaultRequest(BaseModel):
 class AgentStudioGenerateRequest(BaseModel):
     experiment_context: dict[str, Any] = Field(default_factory=dict)
     map_id: str = DEFAULT_MAP_ID
-    map_locations: list[dict[str, Any]] = Field(default_factory=list)
+    map_locations: list[dict[str, Any]] | None = None
     existing_agents: list[dict[str, Any]] = Field(default_factory=list)
     language: str = "zh"
     source: dict[str, Any] = Field(default_factory=dict)
@@ -713,7 +713,11 @@ def _studio_group_titles(zh: bool) -> dict[str, tuple[str, str, bool]]:
 
 
 def _studio_location_options(request: AgentStudioGenerateRequest) -> list[AgentStudioOption]:
-    locations = request.map_locations or _map_locations_for_status(request.map_id)
+    locations = (
+        request.map_locations
+        if request.map_locations is not None
+        else _map_locations_for_status(request.map_id)
+    )
     options: list[AgentStudioOption] = []
     for index, item in enumerate(locations):
         if not isinstance(item, dict) or not item.get("id"):
@@ -729,8 +733,6 @@ def _studio_location_options(request: AgentStudioGenerateRequest) -> list[AgentS
         )
         if index >= 11:
             break
-    if not options:
-        options.append(AgentStudioOption(id="park", label="Park (park)" if not _language_is_zh(request.language) else "公园 (park)"))
     return options
 
 
@@ -875,7 +877,7 @@ def _agent_studio_response(request: AgentStudioGenerateRequest) -> AgentStudioGe
             options = _studio_location_options(request)
             valid_ids = {option.id for option in options}
             locked = request.locked_choices.get(group_id)
-            selected[group_id] = locked if locked in valid_ids else options[0].id
+            selected[group_id] = locked if locked in valid_ids else (options[0].id if options else "")
             groups.append(AgentStudioGroup(id=group_id, title=title, step=step, allow_custom=False, options=options))
             continue
 
@@ -895,8 +897,10 @@ def _agent_studio_response(request: AgentStudioGenerateRequest) -> AgentStudioGe
 
     existing_names = _studio_existing_names(request.existing_agents)
     location_options = next((group.options for group in groups if group.id == "initial_location"), [])
-    initial_location = selected.get("initial_location") or (location_options[0].id if location_options else "park")
-    location_label = _selected_location_label(location_options, initial_location)
+    initial_location = selected.get("initial_location") or (location_options[0].id if location_options else "")
+    location_label = _selected_location_label(location_options, initial_location) if initial_location else (
+        "未配置地点" if zh else "No map location configured"
+    )
     name = _studio_name(theme, seed, zh, existing_names)
     role = selected.get("identity_role") or ("参与者" if zh else "participant")
     function = selected.get("identity_function") or ("观察" if zh else "observe")
@@ -2017,7 +2021,11 @@ async def setup_status() -> dict[str, Any]:
             (item for item in default_experiments if item["key"] == DEFAULT_EXPERIMENT_KEY),
             None,
         ),
-        "needs_setup": not bool(env.get("GOD_LLM_API_KEY")) or not has_current,
+        "needs_setup": (
+            not bool(env.get("GOD_LLM_API_KEY"))
+            or not bool(env.get("GOD_LLM_MODEL"))
+            or not has_current
+        ),
     }
 
 
@@ -2038,7 +2046,9 @@ async def save_model_config(payload: ModelConfigPayload) -> dict[str, Any]:
     }
     for key, default in ENV_DEFAULTS.items():
         if key in MODEL_KEYS and key not in values:
-            values[key] = _merged_env().get(key, default)
+            fallback = _merged_env().get(key, default)
+            if fallback:
+                values[key] = fallback
     if values:
         _write_model_env_values(values)
     return await setup_status()
@@ -2053,6 +2063,8 @@ async def generate_draft(request: GenerateDraftRequest) -> dict[str, Any]:
     model = model_config.GOD_LLM_MODEL or env.get("GOD_LLM_MODEL") or ENV_DEFAULTS["GOD_LLM_MODEL"]
     if not api_key.strip():
         raise HTTPException(status_code=400, detail="GOD_LLM_API_KEY is required to generate an experiment draft")
+    if not model.strip():
+        raise HTTPException(status_code=400, detail="GOD_LLM_MODEL is required to generate an experiment draft")
     package = _load_map_package(request.basics.map_id)
     try:
         raw = await _call_openai_compatible(

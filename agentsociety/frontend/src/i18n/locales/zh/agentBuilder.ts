@@ -106,6 +106,8 @@ export default {
         spritePending: '尚未生成角色形象。',
         spritePhotoRequired: '请先选择参考图。',
         spriteRequiredBeforeSave: '保存前需要先根据参考图生成角色形象。',
+        locationRequired: '保存智能体前，请先选择一个有效出生地点。',
+        locationUnavailable: '当前地图还没有可用地点。请先在 Map Studio 添加地点，再保存智能体。',
         generateSprite: '生成角色形象',
         generate: '生成选项',
         generated: '已生成候选选项。',

@@ -1361,8 +1361,11 @@ Initialization example:
     def _runtime_path(self, relative_path: str) -> Path | None:
         if self._agent_work_dir is None:
             return None
-        target = (self._agent_work_dir / relative_path).resolve()
-        if target != self._agent_work_dir and self._agent_work_dir not in target.parents:
+        work_root = self._agent_work_dir.resolve()
+        target = (work_root / relative_path).resolve()
+        try:
+            target.relative_to(work_root)
+        except ValueError:
             raise ValueError(f"Path escapes agent workspace: {relative_path}")
         target.parent.mkdir(parents=True, exist_ok=True)
         return target

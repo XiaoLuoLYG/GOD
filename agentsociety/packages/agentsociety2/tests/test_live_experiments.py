@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from datetime import datetime
 from types import SimpleNamespace
 
 from agentsociety2.backend.routers.live_experiments import (
     AskTarget,
     LiveExperimentSession,
+    _read_replay_tail,
 )
 
 
@@ -178,3 +180,44 @@ async def _live_interaction_records_operator_command(monkeypatch, tmp_path):
     assert fake_writer.rows[0]["prompt"] == "What happened?"
     assert fake_writer.rows[0]["target"] == {"type": "society"}
     assert fake_writer.rows[0]["status"] == "completed"
+
+
+def test_read_replay_tail_quotes_catalog_identifiers(tmp_path):
+    db_path = tmp_path / "sqlite.db"
+    table_name = 'agent "snapshot"'
+    step_key = 'step "num"'
+    time_key = 'time "value"'
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            """
+            CREATE TABLE replay_dataset_catalog (
+                table_name TEXT,
+                step_key TEXT,
+                time_key TEXT,
+                capabilities_json TEXT
+            )
+            """
+        )
+        conn.execute(
+            f'CREATE TABLE "{table_name.replace(chr(34), chr(34) + chr(34))}" '
+            f'("{step_key.replace(chr(34), chr(34) + chr(34))}" INTEGER, '
+            f'"{time_key.replace(chr(34), chr(34) + chr(34))}" TEXT)'
+        )
+        conn.execute(
+            "INSERT INTO replay_dataset_catalog VALUES (?, ?, ?, ?)",
+            (table_name, step_key, time_key, '["agent_snapshot"]'),
+        )
+        conn.execute(
+            f'INSERT INTO "{table_name.replace(chr(34), chr(34) + chr(34))}" VALUES (?, ?)',
+            (7, "2026-05-31T09:30:00+08:00"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    tail = _read_replay_tail(db_path)
+
+    assert tail is not None
+    assert tail[0] == 7
+    assert tail[1].isoformat() == "2026-05-31T09:30:00+08:00"
