@@ -313,6 +313,26 @@ def test_setup_status_loads_enabled_curated_experiments(monkeypatch, tmp_path):
     assert status["default_experiment"]["key"] == "god_town"
 
 
+def test_setup_status_marks_default_experiment_replay_db_existence(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    workspace = tmp_path / "quick_experiments"
+    for hypothesis_id in ("god_town", "pku_trump_visit"):
+        init_dir = workspace / f"hypothesis_{hypothesis_id}" / "experiment_1" / "init"
+        init_dir.mkdir(parents=True)
+        (init_dir / "init_config.json").write_text("{}", encoding="utf-8")
+    pku_run_dir = workspace / "hypothesis_pku_trump_visit" / "experiment_1" / "run"
+    pku_run_dir.mkdir(parents=True)
+    (pku_run_dir / "sqlite.db").write_bytes(b"db")
+
+    status = anyio.run(god_setup.setup_status)
+
+    by_key = {item["key"]: item for item in status["default_experiments"]}
+    assert by_key["god_town"]["config_exists"] is True
+    assert by_key["god_town"]["replay_db_exists"] is False
+    assert by_key["pku_trump_visit"]["config_exists"] is True
+    assert by_key["pku_trump_visit"]["replay_db_exists"] is True
+
+
 def test_agent_studio_generate_keeps_location_on_current_map():
     response = anyio.run(
         god_setup.generate_agent_studio_options,

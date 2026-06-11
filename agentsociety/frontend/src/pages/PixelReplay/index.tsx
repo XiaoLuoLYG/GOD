@@ -1259,6 +1259,29 @@ const sleep = (ms: number) => new Promise<void>((resolve) => {
 
 const toErrorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+const isReplayDatabaseNotReadyError = (error: unknown) => (
+    toErrorMessage(error).includes('Database not found')
+);
+
+async function ensureInitialLiveReplayFrame(
+    liveBaseUrl: string | undefined,
+    withLiveWorkspace: (path?: string) => string,
+): Promise<LiveStatus | undefined> {
+    if (!liveBaseUrl) {
+        return undefined;
+    }
+    const status = await postJson<LiveStatus>(withLiveWorkspace('/sessions'));
+    if (status.status === 'failed') {
+        throw new Error(status.error || 'Live session failed before replay data was ready');
+    }
+    if (status.status === 'waiting' && status.step_count === 0) {
+        return postJson<LiveStatus>(withLiveWorkspace('/run-step'), {
+            tick: status.default_tick,
+        });
+    }
+    return status;
+}
+
 async function waitForInitialReplay<T>(
     operation: () => Promise<T>,
     onRetry: (error: unknown, attempt: number) => void,
@@ -2818,19 +2841,31 @@ export default function PixelReplay() {
             try {
                 const { nextMap, nextLiveStatus } = await waitForInitialReplay(
                     async () => {
-                        const [mapInfo, initialProfiles] = await Promise.all([
-                            fetchJson<ReplayMapInfo>(withWorkspace('/map')),
-                            fetchJson<AgentProfile[]>(withWorkspace('/agents/profiles')),
-                        ]);
-                        const loadedMap = await loadWalkableMap(mapInfo, initialProfiles, t, currentLanguage);
                         let loadedLiveStatus: LiveStatus | undefined;
+                        let liveStartupError: unknown;
                         if (liveBaseUrl) {
                             try {
-                                loadedLiveStatus = await postJson<LiveStatus>(withLiveWorkspace('/sessions'));
+                                setLoadingDetail(t('replay.pixel.loading.startingLive'));
+                                loadedLiveStatus = await ensureInitialLiveReplayFrame(liveBaseUrl, withLiveWorkspace);
                             } catch (err) {
-                                console.info('Live session unavailable; falling back to replay-only mode.', err);
+                                liveStartupError = err;
+                                console.info('Live session unavailable while preparing replay data.', err);
                             }
                         }
+                        let mapInfo: ReplayMapInfo;
+                        let initialProfiles: AgentProfile[];
+                        try {
+                            [mapInfo, initialProfiles] = await Promise.all([
+                                fetchJson<ReplayMapInfo>(withWorkspace('/map')),
+                                fetchJson<AgentProfile[]>(withWorkspace('/agents/profiles')),
+                            ]);
+                        } catch (err) {
+                            if (liveStartupError && isReplayDatabaseNotReadyError(err)) {
+                                throw liveStartupError;
+                            }
+                            throw err;
+                        }
+                        const loadedMap = await loadWalkableMap(mapInfo, initialProfiles, t, currentLanguage);
                         await refreshReplayData(true);
                         return { nextMap: loadedMap, nextLiveStatus: loadedLiveStatus };
                     },

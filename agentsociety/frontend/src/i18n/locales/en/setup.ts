@@ -79,6 +79,8 @@ export default {
         chooseBuiltin: 'Browse Built-Ins',
         builtinModalTitle: 'Built-In Experiments',
         hasReplay: 'Replay preview',
+        needsFirstFrame: 'Will generate first frame',
+        previewReplay: 'Preview Published Replay',
         openDefault: 'Set Current and Start',
         customTitle: 'Create Custom Experiment',
         customDescription: 'Generate a new experiment draft, edit agents and environment settings, then publish it as the current experiment.',

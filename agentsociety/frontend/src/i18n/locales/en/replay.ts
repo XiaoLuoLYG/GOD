@@ -58,6 +58,7 @@ export default {
     pixel: {
         loading: {
             text: "Loading town replay...",
+            startingLive: "Starting the live experiment and generating the first frame...",
             retry: "GOD is preparing the town replay. Waiting for services and the first frame... Retry {{attempt}}: {{error}}",
         },
         error: {

@@ -58,6 +58,7 @@ export default {
     pixel: {
         loading: {
             text: "正在加载小镇回放...",
+            startingLive: "正在启动实时实验并生成第一帧...",
             retry: "GOD 正在准备小镇回放，等待服务和第一帧数据就绪... 第 {{attempt}} 次重试：{{error}}",
         },
         error: {

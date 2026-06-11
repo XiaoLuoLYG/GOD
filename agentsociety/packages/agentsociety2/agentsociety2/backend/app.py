@@ -30,6 +30,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
 from agentsociety2.backend.routers import (
@@ -52,6 +53,20 @@ from agentsociety2.backend.routers import (
 # 加载环境变量
 _project_root = Path(__file__).resolve().parents[2]
 load_dotenv(_project_root / ".env")
+
+
+def _find_god_root() -> Path:
+    raw = os.getenv("GOD_ROOT")
+    if raw:
+        return Path(raw).expanduser().resolve()
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "scripts" / "god.sh").exists():
+            return parent
+    return Path(__file__).resolve().parents[5]
+
+
+_repo_root = _find_god_root()
+_public_site_root = _repo_root / "docs" / "site"
 
 
 # 配置标准 logging
@@ -163,6 +178,13 @@ app.include_router(map_packs.router)
 app.include_router(experiment_packs.router)
 app.include_router(package_imports.router)
 
+if _public_site_root.exists():
+    app.mount(
+        "/public-site",
+        StaticFiles(directory=str(_public_site_root), html=True),
+        name="public-site",
+    )
+
 
 @app.get("/")
 async def root():
@@ -186,6 +208,7 @@ async def root():
             "map_packs": "/api/v1/god/map-packs/*",
             "experiment_packs": "/api/v1/god/experiment-packs/*",
             "package_imports": "/api/v1/god/packages/*",
+            "public_site": "/public-site/*",
         },
     }
 

@@ -112,12 +112,15 @@ def experiment_path(workspace_path: Path, entry: dict[str, Any]) -> Path:
 def status_entries(workspace_path: Path) -> list[dict[str, Any]]:
     values: list[dict[str, Any]] = []
     for entry in load_registry_entries(workspace_path):
-        config_path = experiment_path(workspace_path, entry) / "init" / "init_config.json"
+        exp_path = experiment_path(workspace_path, entry)
+        config_path = exp_path / "init" / "init_config.json"
+        replay_db_path = exp_path / "run" / "sqlite.db"
         values.append(
             {
                 **entry,
                 "workspace_path": str(workspace_path),
                 "config_exists": config_path.exists(),
+                "replay_db_exists": replay_db_path.exists(),
             }
         )
     return values
