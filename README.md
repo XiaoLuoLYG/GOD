@@ -4,55 +4,97 @@
 </h1>
 
 <p align="center">
-  <img src="docs/assets/screenshots/00-hero.png" alt="GOD — Govern · Observe · Direct" width="100%" />
+  <a href="https://xiaoluolyg.github.io/GOD/replays/god-town/">
+    <img src="docs/assets/screenshots/00-hero.png" alt="GOD — click to open the browser replay" width="100%" />
+  </a>
 </p>
 <p align="center">
-  <b>🌩️ Be like a god to a town of agents.</b><br/>
-  Pause time. Whisper to a soul. Bend the next step. Reset the world — all from a single click.
+  <b>🌩️ An operator console for inspectable agent societies.</b><br/>
+  Pause simulation time, ask targeted questions, intervene in the next step, and export portable artifacts from one interface.
 </p>
 
+<p align="center">
+  <a href="https://xiaoluolyg.github.io/GOD/replays/god-town/"><b>▶ Try browser replay</b></a>
+  &nbsp;·&nbsp; no install, no API key &nbsp;·&nbsp;
+  <a href="#-quick-start"><b>Run locally</b></a>
+</p>
 
 <p align="center">
+  <a href="#-live-demo"><b>🌐 Live Demo</b></a> ·
   <a href="#-quick-start"><b>🚀 Quick Start</b></a> ·
-  <a href="#-highlights">Highlights</a> ·
-  <a href="#-features">Features</a> ·
-  <a href="#%EF%B8%8F-how-it-works">How it works</a> ·
-  <a href="#-built-in-experiments">Built-in Experiments</a> ·
-  <a href="https://xiaoluolyg.github.io/GOD/">Scenarios</a> ·
-  <a href="https://xiaoluolyg.github.io/GOD/developer/">Developer Docs</a> ·
   <a href="#-updates">Updates</a> ·
   <a href="#%EF%B8%8F-roadmap">Roadmap</a> ·
+  <a href="#-highlights">Highlights</a> ·
+  <a href="#-features">Features</a> ·
+  <a href="#-built-in-experiments">Built-in Experiments</a> ·
+  <a href="https://xiaoluolyg.github.io/GOD/">Public Site</a> ·
+  <a href="https://xiaoluolyg.github.io/GOD/developer/">Developer Docs</a> ·
   <a href="CONTRIBUTING.md">Contributing</a> ·
   <a href="README.zh-CN.md">🌏 中文</a>
 </p>
 
 <p align="center">
+  <a href="https://github.com/XiaoLuoLYG/GOD/releases/tag/v0.2.0">
+    <img alt="Release" src="https://img.shields.io/github/v/release/XiaoLuoLYG/GOD?style=flat-square" />
+  </a>
+  <a href="https://xiaoluolyg.github.io/GOD/replays/god-town/">
+    <img alt="Live replay" src="https://img.shields.io/badge/demo-browser%20replay-22c55e?style=flat-square" />
+  </a>
   <img alt="Python" src="https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white" />
   <img alt="React" src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black" />
   <img alt="Vite" src="https://img.shields.io/badge/Vite-6-646CFF?style=flat-square&logo=vite&logoColor=white" />
   <img alt="No-Code Setup" src="https://img.shields.io/badge/setup-no--code-22c55e?style=flat-square&logo=googlechrome&logoColor=white" />
   <img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square" />
   <img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-14b8a6?style=flat-square" />
-  <img alt="Status" src="https://img.shields.io/badge/status-alpha-orange?style=flat-square" />
 </p>
 
 ---
 
-> Other generative-agent projects let you **watch**.
-> **GOD lets you reign.**
+> Many generative-agent projects make the human a **spectator**.
+> **GOD exposes the operator workflow.**
 >
-> One screen. Pause time. Question any soul. Rewrite the next step. Restart the world.
-> The missing operator console for a society of agents — alive while you steer it.
+> One screen for replay, targeted questions, next-step interventions, and portable artifacts.
+> The goal is an inspectable control room for language-agent societies, not a claim of social realism.
+
+## 🗓️ Updates
+
+- **2026-06-11 · [v0.2.0](https://github.com/XiaoLuoLYG/GOD/releases/tag/v0.2.0)** — public site with browser replays;
+  Experiment / Map / Agent pack hubs and ZIP import-export; Windows launcher; hardened first-run startup.
+  ([#40](https://github.com/XiaoLuoLYG/GOD/pull/40) [#49](https://github.com/XiaoLuoLYG/GOD/pull/49)
+  [#57](https://github.com/XiaoLuoLYG/GOD/pull/57) [#61](https://github.com/XiaoLuoLYG/GOD/pull/61)
+  [#64](https://github.com/XiaoLuoLYG/GOD/pull/64) [#65](https://github.com/XiaoLuoLYG/GOD/pull/65))
+- **2026-05 · Operator studios** — bilingual control room, map-first `/ask` + `/intervene` rail,
+  Agent Studio, Map Studio, unified skill runtime.
+  ([#26](https://github.com/XiaoLuoLYG/GOD/pull/26)–[#31](https://github.com/XiaoLuoLYG/GOD/pull/31))
+
+## 🛣️ Roadmap
+
+**Shipped:** operator console (replay, ask, intervene) · Agent / Map Studio · no-code setup · pluggable maps ·
+pack import-export · [public site](https://xiaoluolyg.github.io/GOD/) & browser replays · bilingual UI · Windows launcher
+
+**Next:** pluggable agent runtimes · multi-experiment orchestration · live / event-responsive worlds ·
+large-scale simulation · evaluation · operator notes · hosted live control room
+
+Have an idea? [Open an issue or PR](#-contributing).
+
+## 🌐 Live Demo
+
+Open a curated replay in your browser — scrub the map, read agent profiles, download packs when you want to run locally.
+
+| | |
+| --- | --- |
+| 🏘️ [**GOD Town replay**](https://xiaoluolyg.github.io/GOD/replays/god-town/) | 🏫 [**PKU Public Situation**](https://xiaoluolyg.github.io/GOD/replays/pku-public-situation/) |
+| 📦 [**Experiment packs**](https://xiaoluolyg.github.io/GOD/experiments/) | 🌐 [**Full public site**](https://xiaoluolyg.github.io/GOD/) |
 
 ## ✨ Highlights
 
 <table>
 <tr>
   <td align="center" width="20%">⏯️<br/><b>Pause time</b><br/><sub>Stop, scrub, fast-forward, auto-play any live step.</sub></td>
-  <td align="center" width="20%">💬<br/><b>Whisper to anyone</b><br/><sub>Ask one resident, a group, or the whole town — mid-run.</sub></td>
-  <td align="center" width="20%">🎛️<br/><b>Bend the next step</b><br/><sub>Inject instructions and watch agents react in real time.</sub></td>
+  <td align="center" width="20%">💬<br/><b>Ask anyone</b><br/><sub>Ask one resident, a group, or the whole town — mid-run.</sub></td>
+  <td align="center" width="20%">🎛️<br/><b>Steer the next step</b><br/><sub>Inject instructions and inspect how agents respond.</sub></td>
   <td align="center" width="20%">🪄<br/><b>No-code setup</b><br/><sub>Configure model, scenario and agents from a browser wizard.</sub></td>
-  <td align="center" width="20%">🔄<br/><b>Reset reality</b><br/><sub>One command wipes a stale run and re-seeds a clean world.</sub></td>
+  <td align="center" width="20%">🔄<br/><b>Reset run state</b><br/><sub>One command wipes a stale run and re-seeds a clean world.</sub></td>
 </tr>
 </table>
 
@@ -116,6 +158,9 @@ Full walkthrough: **[Quickstart →](QUICKSTART.md)**
 | 🧼 | **One-command reset** | Wipe replay data and seed a clean society without leaving the terminal. |
 | 🗺️ | **Pixel town world** | A live tiled map: locations, actions, messages, statuses — every step replay-friendly. |
 | 🧱 | **Single current experiment** | `.env` stores local model/port settings; `.god/current_experiment.json` stores the one active experiment. |
+| 🌐 | **Browser replays** | Curated replays on GitHub Pages — no local setup or API key required. |
+| 📦 | **Pack library** | Import and export Experiment, Map, and Agent packs; browse more on the public site. |
+| 🪟 | **Windows launcher** | `god.cmd start` on PowerShell — same one-command flow as macOS/Linux. |
 
 ## 🏗️ How It Works
 
@@ -177,6 +222,8 @@ On Windows, replace `./scripts/god.sh` with `.\scripts\god.cmd`.
 ## 🧪 Built-in Experiments
 
 GOD ships two built-in experiments and treats them exactly like experiments you publish yourself. The setup wizard writes the selected experiment to `.god/current_experiment.json`; `start`, `open`, and `new-run` then act only on that current experiment.
+
+More downloadable scenarios — Empty City Gate, Gaokao Blackout, Hogwarts Parent Meeting, and others — live on the [**public site**](https://xiaoluolyg.github.io/GOD/experiments/).
 
 `.env` is intentionally local-only and only stores model, API, port, and similar machine settings. It no longer decides the default experiment or map, so an old `GOD_MAP_ID=pku` cannot make GOD Town load the PKU map.
 
@@ -257,44 +304,6 @@ uv run python scripts/validate_map_package.py custom/maps/<map_id>
 ```
 
 The setup wizard will list valid packages without code changes. v1 supports Tiled JSON maps with PNG tilesets and a `Collisions` layer where `0` means walkable. The PKU campus package now ships in the repository at `agentsociety/custom/maps/pku/`. See [docs/MAP_PACKAGES.md](docs/MAP_PACKAGES.md) for the full package contract.
-
-## 🗓️ Updates
-
-Supported feature updates:
-
-- **2026-05-22 · Runtime localization · [#26](https://github.com/XiaoLuoLYG/GOD/pull/26)** — replay, setup, map metadata, locations, actions, statuses, emotions, group labels, and system event templates now switch cleanly between English and Chinese while preserving free-form agent content.
-- **2026-05-23 · Control Room command UI · [#27](https://github.com/XiaoLuoLYG/GOD/pull/27)** — PixelReplay now uses a full-height map with a right-side rail, Summary/Chat/Residents/Live Console tabs, and a map-embedded `/ask` + `/intervene` command composer with mention completion.
-- **2026-05-24 · Agent Studio wizard · [#28](https://github.com/XiaoLuoLYG/GOD/pull/28)** — Agent Builder and Setup drafts share a map-bound Studio flow for seed, identity, appearance, personality, daily setup, review, and structured agent metadata.
-- **2026-05-25 · Strict sprite pipeline · [#29](https://github.com/XiaoLuoLYG/GOD/pull/29)** — Agent Studio can generate validated map-compatible sprites, preserve existing profile text, enforce clean IDs/config sync, and keep generated `Generated_Agent_*.png` files local by default.
-- **2026-05-26 · Agent runtime wiring · [#30](https://github.com/XiaoLuoLYG/GOD/pull/30)** — Agents now use the sames skill runtime consistently across AgentBuilder, setup drafts, imports, applies, and default experiment configs.
-- **2026-05-27 · Map Studio · [#31](https://github.com/XiaoLuoLYG/GOD/pull/31)** — GOD now includes a Map Studio for generating or uploading local map drafts, configuring image generation, calibrating anchors/collisions, validating packages, publishing them, and returning to Setup with the new `map_id` selected.
-
-## 🛣️ Roadmap
-
-### ✅ Completed
-
-- [x] 🗺️ **Pluggable map packages** — drop a folder under `agentsociety/custom/maps/<map_id>/`, refresh the wizard, and a new world is selectable. Auto-discovered, validated, hot-swappable. See [`docs/MAP_PACKAGES.md`](docs/MAP_PACKAGES.md).
-- [x] 🏫 **PKU campus map** — the PKU map package is bundled as a first-class map alongside The Ville.
-- [x] 🪄 **No-code setup wizard** — browser flow for model setup, built-in experiment choice, custom experiment generation/editing, and launch.
-- [x] 🧪 **Scripted experiments** — reproducible experiments ship as plain folders under `quick_experiments/<hypothesis>/<experiment>/`; choosing or publishing one makes it the current experiment.
-- [x] 🎮 **Control Room command rail** — replay controls, resident roster, live console, targeted Ask, and Intervene now live in one map-first operator surface.
-- [x] 🧬 **Agent Studio v1** — map-aware add/edit flow with structured profile metadata, ID validation, setup integration, and sprite generation support.
-- [x] 🧭 **Map Studio v1** — prompt/reference-image map draft generation, anchor and collision calibration, package validation, publishing, and Setup handoff.
-- [x] 🌏 **Bilingual runtime UI** — English/Chinese UI and runtime-owned labels for setup, replay, maps, statuses, actions, and system events.
-- [x] 🔌 **Agent skill-runtime path** — the shipped JiuwenClaw agent adapter now uses the AgentSociety skill runtime as the canonical execution path.
-
-### 🛣️ Not Yet Done
-
-- [ ] 🤖 **Pluggable agent runtimes** — swap LLM runtimes and persona templates as cleanly as we now swap maps.
-- [ ] 🧪 **Multi-experiment orchestration** — run experiments, control groups, repeats, and ablations side-by-side.
-- [ ] 🗺️ **Live map generation** — maps that evolve with events, repairs, blockages, and crowds.
-- [ ] 🌦️ **Event-responsive worlds** — weather, accidents, festivals, rumors, shortages, repairs, blockages, and crowds that change agent behavior over time.
-- [ ] 🌐 **Large-scale simulation** — AgentSociety batching, sharded runs, sampled replay, and performance-minded replay summaries.
-- [ ] 📊 **Experiment evaluation** — cross-run metrics, behavior diffs, intervention effect analysis.
-- [ ] 📝 **Operator workflow** — per-step notes, tags, bookmarks, key-event summaries.
-- [ ] 🌍 **Hosted demo & scenario sharing** — public demo, experiment/map templates, and one-click import/export for community scenarios.
-
-Have an idea? [Open an issue or PR](#-contributing).
 
 ## 🤝 Contributing
 

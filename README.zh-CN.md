@@ -4,55 +4,97 @@
 </h1>
 
 <p align="center">
-  <img src="docs/assets/screenshots/00-hero.png" alt="GOD — Govern · Observe · Direct" width="100%" />
+  <a href="https://xiaoluolyg.github.io/GOD/replays/god-town/">
+    <img src="docs/assets/screenshots/00-hero.png" alt="GOD — 点击打开浏览器回放" width="100%" />
+  </a>
 </p>
 <p align="center">
-  <b>🌩️ 像上帝一样，俯瞰一座由 Agent 组成的小镇。</b><br/>
-  暂停时间。操控环境。对某个灵魂发问。一键重置 —— 全部在一个屏幕里完成。
+  <b>🌩️ 面向可检查 agent society 的 operator console。</b><br/>
+  暂停仿真时间，定向提问，干预下一步，并从同一个界面导出可移植 artifacts。
 </p>
 
+<p align="center">
+  <a href="https://xiaoluolyg.github.io/GOD/replays/god-town/"><b>▶ 浏览器回放</b></a>
+  &nbsp;·&nbsp; 无需安装、无需 API key &nbsp;·&nbsp;
+  <a href="#-快速开始"><b>本地运行</b></a>
+</p>
 
 <p align="center">
+  <a href="#-浏览器回放"><b>🌐 浏览器回放</b></a> ·
   <a href="#-快速开始"><b>🚀 快速开始</b></a> ·
-  <a href="#-亮点">亮点</a> ·
-  <a href="#-核心能力">核心能力</a> ·
-  <a href="#%EF%B8%8F-架构">架构</a> ·
-  <a href="#-内置实验">内置实验</a> ·
-  <a href="https://xiaoluolyg.github.io/GOD/zh/">使用场景</a> ·
-  <a href="https://xiaoluolyg.github.io/GOD/developer/zh/">开发者文档</a> ·
   <a href="#-更新">更新</a> ·
   <a href="#%EF%B8%8F-roadmap">Roadmap</a> ·
+  <a href="#-亮点">亮点</a> ·
+  <a href="#-核心能力">核心能力</a> ·
+  <a href="#-内置实验">内置实验</a> ·
+  <a href="https://xiaoluolyg.github.io/GOD/zh/">公开站</a> ·
+  <a href="https://xiaoluolyg.github.io/GOD/developer/zh/">开发者文档</a> ·
   <a href="CONTRIBUTING.zh-CN.md">参与开发</a> ·
   <a href="README.md">🌏 English</a>
 </p>
 
 <p align="center">
+  <a href="https://github.com/XiaoLuoLYG/GOD/releases/tag/v0.2.0">
+    <img alt="Release" src="https://img.shields.io/github/v/release/XiaoLuoLYG/GOD?style=flat-square" />
+  </a>
+  <a href="https://xiaoluolyg.github.io/GOD/replays/god-town/">
+    <img alt="Live replay" src="https://img.shields.io/badge/demo-浏览器回放-22c55e?style=flat-square" />
+  </a>
   <img alt="Python" src="https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white" />
   <img alt="React" src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black" />
   <img alt="Vite" src="https://img.shields.io/badge/Vite-6-646CFF?style=flat-square&logo=vite&logoColor=white" />
   <img alt="No-Code Setup" src="https://img.shields.io/badge/setup-no--code-22c55e?style=flat-square&logo=googlechrome&logoColor=white" />
   <img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square" />
   <img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-14b8a6?style=flat-square" />
-  <img alt="Status" src="https://img.shields.io/badge/status-alpha-orange?style=flat-square" />
 </p>
 
 ---
 
-> 别的 generative-agent 项目只让你 **观察**。
-> **GOD 让你掌控一切**
+> 许多 generative-agent 项目把人放在 **旁观者** 位置。
+> **GOD 把 operator workflow 显式暴露出来。**
 >
-> 一个屏幕。暂停时间。灵魂发问。操控环境。重启世界。
-> 它是缺失的那一层操作台 —— 让一座 Agent 社会在你手中实时运转。
+> 一个屏幕完成 replay、定向提问、下一步干预和可移植 artifacts 导出。
+> 目标是让 language-agent society 可检查、可干预、可复现，而不是证明社会真实性。
+
+## 🗓️ 更新
+
+- **2026-06-11 · [v0.2.0](https://github.com/XiaoLuoLYG/GOD/releases/tag/v0.2.0)** —— 公开站与浏览器回放；
+  Experiment / Map / Agent 包 hub 与 ZIP 导入导出；Windows 一键启动；首次启动硬化。
+  ([#40](https://github.com/XiaoLuoLYG/GOD/pull/40) [#49](https://github.com/XiaoLuoLYG/GOD/pull/49)
+  [#57](https://github.com/XiaoLuoLYG/GOD/pull/57) [#61](https://github.com/XiaoLuoLYG/GOD/pull/61)
+  [#64](https://github.com/XiaoLuoLYG/GOD/pull/64) [#65](https://github.com/XiaoLuoLYG/GOD/pull/65))
+- **2026-05 · 操作台与 Studio** —— 双语控制台、地图优先 `/ask` + `/intervene` rail、
+  Agent Studio、Map Studio、统一 skill runtime。
+  ([#26](https://github.com/XiaoLuoLYG/GOD/pull/26)–[#31](https://github.com/XiaoLuoLYG/GOD/pull/31))
+
+## 🛣️ Roadmap
+
+**已完成：** 操作台（replay、ask、intervene）· Agent / Map Studio · 零代码配置 · 可拔插地图 ·
+包导入导出 · [公开站](https://xiaoluolyg.github.io/GOD/zh/) 与浏览器回放 · 双语 UI · Windows 启动器
+
+**下一步：** 可拔插 Agent runtime · 多实验编排 · 动态 / 事件响应世界 · 大规模仿真 ·
+实验评估 · 操作员笔记 · 托管 live 控制台
+
+有想法？欢迎来 [issue 和 PR](#-参与开发) 聊。
+
+## 🌐 浏览器回放
+
+在浏览器里打开精选回放 —— 拖动地图、查看角色档案；想本地复现同一设定时再下载 ExperimentPack。
+
+| | |
+| --- | --- |
+| 🏘️ [**GOD 小镇回放**](https://xiaoluolyg.github.io/GOD/replays/god-town/) | 🏫 [**北大公共事件回放**](https://xiaoluolyg.github.io/GOD/replays/pku-public-situation/) |
+| 📦 [**实验包下载**](https://xiaoluolyg.github.io/GOD/zh/experiments/) | 🌐 [**完整公开站**](https://xiaoluolyg.github.io/GOD/zh/) |
 
 ## ✨ 亮点
 
 <table>
 <tr>
   <td align="center" width="20%">⏯️<br/><b>暂停时间</b><br/><sub>任意 step replay、暂停、加速、自动推进。</sub></td>
-  <td align="center" width="20%">💬<br/><b>对任意人耳语</b><br/><sub>在 live session 里向某个居民、群组或全镇发问。</sub></td>
-  <td align="center" width="20%">🎛️<br/><b>改写下一步</b><br/><sub>注入指令，Agent 在下一回合立刻响应。</sub></td>
+  <td align="center" width="20%">💬<br/><b>定向提问</b><br/><sub>在 live session 里向某个居民、群组或全镇发问。</sub></td>
+  <td align="center" width="20%">🎛️<br/><b>引导下一步</b><br/><sub>注入指令，并检查 Agent 后续响应。</sub></td>
   <td align="center" width="20%">🪄<br/><b>零代码上手</b><br/><sub>浏览器配置向导：模型、剧本、Agent 一站搞定。</sub></td>
-  <td align="center" width="20%">🔄<br/><b>重启世界</b><br/><sub>一条命令清掉旧数据，重新孵化一座干净的小镇。</sub></td>
+  <td align="center" width="20%">🔄<br/><b>重置运行状态</b><br/><sub>一条命令清掉旧数据，重新生成干净的小镇状态。</sub></td>
 </tr>
 </table>
 
@@ -115,6 +157,9 @@ http://127.0.0.1:5174/pixel-replay/god_town/1
 | 🧼 | **一键重开** | 一条命令清掉 replay 数据，孵化一座干净的小镇。 |
 | 🗺️ | **像素小镇世界** | 地点、动作、消息、状态都是结构化、replay 友好的。 |
 | 🧱 | **唯一当前实验** | `.env` 只保存模型、API、端口等本机配置；`.god/current_experiment.json` 保存唯一 active 实验。 |
+| 🌐 | **浏览器回放** | GitHub Pages 上的精选回放 —— 无需本地安装或 API key。 |
+| 📦 | **资源包库** | Experiment / Map / Agent 包导入导出；公开站还有更多可下载场景。 |
+| 🪟 | **Windows 启动器** | PowerShell 下 `god.cmd start` —— 与 macOS/Linux 同样一条命令。 |
 
 ## 🏗️ 架构
 
@@ -176,6 +221,8 @@ Windows 下把 `./scripts/god.sh` 替换成 `.\scripts\god.cmd` 即可。
 ## 🧪 内置实验
 
 GOD 现在内置两个默认实验，并且和你自己发布的实验使用同一套 current model。配置向导会把你选择的实验写到 `.god/current_experiment.json`；之后 `start`、`open`、`new-run` 都只作用于这个当前实验。
+
+更多可下载场景 —— 空城计、高考停电、霍格沃茨家长会等 —— 见 [**公开站**](https://xiaoluolyg.github.io/GOD/zh/experiments/)。
 
 `.env` 只保存本机模型、API、端口等配置，不再决定默认实验或地图。因此即使旧 `.env` 里残留 `GOD_MAP_ID=pku`，选择 GOD Town 时仍然会使用 `the_ville` 地图，不会串台。
 
@@ -256,43 +303,6 @@ uv run python scripts/validate_map_package.py custom/maps/<map_id>
 ```
 
 配置向导会自动列出所有合法的地图包，完全不用改代码。v1 支持带 PNG tileset 的 Tiled JSON 地图，并要求一个 `Collisions` 层（`0` 表示可走）。PKU 校园地图包现在已经随仓库发布，路径是 `agentsociety/custom/maps/pku/`。完整契约见 [docs/MAP_PACKAGES.zh-CN.md](docs/MAP_PACKAGES.zh-CN.md)。
-
-## 🗓️ 更新
-
-最近的功能更新：
-
-- **2026-05-22 · 运行时本地化 · [#26](https://github.com/XiaoLuoLYG/GOD/pull/26)** —— replay、setup、地图元数据、地点、动作、状态、情绪、群组名和系统事件模板支持 English / 中文切换，同时保留 Agent 自由文本原样。
-- **2026-05-23 · 控制台命令 UI · [#27](https://github.com/XiaoLuoLYG/GOD/pull/27)** —— PixelReplay 改为全高地图 + 右侧 rail，加入 Summary / Chat / Residents / Live Console 标签页，以及地图内 `/ask`、`/intervene` 命令输入器和 mention 自动补全。
-- **2026-05-24 · Agent Studio 向导 · [#28](https://github.com/XiaoLuoLYG/GOD/pull/28)** —— Agent Builder 和 Setup 草稿共用地图绑定的 Studio 流程，覆盖 seed、身份、外貌、性格、日程、review 和结构化 agent metadata。
-- **2026-05-25 · 严格 sprite 管线 · [#29](https://github.com/XiaoLuoLYG/GOD/pull/29)** —— Agent Studio 可以生成经过校验、适配地图的角色 sprite，保留旧 profile 文本，校验 ID / config 同步，并默认把 `Generated_Agent_*.png` 留在本地。
-- **2026-05-26 · Agent runtime 统一 · [#30](https://github.com/XiaoLuoLYG/GOD/pull/30)** —— Agent 在 AgentBuilder、setup 草稿、导入、应用和默认实验配置中走统一的 skill runtime。
-- **2026-05-27 · 地图工作台 · [#31](https://github.com/XiaoLuoLYG/GOD/pull/31)** —— GOD 新增 Map Studio：生成或上传本地地图草稿，配置图片生成，校准地点锚点 / 碰撞层，校验地图包，发布后带着新的 `map_id` 回到 Setup。
-
-## 🛣️ Roadmap
-
-### ✅ 已完成
-
-- [x] 🗺️ **可拔插地图包** —— 把一个文件夹丢到 `agentsociety/custom/maps/<map_id>/`，刷新向导即出现新世界。自动发现、自动校验、热插拔。详见 [`docs/MAP_PACKAGES.zh-CN.md`](docs/MAP_PACKAGES.zh-CN.md)。
-- [x] 🏫 **PKU 校园地图** —— PKU 地图包已经作为一等地图随仓库发布，和 The Ville 一起可选。
-- [x] 🪄 **零代码配置向导** —— 浏览器流程：模型配置、内置实验选择、自建实验生成 / 编辑 / 发布，一台空机器到真实的小镇。
-- [x] 🧪 **可复现实验** —— 实验以普通文件夹形式发布，位于 `quick_experiments/<hypothesis>/<experiment>/`。选择或发布一个实验后，它就会成为 current。
-- [x] 🎮 **控制台命令 rail** —— replay 控制、居民列表、Live Console、定向 Ask 和 Intervene 都合并在一个地图优先的操作界面里。
-- [x] 🧬 **Agent Studio v1** —— 地图感知的新增 / 编辑 Agent 流程，包含结构化 profile metadata、ID 校验、Setup 集成和 sprite 生成支持。
-- [x] 🧭 **Map Studio v1** —— prompt / 参考图生成地图草稿，锚点与碰撞层校准，地图包校验、发布，以及返回 Setup 的 handoff。
-- [x] 🌏 **双语运行时 UI** —— setup、replay、地图、状态、动作和系统事件中的产品侧文本支持 English / 中文。
-
-### 🛣️ 未完成 / 进行中
-
-- [ ] 🤖 **可拔插 Agent 运行时** —— 让 LLM runtime 和 persona 模板能像地图一样干净地替换。
-- [ ] 🧪 **多实验编排** —— 在同一个控制台里跑实验、对照组、重复试验和 ablation。
-- [ ] 🗺️ **实时地图生成** —— 地图随事件、修缮、阻塞、人群动态演化。
-- [ ] 🌦️ **事件响应世界** —— 天气、事故、节日、谣言、供应短缺。
-- [ ] 🌐 **大规模仿真** —— 接入 AgentSociety 的批量 Agent、分片运行、采样 replay 和性能友好的 replay 摘要。
-- [ ] 📊 **实验评估** —— 跨实验指标、行为差异、干预效果分析和可分享报告。
-- [ ] 📝 **操作员工作流** —— 每个 step 的笔记、标签、书签、保存命令宏和关键事件摘要。
-- [ ] 🌍 **公开 Demo & 场景分享** —— 托管 demo、实验 / 地图模板，以及社区场景的一键导入导出。
-
-有想法？欢迎来 [issue 和 PR](#-参与开发) 聊。
 
 ## 🤝 参与开发
 
