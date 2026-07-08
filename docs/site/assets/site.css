@@ -791,8 +791,7 @@ h3 {
 .map-wrap {
   position: relative;
   overflow: auto;
-  height: min(68vh, 720px);
-  min-height: 440px;
+  max-height: min(68vh, 720px);
   background:
     linear-gradient(rgba(20, 32, 51, 0.05) 1px, transparent 1px),
     linear-gradient(90deg, rgba(20, 32, 51, 0.05) 1px, transparent 1px),
