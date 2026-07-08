@@ -378,11 +378,11 @@ And takes inspiration from [Generative Agents](https://arxiv.org/abs/2304.03442)
 
 ## ⭐ Star History
 
-<a href="https://star-history.com/#XiaoLuoLYG/GOD&Date">
+<a href="https://www.star-history.com/?repos=xiaoluolyg%2Fgod&type=date&legend=top-left">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=XiaoLuoLYG/GOD&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=XiaoLuoLYG/GOD&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=XiaoLuoLYG/GOD&type=Date" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=xiaoluolyg/god&type=date&theme=dark&legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=xiaoluolyg/god&type=date&legend=top-left" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=xiaoluolyg/god&type=date&legend=top-left" />
   </picture>
 </a>
 
