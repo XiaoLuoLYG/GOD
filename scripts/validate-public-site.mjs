@@ -68,6 +68,10 @@ function assertContains(errors, html, needle, label, page) {
   }
 }
 
+function hasHan(value) {
+  return /[\u3400-\u9fff]/.test(String(value || ""));
+}
+
 function assetPathFromManifest(slug, manifest) {
   if (!manifest || !manifest.preview_url) return "";
   return `public-data/map-packs/${slug}/${manifest.preview_url}`;
@@ -99,6 +103,13 @@ async function validateMapPack(base, entry) {
       errors.push(`${manifestPath}: ${error.message}`);
       return null;
     });
+
+  for (const location of manifest?.locations || []) {
+    const name = location?.localized?.en?.name || "";
+    if (!name || hasHan(name)) {
+      errors.push(`${manifestPath}: location ${location.id || "unknown"} needs an English localized name`);
+    }
+  }
 
   const preview = entry.image || assetPathFromManifest(slug, manifest);
   if (preview && !(await checkExists(base, preview))) {
@@ -134,6 +145,16 @@ async function validateAgentPack(base, entry) {
       return null;
     });
 
+  for (const agent of manifest?.agents || []) {
+    const display = agent?.localized?.en || {};
+    if (!display.name || hasHan(display.name)) {
+      errors.push(`${manifestPath}: agent ${agent.id || "unknown"} needs an English localized name`);
+    }
+    if (!display.summary || hasHan(display.summary)) {
+      errors.push(`${manifestPath}: agent ${agent.id || "unknown"} needs an English localized summary`);
+    }
+  }
+
   const firstSprite = manifest?.agents?.find((agent) => agent.sprite?.path)?.sprite?.path;
   if (firstSprite) {
     const spritePath = `public-data/agent-packs/${slug}/${firstSprite}`;
@@ -156,6 +177,7 @@ async function validateReplay(base, entry) {
 
   if (html) {
     assertContains(errors, html, `data-replay-slug="${slug}"`, "data-replay-slug marker", page);
+    assertContains(errors, html, "data-language-toggle", "language toggle", page);
     assertContains(errors, html, "data-step-range", "timeline range", page);
     assertContains(
       errors,

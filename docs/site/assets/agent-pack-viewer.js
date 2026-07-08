@@ -6,6 +6,7 @@
     return entry.slug === slug;
   }) || {};
   var locale = window.GOD_LOCALE || "en";
+  var dataVersion = "20260708-pack-locale-compact";
   var spriteVersion = "20260603-hires-role-sprites";
   var text = window.GOD_TEXT || function (key) {
     var fallback = {
@@ -22,6 +23,11 @@
     if (!path) return "#";
     if (/^https?:\/\//.test(path)) return path;
     return root + path;
+  }
+
+  function versionedUrl(path) {
+    var target = url(path);
+    return target + (target.indexOf("?") === -1 ? "?" : "&") + "v=" + dataVersion;
   }
 
   function escapeHtml(value) {
@@ -51,9 +57,30 @@
     return localized[locale] || localized.en || localized.zh || {};
   }
 
-  function profileLine(profile) {
+  function hasHan(value) {
+    return /[\u3400-\u9fff]/.test(String(value || ""));
+  }
+
+  function localizedAgent(agent) {
+    var localized = agent.localized || {};
+    if (locale === "zh") {
+      return localized.zh || {};
+    }
+    return localized.en || {};
+  }
+
+  function displayAgentName(agent, profile) {
+    var display = localizedAgent(agent);
+    var name = display.name || profile.name || agent.name || agent.id || "";
+    return locale === "en" && hasHan(name) ? "Agent " + (agent.id || "") : name;
+  }
+
+  function profileLine(agent, profile) {
+    var display = localizedAgent(agent);
+    if (display.summary) return display.summary;
     if (!profile || typeof profile !== "object") return "";
-    return profile.persona || profile.role || profile.occupation || profile.goal || "";
+    var line = profile.persona || profile.role || profile.occupation || profile.goal || "";
+    return locale === "en" && hasHan(line) ? "Profile details are available in the pack download." : line;
   }
 
   function bindDownloadButton() {
@@ -90,7 +117,7 @@
   setText(".footer-inner a[href='../']", text("common.library"));
   bindDownloadButton();
 
-  fetch(url("public-data/agent-packs/" + slug + "/agent_pack.json"))
+  fetch(versionedUrl("public-data/agent-packs/" + slug + "/agent_pack.json"))
     .then(function (response) {
       return response.ok ? response.json() : null;
     })
@@ -140,11 +167,11 @@
         return [
           '<article class="agent-preview-card">',
           spriteSrc
-            ? '  <img src="' + escapeHtml(spriteSrc) + '" alt="' + escapeHtml(agent.name || agent.id) + ' sprite" loading="eager" decoding="async">'
+            ? '  <img src="' + escapeHtml(spriteSrc) + '" alt="' + escapeHtml(displayAgentName(agent, profile)) + ' sprite" loading="eager" decoding="async">'
             : '  <div class="agent-preview-placeholder" aria-hidden="true">G</div>',
           '  <div>',
-          '    <strong>' + escapeHtml(profile.name || agent.name || agent.id) + '</strong>',
-          '    <p>' + escapeHtml(profileLine(profile)) + '</p>',
+          '    <strong>' + escapeHtml(displayAgentName(agent, profile)) + '</strong>',
+          '    <p>' + escapeHtml(profileLine(agent, profile)) + '</p>',
           '  </div>',
           '</article>'
         ].join("");

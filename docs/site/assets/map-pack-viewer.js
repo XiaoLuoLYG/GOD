@@ -6,6 +6,7 @@
     return entry.slug === slug;
   }) || {};
   var locale = window.GOD_LOCALE || "en";
+  var dataVersion = "20260708-pack-locale-compact";
   var text = window.GOD_TEXT || function (key) {
     var fallback = {
       "common.mapPack": "Map Pack",
@@ -25,12 +26,21 @@
     return root + path;
   }
 
+  function versionedUrl(path) {
+    var target = url(path);
+    return target + (target.indexOf("?") === -1 ? "?" : "&") + "v=" + dataVersion;
+  }
+
   function escapeHtml(value) {
     return String(value == null ? "" : value)
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
+  }
+
+  function hasHan(value) {
+    return /[\u3400-\u9fff]/.test(String(value || ""));
   }
 
   function setText(selector, value) {
@@ -50,6 +60,14 @@
   function localizedManifest(manifest) {
     var localized = manifest.localized || {};
     return localized[locale] || localized.en || localized.zh || {};
+  }
+
+  function localizedLocation(location) {
+    var localized = location.localized || {};
+    if (locale === "zh") {
+      return localized.zh || localized.en || {};
+    }
+    return localized.en || {};
   }
 
   function countLabel(count, key) {
@@ -76,7 +94,7 @@
     imageNode.setAttribute("alt", title + " map preview");
   }
 
-  fetch(url("public-data/map-packs/" + slug + "/map_pack.json"))
+  fetch(versionedUrl("public-data/map-packs/" + slug + "/map_pack.json"))
     .then(function (response) {
       return response.ok ? response.json() : null;
     })
@@ -109,9 +127,14 @@
       if (list) {
         list.innerHTML = (manifest.locations || []).slice(0, 32).map(function (location) {
           var anchor = location.anchor_tile || {};
+          var locationDisplay = localizedLocation(location);
+          var locationName = locationDisplay.name || location.name || location.id;
+          if (locale === "en" && hasHan(locationName)) {
+            locationName = location.id || "";
+          }
           return [
             '<article class="detail-mini-card">',
-            '  <strong>' + escapeHtml(location.name || location.id) + '</strong>',
+            '  <strong>' + escapeHtml(locationName) + '</strong>',
             '  <span>' + escapeHtml(location.id || "") + '</span>',
             '  <small>' + escapeHtml((locale === "zh" ? "格 " : "tile ") + (anchor.x == null ? "?" : anchor.x) + ", " + (anchor.y == null ? "?" : anchor.y)) + '</small>',
             '</article>'

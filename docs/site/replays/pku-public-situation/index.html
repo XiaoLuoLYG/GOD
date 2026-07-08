@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>PKU Public Situation Replay - GOD</title>
     <meta name="description" content="Watch the public PKU Public Situation replay archive.">
-    <link rel="stylesheet" href="../../assets/site.css?v=20260708b">
+    <link rel="stylesheet" href="../../assets/site.css?v=20260708c">
   </head>
   <body class="replay-page" data-site-root="../../" data-replay-slug="pku-public-situation" data-data-root="../../public-data/replays/pku-public-situation/">
     <header class="site-header">
@@ -17,28 +17,29 @@
           <a data-nav href="../../agent-packs/">Agent Packs</a>
           <a data-nav href="../../experiments/">Experiments</a>
           <a class="nav-cta" href="https://github.com/XiaoLuoLYG/GOD">GitHub</a>
+          <a class="language-toggle" data-language-toggle href="?lang=zh" aria-label="切换到中文">中文</a>
         </div>
       </nav>
     </header>
 
     <main data-replay-viewer>
       <section class="replay-hero">
-        <p class="mini-label" data-replay-kicker>Replay</p>
+        <p class="mini-label" data-replay-kicker data-i18n="replay">Replay</p>
         <h1 data-replay-title>PKU Public Situation</h1>
-        <p class="hero-line" data-replay-summary>Loading replay...</p>
+        <p class="hero-line" data-replay-summary data-i18n="loadingReplay">Loading replay...</p>
       </section>
 
       <section class="replay-shell">
         <div class="replay-stage">
           <div class="map-toolbar">
-            <strong data-map-title>Map</strong>
-            <span class="status-pill" data-replay-status>Loading</span>
+            <strong data-map-title data-i18n="map">Map</strong>
+            <span class="status-pill" data-replay-status data-i18n="loading">Loading</span>
           </div>
           <div class="map-wrap">
             <canvas data-map-canvas width="1200" height="800"></canvas>
           </div>
           <div class="timeline-controls">
-            <button class="button button--small" type="button" data-play-toggle>Play</button>
+            <button class="button button--small" type="button" data-play-toggle data-i18n="play">Play</button>
             <input type="range" min="0" max="0" value="0" data-step-range aria-label="Replay step">
             <strong data-step-label>Step 0</strong>
           </div>
@@ -46,22 +47,22 @@
 
         <aside class="replay-panel">
           <div class="panel-section">
-            <h2>Downloads</h2>
+            <h2 data-i18n="downloads">Downloads</h2>
             <div class="download-list" data-download-list></div>
           </div>
           <div class="panel-section">
-            <h2>Agents</h2>
+            <h2 data-i18n="agents">Agents</h2>
             <div class="agent-list" data-agent-list></div>
           </div>
           <div class="panel-section">
-            <h2>Operator Trace</h2>
+            <h2 data-i18n="operatorTrace">Operator Trace</h2>
             <div class="command-list" data-command-list></div>
           </div>
         </aside>
       </section>
-      <p class="replay-note">Local setup gives the best experience. Online replays are static previews with limited live-control features.</p>
+      <p class="replay-note" data-i18n="note">Local setup gives the best experience. Online replays are static previews with limited live-control features.</p>
     </main>
 
-    <script src="../../assets/replay-viewer.js?v=20260708b"></script>
+    <script src="../../assets/replay-viewer.js?v=20260708c"></script>
   </body>
 </html>

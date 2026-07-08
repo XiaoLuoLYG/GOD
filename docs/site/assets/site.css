@@ -507,11 +507,7 @@ h3 {
 }
 
 .library-card__media--agent {
-  background:
-    linear-gradient(rgba(20, 32, 51, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(20, 32, 51, 0.06) 1px, transparent 1px),
-    #fffaf0;
-  background-size: 18px 18px;
+  background: #f6fbff;
 }
 
 .library-card__media--agent img {
@@ -553,11 +549,7 @@ h3 {
   display: grid;
   min-height: 172px;
   place-items: center;
-  background:
-    linear-gradient(rgba(20, 32, 51, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(20, 32, 51, 0.06) 1px, transparent 1px),
-    var(--panel-gold);
-  background-size: 18px 18px;
+  background: #f6fbff;
   color: var(--teal);
   font-size: 4rem;
   font-weight: 900;
@@ -673,32 +665,32 @@ h3 {
 }
 
 .agent-preview-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
 }
 
 .agent-preview-card {
   display: grid;
-  gap: 12px;
-  padding: 14px;
+  gap: 8px;
+  padding: 10px;
 }
 
 .agent-preview-card img,
 .agent-preview-placeholder {
   width: 100%;
-  height: 150px;
+  height: 118px;
   border: 1px solid rgba(20, 32, 51, 0.08);
   border-radius: 6px;
-  background:
-    linear-gradient(rgba(20, 32, 51, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(20, 32, 51, 0.06) 1px, transparent 1px),
-    #fffaf0;
-  background-size: 18px 18px;
+  background: #f6fbff;
 }
 
 .agent-preview-card img {
-  padding: 14px;
+  padding: 8px;
   object-fit: contain;
   image-rendering: pixelated;
+}
+
+.pack-detail > .button-row {
+  margin-bottom: 14px;
 }
 
 .agent-preview-placeholder {

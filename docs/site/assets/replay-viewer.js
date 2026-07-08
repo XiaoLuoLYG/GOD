@@ -21,6 +21,107 @@
   };
   var colors = ["#0f766e", "#3366a3", "#d45a38", "#b7791f", "#8b5cf6", "#0ea5e9", "#db2777", "#16a34a"];
   var loadRequestId = 0;
+  var pageDefaultLocale = (document.documentElement.lang || "en").toLowerCase().indexOf("zh") === 0 ? "zh" : "en";
+  var locale = resolveLocale();
+  document.documentElement.lang = locale === "zh" ? "zh-CN" : "en";
+  var TEXT = {
+    en: {
+      navReplays: "Replays",
+      navMaps: "Map Packs",
+      navAgents: "Agent Packs",
+      navExperiments: "Experiments",
+      replay: "Replay",
+      loadingReplay: "Loading replay...",
+      map: "Map",
+      loading: "Loading",
+      downloads: "Downloads",
+      agents: "Agents",
+      operatorTrace: "Operator Trace",
+      note: "Local setup gives the best experience. Online replays are static previews with limited live-control features.",
+      play: "Play",
+      pause: "Pause",
+      step: "Step",
+      loadingStep: "Loading step",
+      loadFailed: "Replay failed to load",
+      download: "Download",
+      experimentPack: "Download ExperimentPack",
+      noState: "No visible state",
+      location: "Location",
+      agent: "Agent",
+      headingTo: "Heading to",
+      moving: "Moving",
+      active: "Active",
+      ready: "Ready",
+      message: "Recorded replay message",
+      operatorQuestion: "Operator question",
+      operatorResponse: "Recorded operator response",
+      noOperator: "No operator record at",
+      switchLanguage: "切换到中文",
+      switchLabel: "中文",
+      typeAsk: "ASK",
+      typeIntervene: "INTERVENE",
+      replayTitles: {
+        "god-town": {
+          title: "GOD Town",
+          summary: "A compact town where daily routines, messages, movement, ask, and intervention can be replayed step by step.",
+          documentTitle: "GOD Town Replay - GOD"
+        },
+        "pku-public-situation": {
+          title: "PKU Public Situation",
+          summary: "A campus-scale public event replay for watching attention, gathering, targeted questions, and live interventions.",
+          documentTitle: "PKU Public Situation Replay - GOD"
+        }
+      }
+    },
+    zh: {
+      navReplays: "回放",
+      navMaps: "地图包",
+      navAgents: "角色包",
+      navExperiments: "实验",
+      replay: "回放",
+      loadingReplay: "正在加载回放...",
+      map: "地图",
+      loading: "加载中",
+      downloads: "下载",
+      agents: "角色",
+      operatorTrace: "操作者记录",
+      note: "本地运行体验更完整；在线回放是静态预览，实时控制能力有限。",
+      play: "播放",
+      pause: "暂停",
+      step: "第",
+      loadingStep: "正在加载步骤",
+      loadFailed: "回放加载失败",
+      download: "下载",
+      experimentPack: "下载实验包",
+      noState: "暂无可见状态",
+      location: "地点",
+      agent: "角色",
+      headingTo: "前往",
+      moving: "移动中",
+      active: "活跃",
+      ready: "就绪",
+      message: "已记录的回放消息",
+      operatorQuestion: "操作者问题",
+      operatorResponse: "已记录的操作者回复",
+      noOperator: "此步骤没有操作者记录：",
+      switchLanguage: "Switch to English",
+      switchLabel: "English",
+      typeAsk: "提问",
+      typeIntervene: "干预",
+      replayTitles: {
+        "god-town": {
+          title: "GOD 小镇",
+          summary: "一个紧凑小镇，可逐步回放日常行动、消息、移动、提问和干预。",
+          documentTitle: "GOD 小镇回放 - GOD"
+        },
+        "pku-public-situation": {
+          title: "北大公共情境",
+          summary: "校园尺度公共事件回放，用于观察注意力、聚集、定向提问和实时干预。",
+          documentTitle: "北大公共情境回放 - GOD"
+        }
+      }
+    }
+  };
   var COMMAND_TEXT = {
     ask_live_step_1_20260511_085000: {
       prompt: "Ask Jiuwen Alice where she is and what she plans to do next.",
@@ -67,6 +168,23 @@
     return;
   }
 
+  function resolveLocale() {
+    var param = new URLSearchParams(window.location.search).get("lang");
+    if (param === "en" || param === "zh") {
+      try {
+        window.localStorage.setItem("godSiteLanguage", param);
+      } catch (error) {}
+      return param;
+    }
+    try {
+      var stored = window.localStorage.getItem("godSiteLanguage");
+      if (stored === "en" || stored === "zh") {
+        return stored;
+      }
+    } catch (error) {}
+    return pageDefaultLocale;
+  }
+
   function $(selector) {
     return document.querySelector(selector);
   }
@@ -95,18 +213,76 @@
       return "";
     }
     var text = String(value);
+    if (locale === "zh") {
+      return text;
+    }
     return hasHan(text) ? fallback : text;
   }
 
   function localizedName(item, field) {
     var key = field || "name";
-    return item && item.localized && item.localized.en && item.localized.en[key] || "";
+    return item && item.localized && item.localized[locale] && item.localized[locale][key]
+      || item && item.localized && item.localized.en && item.localized.en[key]
+      || "";
+  }
+
+  function text(key) {
+    return TEXT[locale][key] || TEXT.en[key] || "";
+  }
+
+  function replayCopy(field) {
+    var copies = text("replayTitles") || {};
+    return copies[replaySlug()] && copies[replaySlug()][field] || "";
+  }
+
+  function stepText(step) {
+    return locale === "zh" ? text("step") + " " + step + " 步" : text("step") + " " + step;
+  }
+
+  function noOperatorText(step) {
+    return locale === "zh" ? stepText(step) + "没有操作者记录。" : text("noOperator") + " " + stepText(step) + ".";
+  }
+
+  function applyStaticText() {
+    var nav = [
+      ["replays", text("navReplays")],
+      ["map-packs", text("navMaps")],
+      ["agent-packs", text("navAgents")],
+      ["experiments", text("navExperiments")]
+    ];
+    document.querySelectorAll(".nav-links [data-nav]").forEach(function (link) {
+      var href = link.getAttribute("href") || "";
+      nav.forEach(function (item) {
+        if (href.indexOf(item[0]) !== -1) {
+          link.textContent = item[1];
+        }
+      });
+    });
+    document.querySelectorAll("[data-i18n]").forEach(function (node) {
+      var value = text(node.getAttribute("data-i18n"));
+      if (value) {
+        node.textContent = value;
+      }
+    });
+    renderLanguageToggle();
+  }
+
+  function renderLanguageToggle() {
+    var link = $("[data-language-toggle]");
+    if (!link) {
+      return;
+    }
+    var params = new URLSearchParams(window.location.search);
+    params.set("lang", locale === "zh" ? "en" : "zh");
+    link.href = window.location.pathname + "?" + params.toString() + window.location.hash;
+    link.textContent = text("switchLabel");
+    link.setAttribute("aria-label", text("switchLanguage"));
   }
 
   function buildLocationNames() {
     state.locationNames = {};
     (state.mapInfo.locations || []).forEach(function (location) {
-      state.locationNames[String(location.id)] = localizedName(location) || displayText(location.name, "Location");
+      state.locationNames[String(location.id)] = localizedName(location) || displayText(location.name, text("location"));
     });
   }
 
@@ -116,28 +292,34 @@
 
   function agentName(agent) {
     var names = AGENT_NAMES[replaySlug()] || {};
-    return names[String(agent && agent.id || "")] || displayText(agent && agent.name, "Agent " + (agent && agent.id || ""));
+    if (locale === "en" && names[String(agent && agent.id || "")]) {
+      return names[String(agent && agent.id || "")];
+    }
+    return displayText(agent && agent.name, text("agent") + " " + (agent && agent.id || ""));
   }
 
   function locationName(id, fallback) {
-    return state.locationNames[String(id || "")] || displayText(fallback, "Location");
+    return state.locationNames[String(id || "")] || displayText(fallback, text("location"));
   }
 
   function actionLabel(agent) {
+    if (locale === "zh" && agent && (agent.action || agent.status)) {
+      return displayText(agent.action || agent.status, "");
+    }
     if (agent && agent.action && !hasHan(agent.action)) {
       return displayText(agent.action, "");
     }
     if (agent && agent.movement_status === "moving") {
-      return agent.target_location_id ? "Heading to " + locationName(agent.target_location_id, "destination") : "Moving";
+      return agent.target_location_id ? text("headingTo") + " " + locationName(agent.target_location_id, "destination") : text("moving");
     }
     if (agent && agent.status && !hasHan(agent.status)) {
       return displayText(agent.status, "");
     }
-    return agent && Number(agent.message_count || 0) > 0 ? "Active" : "Ready";
+    return agent && Number(agent.message_count || 0) > 0 ? text("active") : text("ready");
   }
 
   function messageLabel(value) {
-    return displayText(value, "Recorded replay message");
+    return displayText(value, text("message"));
   }
 
   function commandsForCurrentStep() {
@@ -376,11 +558,16 @@
       return !item.hidden && item.type !== "replay";
     });
     list.innerHTML = visibleDownloads.map(function (item) {
-      var description = item.description ? '<span>' + escapeHtml(item.description) + '</span>' : '<span>' + escapeHtml(item.type) + '</span>';
-      var action = item.type === "experiment" ? "Download ExperimentPack" : "Download";
+      var zhLabels = { map: "地图包", agent: "角色包", experiment: "可运行实验包" };
+      var label = locale === "zh" ? zhLabels[item.type] || item.label : item.label;
+      var descriptionText = locale === "zh" && item.type === "experiment"
+        ? "仅包含场景 setup，不包含回放历史和本地运行状态。"
+        : item.description || item.type;
+      var description = '<span>' + escapeHtml(descriptionText) + '</span>';
+      var action = item.type === "experiment" ? text("experimentPack") : text("download");
       return [
         '<a class="download-row" href="' + downloadUrl(item.href) + '">',
-        '  <span><strong>' + escapeHtml(item.label) + '</strong>' + description + '</span>',
+        '  <span><strong>' + escapeHtml(label) + '</strong>' + description + '</span>',
         '  <span>' + escapeHtml(action) + '</span>',
         '</a>'
       ].join("");
@@ -397,7 +584,7 @@
       return [
         '<div class="agent-row">',
         '  <span class="agent-dot" style="background:' + colors[index % colors.length] + '"></span>',
-        '  <span><strong>' + escapeHtml(agentName(agent)) + '</strong><span>' + escapeHtml(line || "No visible state") + '</span></span>',
+        '  <span><strong>' + escapeHtml(agentName(agent)) + '</strong><span>' + escapeHtml(line || text("noState")) + '</span></span>',
         '</div>'
       ].join("");
     }).join("");
@@ -413,17 +600,18 @@
       return Number(a.step) - Number(b.step) || String(a.command_id).localeCompare(String(b.command_id));
     });
     list.innerHTML = commands.map(function (command) {
-      var copy = COMMAND_TEXT[String(command.command_id)] || {};
-      var prompt = copy.prompt || displayText(command.prompt, "Operator question");
-      var result = copy.result || displayText(String(command.result || "").replace(/\s+/g, " ").slice(0, 170), "Recorded operator response");
+      var copy = locale === "en" ? COMMAND_TEXT[String(command.command_id)] || {} : {};
+      var prompt = copy.prompt || displayText(command.prompt, text("operatorQuestion"));
+      var result = copy.result || displayText(String(command.result || "").replace(/\s+/g, " ").slice(0, 170), text("operatorResponse"));
+      var type = command.type === "intervene" ? text("typeIntervene") : text("typeAsk");
       return [
         '<div class="command-row">',
-        '  <strong>' + escapeHtml(command.type.toUpperCase() + " · step " + command.step) + '</strong>',
+        '  <strong>' + escapeHtml(type + " · " + stepText(command.step)) + '</strong>',
         '  <span>' + escapeHtml(prompt) + '</span>',
         result ? '  <span>' + escapeHtml(result) + '</span>' : "",
         '</div>'
       ].join("");
-    }).join("") || '<div class="command-row"><span>No operator record at Step ' + escapeHtml(point.step || 0) + '.</span></div>';
+    }).join("") || '<div class="command-row"><span>' + escapeHtml(noOperatorText(point.step || 0)) + '</span></div>';
   }
 
   function updateControls() {
@@ -435,10 +623,10 @@
       range.value = String(state.stepIndex);
     }
     if (play) {
-      play.textContent = state.playing ? "Pause" : "Play";
+      play.textContent = state.playing ? text("pause") : text("play");
     }
     var point = state.timeline[state.stepIndex];
-    setText("[data-step-label]", point ? "Step " + point.step : "Step 0");
+    setText("[data-step-label]", point ? stepText(point.step) : stepText(0));
   }
 
   function loadStepByIndex(index) {
@@ -449,7 +637,7 @@
     if (!point) {
       return Promise.resolve();
     }
-    setText("[data-replay-status]", "Loading step " + point.step);
+    setText("[data-replay-status]", text("loadingStep") + " " + point.step);
     return fetch(dataUrl(point.frame_url || ("steps/" + String(point.step).padStart(6, "0") + ".json")))
       .then(function (response) {
         if (!response.ok) {
@@ -466,7 +654,7 @@
         renderAgents();
         renderCommands();
         drawFrame();
-        setText("[data-replay-status]", "Step " + frame.step + " · " + (frame.t || ""));
+        setText("[data-replay-status]", stepText(frame.step) + " · " + (frame.t || ""));
       });
   }
 
@@ -531,6 +719,7 @@
   }
 
   function init() {
+    applyStaticText();
     Promise.all([
       fetchJson("manifest.json"),
       fetchJson("timeline.json"),
@@ -545,9 +734,10 @@
         state.profiles = values[3] || [];
         state.mapInfo = values[4];
         buildLocationNames();
-        setText("[data-replay-title]", state.manifest.title);
-        setText("[data-replay-summary]", state.manifest.summary);
-        setText("[data-map-title]", localizedName(state.mapInfo, "display_name") || displayText(state.mapInfo.display_name, "Map") || "Map");
+        document.title = replayCopy("documentTitle") || document.title;
+        setText("[data-replay-title]", replayCopy("title") || displayText(state.manifest.title, "Replay"));
+        setText("[data-replay-summary]", replayCopy("summary") || displayText(state.manifest.summary, text("loadingReplay")));
+        setText("[data-map-title]", localizedName(state.mapInfo, "display_name") || displayText(state.mapInfo.display_name, text("map")) || text("map"));
         renderDownloads();
         return loadAgentSprites().then(function () {
           return fetchJson("map/" + state.mapInfo.tiled_map_url);
@@ -566,7 +756,7 @@
         return loadStepByIndex(0);
       })
       .catch(function (error) {
-        setText("[data-replay-status]", "Replay failed to load");
+        setText("[data-replay-status]", text("loadFailed"));
         console.error(error);
       });
   }

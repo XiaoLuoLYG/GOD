@@ -43,17 +43,17 @@
       "replay.operatorRecords": "operator records",
       "home.metaTitle": "GOD - Govern, Observe, Direct",
       "home.badge": "Govern - Observe - Direct",
-      "home.subtitle": "Make your agents dance in a virtual Eden.",
-      "home.line": "Create your own world.",
-      "home.primaryCta": "Create your own world",
+      "home.subtitle": "An operator console for inspectable agent-society replays.",
+      "home.line": "Browse public replays and portable packs.",
+      "home.primaryCta": "Browse experiment packs",
       "home.githubCta": "View on GitHub",
-      "home.scrollCue": "Scroll down to enter the world",
-      "home.productsEyebrow": "Public product surfaces",
-      "home.productsTitle": "Four public hubs.",
-      "home.productsSummary": "ExperimentPacks are playable setup seeds. Example replays are watchable results. MapPacks and AgentPacks remain reusable dependencies.",
+      "home.scrollCue": "Scroll down to review the artifacts",
+      "home.productsEyebrow": "Public review artifacts",
+      "home.productsTitle": "Four artifact hubs.",
+      "home.productsSummary": "ExperimentPacks are playable setup seeds. Replays are inspectable results. MapPacks and AgentPacks remain portable dependencies.",
       "home.replaysEyebrow": "Featured replays",
-      "home.replaysTitle": "Open a world that already happened.",
-      "home.replaysSummary": "Timeline, map assets, agent profiles, and operator traces are browser-readable; download the ExperimentPack when you want to play from the same setup.",
+      "home.replaysTitle": "Open an existing replay.",
+      "home.replaysSummary": "Timeline, map assets, agent profiles, and operator traces are browser-readable; download the ExperimentPack to reproduce from the same setup.",
       "home.footer": "GOD - Govern, Observe, Direct",
       "home.contact": "Contact:",
       "common.github": "GitHub",
@@ -105,17 +105,17 @@
       "replay.operatorRecords": "条操作记录",
       "home.metaTitle": "GOD - 治理、观察、引导",
       "home.badge": "Govern - Observe - Direct",
-      "home.subtitle": "让你的 agents 在虚拟伊甸中起舞。",
-      "home.line": "创建你自己的世界。",
-      "home.primaryCta": "创建你自己的世界",
+      "home.subtitle": "用于检查 agent society 回放的 operator console。",
+      "home.line": "浏览公开回放和可移植 artifact packs。",
+      "home.primaryCta": "浏览实验包",
       "home.githubCta": "在 GitHub 查看",
-      "home.scrollCue": "向下滚动进入世界",
-      "home.productsEyebrow": "公开产品入口",
-      "home.productsTitle": "四个公开枢纽。",
-      "home.productsSummary": "ExperimentPack 是可运行的 setup seed。示例回放是可观看结果。MapPack 和 AgentPack 则是可复用依赖。",
+      "home.scrollCue": "向下滚动查看 artifacts",
+      "home.productsEyebrow": "可审查的公开 artifacts",
+      "home.productsTitle": "四个 artifact 枢纽。",
+      "home.productsSummary": "ExperimentPack 是可运行的 setup seed。回放是可检查的结果。MapPack 和 AgentPack 是可移植依赖。",
       "home.replaysEyebrow": "精选回放",
-      "home.replaysTitle": "打开一个已经发生过的世界。",
-      "home.replaysSummary": "时间线、地图资产、角色档案和操作者记录都可在浏览器中读取；想从同一套设定开始运行时，可以下载 ExperimentPack。",
+      "home.replaysTitle": "打开一个已有回放。",
+      "home.replaysSummary": "时间线、地图资产、角色档案和操作者记录都可在浏览器中读取；想从同一套设定复现时，可以下载 ExperimentPack。",
       "home.footer": "GOD - 治理、观察、引导",
       "home.contact": "联系：",
       "common.github": "GitHub",
@@ -142,6 +142,22 @@
       return path;
     }
     return root + path;
+  }
+
+  function localizedUrl(path) {
+    var href = url(path);
+    if (!path || href === "#" || isAbsoluteUrl(path)) {
+      return href;
+    }
+    var split = href.split("#");
+    var base = split[0];
+    var hash = split.length > 1 ? "#" + split.slice(1).join("#") : "";
+    var queryIndex = base.indexOf("?");
+    var pathname = queryIndex === -1 ? base : base.slice(0, queryIndex);
+    var params = new URLSearchParams(queryIndex === -1 ? "" : base.slice(queryIndex + 1));
+    params.set("lang", locale);
+    params.set("v", "20260708-pack-card-tight");
+    return pathname + "?" + params.toString() + hash;
   }
 
   function isAbsoluteUrl(path) {
@@ -243,16 +259,16 @@
       return;
     }
     var nextLocale = locale === "zh" ? "en" : "zh";
-    var label = locale === "zh" ? "English" : "中文";
+    var label = locale === "zh" ? "English" : "Chinese";
     var params = new URLSearchParams(window.location.search);
     params.set("lang", nextLocale);
-    params.set("v", "20260603-lang-toggle");
+    params.set("v", "20260708-pack-card-tight");
     var href = window.location.pathname + "?" + params.toString() + window.location.hash;
     var link = document.createElement("a");
     link.className = "language-toggle";
     link.href = href;
     link.setAttribute("data-language-toggle", "");
-    link.setAttribute("aria-label", locale === "zh" ? "Switch to English" : "切换到中文");
+    link.setAttribute("aria-label", locale === "zh" ? "Switch to English" : "Switch to Chinese");
     link.textContent = label;
     nav.appendChild(link);
   }
@@ -268,7 +284,7 @@
       var title = display.title || item.title;
       var summary = display.summary || item.summary;
       return [
-        '<a class="product-card product-card--' + escapeHtml(item.key) + '" href="' + url(item.href) + '">',
+        '<a class="product-card product-card--' + escapeHtml(item.key) + '" href="' + localizedUrl(item.href) + '">',
         '  <span class="product-card__icon" aria-hidden="true">' + productIcon(item.key) + '</span>',
         '  <span class="product-card__label">' + escapeHtml(label) + '</span>',
         '  <strong>' + escapeHtml(title) + '</strong>',
@@ -338,11 +354,11 @@
     }
     var image = item.image || (kind === "experiment" ? experimentImage(item) : "");
     var media = image
-      ? '<a class="library-card__media library-card__media--' + escapeHtml(kind) + '" href="' + url(showPreview ? previewHref : item.download) + '"><img src="' + url(image) + '" alt="' + escapeHtml(title) + ' preview" loading="lazy"></a>'
+      ? '<a class="library-card__media library-card__media--' + escapeHtml(kind) + '" href="' + (showPreview ? localizedUrl(previewHref) : url(item.download)) + '"><img src="' + url(image) + '" alt="' + escapeHtml(title) + ' preview" loading="lazy"></a>'
       : '<div class="library-card__glyph" aria-hidden="true">' + productIcon(kind) + '</div>';
     var buttons = [];
     if (showPreview) {
-      buttons.push('<a class="button button--small" href="' + url(previewHref) + '">' + escapeHtml(previewLabel) + '</a>');
+      buttons.push('<a class="button button--small" href="' + localizedUrl(previewHref) + '">' + escapeHtml(previewLabel) + '</a>');
     }
     if (item.download) {
       buttons.push('<a class="button button--small button--ghost" href="' + url(item.download) + '">' + escapeHtml(downloadLabel) + '</a>');
