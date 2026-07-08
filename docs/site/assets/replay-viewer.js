@@ -21,6 +21,24 @@
   };
   var colors = ["#0f766e", "#3366a3", "#d45a38", "#b7791f", "#8b5cf6", "#0ea5e9", "#db2777", "#16a34a"];
   var loadRequestId = 0;
+  var COMMAND_TEXT = {
+    ask_live_step_1_20260511_085000: {
+      prompt: "Ask Jiuwen Alice where she is and what she plans to do next.",
+      result: "Jiuwen Alice is in Johnson Park, starting her morning round and checking on Jiuwen George nearby."
+    },
+    intervene_live_step_1_20260511_085000: {
+      prompt: "Move Jiuwen Alice to the cafe.",
+      result: "Movement intervention queued: Jiuwen Alice is heading to Hobbs Cafe and will advance along the path on the next replay step."
+    },
+    ask_live_step_2_20260511_092000: {
+      prompt: "Ask Jiuwen Alice what she is doing today.",
+      result: "Jiuwen Alice is continuing her morning round from Johnson Park toward Hobbs Cafe, checking in with neighbors and Jiuwen George."
+    },
+    "95a56655dd5b44aeb6f94a9948ac215c": {
+      prompt: "Ask Student Zheng what they want to do next.",
+      result: "Student Zheng plans to leave Centennial Hall and walk back to the Teaching Building for an international relations class."
+    }
+  };
   var AGENT_NAMES = {
     "pku-public-situation": {
       "1": "Student Luo",
@@ -120,6 +138,17 @@
 
   function messageLabel(value) {
     return displayText(value, "Recorded replay message");
+  }
+
+  function commandsForCurrentStep() {
+    var point = state.timeline[state.stepIndex] || {};
+    var currentStep = Number(point.step || 0);
+    var lastPoint = state.timeline[state.timeline.length - 1] || {};
+    var maxStep = Number(lastPoint.step || currentStep);
+    return state.commands.filter(function (command) {
+      var commandStep = Number(command.step || 0);
+      return commandStep === currentStep || (commandStep > maxStep && currentStep === maxStep);
+    });
   }
 
   function dataUrl(path) {
@@ -379,12 +408,14 @@
     if (!list) {
       return;
     }
-    var commands = state.commands.slice().sort(function (a, b) {
+    var point = state.timeline[state.stepIndex] || {};
+    var commands = commandsForCurrentStep().sort(function (a, b) {
       return Number(a.step) - Number(b.step) || String(a.command_id).localeCompare(String(b.command_id));
     });
     list.innerHTML = commands.map(function (command) {
-      var prompt = displayText(command.prompt, "Operator question");
-      var result = displayText(String(command.result || "").replace(/\s+/g, " ").slice(0, 170), "Recorded operator response");
+      var copy = COMMAND_TEXT[String(command.command_id)] || {};
+      var prompt = copy.prompt || displayText(command.prompt, "Operator question");
+      var result = copy.result || displayText(String(command.result || "").replace(/\s+/g, " ").slice(0, 170), "Recorded operator response");
       return [
         '<div class="command-row">',
         '  <strong>' + escapeHtml(command.type.toUpperCase() + " · step " + command.step) + '</strong>',
@@ -392,7 +423,7 @@
         result ? '  <span>' + escapeHtml(result) + '</span>' : "",
         '</div>'
       ].join("");
-    }).join("") || '<div class="command-row"><span>No operator records in this replay.</span></div>';
+    }).join("") || '<div class="command-row"><span>No operator record at Step ' + escapeHtml(point.step || 0) + '.</span></div>';
   }
 
   function updateControls() {

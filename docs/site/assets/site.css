@@ -754,6 +754,7 @@ h3 {
 
 .replay-shell {
   display: grid;
+  align-items: start;
   grid-template-columns: minmax(0, 1fr) 360px;
   gap: 16px;
   width: min(1280px, calc(100% - 32px));
@@ -818,8 +819,7 @@ h3 {
 
 .replay-panel {
   display: grid;
-  max-height: calc(100vh - 150px);
-  grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(220px, 360px) auto;
   overflow: hidden;
 }
 
