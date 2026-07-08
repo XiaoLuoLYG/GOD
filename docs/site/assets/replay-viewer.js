@@ -442,10 +442,29 @@
   function bindControls() {
     var range = $("[data-step-range]");
     var play = $("[data-play-toggle]");
+    function loadStepFromPointer(event) {
+      var bounds = range.getBoundingClientRect();
+      var ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+      pause();
+      loadStepByIndex(Math.round(ratio * Math.max(0, state.timeline.length - 1)));
+    }
     if (range) {
       range.addEventListener("input", function () {
+        var index = Number(range.value || 0);
         pause();
-        loadStepByIndex(Number(range.value || 0));
+        loadStepByIndex(index);
+      });
+      range.addEventListener("pointerdown", function (event) {
+        event.preventDefault();
+        if (range.setPointerCapture) {
+          range.setPointerCapture(event.pointerId);
+        }
+        loadStepFromPointer(event);
+      });
+      range.addEventListener("pointermove", function (event) {
+        if (event.buttons === 1) {
+          loadStepFromPointer(event);
+        }
       });
     }
     if (play) {

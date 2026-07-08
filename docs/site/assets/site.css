@@ -732,19 +732,24 @@ h3 {
 .replay-hero {
   width: min(1280px, calc(100% - 32px));
   margin: 0 auto;
-  padding: 34px 0 18px;
+  padding: 34px 0 14px;
 }
 
 .replay-hero h1 {
   font-size: clamp(2.8rem, 8vw, 6rem);
 }
 
+.replay-hero .hero-line {
+  margin-right: 0;
+  margin-left: 0;
+}
+
 .replay-note {
-  max-width: 760px;
-  margin-top: 12px;
+  width: min(1280px, calc(100% - 32px));
+  margin: -34px auto 48px;
   color: var(--muted);
-  font-size: 0.95rem;
-  line-height: 1.45;
+  font-size: 0.78rem;
+  line-height: 1.35;
 }
 
 .replay-shell {
@@ -752,7 +757,7 @@ h3 {
   grid-template-columns: minmax(0, 1fr) 360px;
   gap: 16px;
   width: min(1280px, calc(100% - 32px));
-  margin: 0 auto 48px;
+  margin: 0 auto 44px;
 }
 
 .replay-stage,
@@ -814,7 +819,7 @@ h3 {
 .replay-panel {
   display: grid;
   max-height: calc(100vh - 150px);
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr);
   overflow: hidden;
 }
 
@@ -823,8 +828,11 @@ h3 {
   padding: 14px;
 }
 
-.panel-section:last-child {
+.panel-section:nth-child(n + 2) {
   overflow: auto;
+}
+
+.panel-section:last-child {
   border-bottom: 0;
 }
 
