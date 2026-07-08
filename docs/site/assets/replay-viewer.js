@@ -9,6 +9,7 @@
     commands: [],
     profiles: [],
     mapInfo: null,
+    locationNames: {},
     tiledMap: null,
     tilesetImages: [],
     agentSprites: {},
@@ -19,6 +20,30 @@
     timer: null
   };
   var colors = ["#0f766e", "#3366a3", "#d45a38", "#b7791f", "#8b5cf6", "#0ea5e9", "#db2777", "#16a34a"];
+  var loadRequestId = 0;
+  var AGENT_NAMES = {
+    "pku-public-situation": {
+      "1": "Student Luo",
+      "2": "Teaching Assistant Wang",
+      "3": "Student Li",
+      "4": "Teacher Chen",
+      "5": "Professor Zhang",
+      "6": "Professor Zhou",
+      "7": "Alumnus Zhao",
+      "8": "Auntie Liu",
+      "9": "Student Wang",
+      "10": "Student Sun",
+      "11": "Student He",
+      "12": "Reporter Lin",
+      "13": "Student Zheng",
+      "14": "Student Shen",
+      "15": "Student Chen",
+      "16": "Student Liang",
+      "17": "Student Ma",
+      "18": "Student Liu",
+      "22": "Coordinator Wang"
+    }
+  };
 
   if (!canvas || !ctx || !dataRoot) {
     return;
@@ -41,6 +66,60 @@
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
+  }
+
+  function hasHan(value) {
+    return /[\u3400-\u9fff]/.test(String(value || ""));
+  }
+
+  function displayText(value, fallback) {
+    if (value == null || value === "") {
+      return "";
+    }
+    var text = String(value);
+    return hasHan(text) ? fallback : text;
+  }
+
+  function localizedName(item, field) {
+    var key = field || "name";
+    return item && item.localized && item.localized.en && item.localized.en[key] || "";
+  }
+
+  function buildLocationNames() {
+    state.locationNames = {};
+    (state.mapInfo.locations || []).forEach(function (location) {
+      state.locationNames[String(location.id)] = localizedName(location) || displayText(location.name, "Location");
+    });
+  }
+
+  function replaySlug() {
+    return body.dataset.replaySlug || "";
+  }
+
+  function agentName(agent) {
+    var names = AGENT_NAMES[replaySlug()] || {};
+    return names[String(agent && agent.id || "")] || displayText(agent && agent.name, "Agent " + (agent && agent.id || ""));
+  }
+
+  function locationName(id, fallback) {
+    return state.locationNames[String(id || "")] || displayText(fallback, "Location");
+  }
+
+  function actionLabel(agent) {
+    if (agent && agent.action && !hasHan(agent.action)) {
+      return displayText(agent.action, "");
+    }
+    if (agent && agent.movement_status === "moving") {
+      return agent.target_location_id ? "Heading to " + locationName(agent.target_location_id, "destination") : "Moving";
+    }
+    if (agent && agent.status && !hasHan(agent.status)) {
+      return displayText(agent.status, "");
+    }
+    return agent && Number(agent.message_count || 0) > 0 ? "Active" : "Ready";
+  }
+
+  function messageLabel(value) {
+    return displayText(value, "Recorded replay message");
   }
 
   function dataUrl(path) {
@@ -201,7 +280,7 @@
       var x = Number(location.anchor_tile.x || 0) * tile + tile / 2;
       var y = Number(location.anchor_tile.y || 0) * tile + tile / 2;
       ctx.fillStyle = "rgba(255, 255, 255, 0.76)";
-      var label = String(location.name || location.id || "");
+      var label = String(locationName(location.id, location.name || location.id || ""));
       var width = ctx.measureText(label).width + 14;
       ctx.fillRect(x - width / 2, y - 26, width, 18);
       ctx.fillStyle = "rgba(20, 32, 51, 0.72)";
@@ -249,7 +328,7 @@
         ctx.stroke();
       }
 
-      var label = String(agent.name || "Agent " + agent.id);
+      var label = agentName(agent);
       var width = Math.min(180, ctx.measureText(label).width + 16);
       ctx.fillStyle = "rgba(255, 255, 255, 0.88)";
       ctx.fillRect(px + 10, py - 19, width, 20);
@@ -285,11 +364,11 @@
       return;
     }
     list.innerHTML = (state.frame.agents || []).map(function (agent, index) {
-      var line = [agent.location, agent.action || agent.status, agent.last_message].filter(Boolean).join(" · ");
+      var line = [locationName(agent.location_id, agent.location), actionLabel(agent), messageLabel(agent.last_message)].filter(Boolean).join(" · ");
       return [
         '<div class="agent-row">',
         '  <span class="agent-dot" style="background:' + colors[index % colors.length] + '"></span>',
-        '  <span><strong>' + escapeHtml(agent.name) + '</strong><span>' + escapeHtml(line || "No visible state") + '</span></span>',
+        '  <span><strong>' + escapeHtml(agentName(agent)) + '</strong><span>' + escapeHtml(line || "No visible state") + '</span></span>',
         '</div>'
       ].join("");
     }).join("");
@@ -304,11 +383,12 @@
       return Number(a.step) - Number(b.step) || String(a.command_id).localeCompare(String(b.command_id));
     });
     list.innerHTML = commands.map(function (command) {
-      var result = String(command.result || "").replace(/\s+/g, " ").slice(0, 170);
+      var prompt = displayText(command.prompt, "Operator question");
+      var result = displayText(String(command.result || "").replace(/\s+/g, " ").slice(0, 170), "Recorded operator response");
       return [
         '<div class="command-row">',
         '  <strong>' + escapeHtml(command.type.toUpperCase() + " · step " + command.step) + '</strong>',
-        '  <span>' + escapeHtml(command.prompt) + '</span>',
+        '  <span>' + escapeHtml(prompt) + '</span>',
         result ? '  <span>' + escapeHtml(result) + '</span>' : "",
         '</div>'
       ].join("");
@@ -320,6 +400,7 @@
     var play = $("[data-play-toggle]");
     if (range) {
       range.max = String(Math.max(0, state.timeline.length - 1));
+      range.step = "1";
       range.value = String(state.stepIndex);
     }
     if (play) {
@@ -330,7 +411,9 @@
   }
 
   function loadStepByIndex(index) {
+    var requestId = ++loadRequestId;
     state.stepIndex = Math.max(0, Math.min(index, state.timeline.length - 1));
+    updateControls();
     var point = state.timeline[state.stepIndex];
     if (!point) {
       return Promise.resolve();
@@ -344,6 +427,9 @@
         return response.json();
       })
       .then(function (frame) {
+        if (requestId !== loadRequestId) {
+          return;
+        }
         state.frame = frame;
         updateControls();
         renderAgents();
@@ -408,9 +494,10 @@
         state.commands = values[2] || [];
         state.profiles = values[3] || [];
         state.mapInfo = values[4];
+        buildLocationNames();
         setText("[data-replay-title]", state.manifest.title);
         setText("[data-replay-summary]", state.manifest.summary);
-        setText("[data-map-title]", state.mapInfo.display_name || "Map");
+        setText("[data-map-title]", localizedName(state.mapInfo, "display_name") || displayText(state.mapInfo.display_name, "Map") || "Map");
         renderDownloads();
         return loadAgentSprites().then(function () {
           return fetchJson("map/" + state.mapInfo.tiled_map_url);

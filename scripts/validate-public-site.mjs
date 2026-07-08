@@ -145,6 +145,48 @@ async function validateAgentPack(base, entry) {
   return errors;
 }
 
+async function validateReplay(base, entry) {
+  const errors = [];
+  const slug = entry.slug;
+  const page = `replays/${slug}/index.html`;
+  const html = await readText(base, page).catch((error) => {
+    errors.push(`${page}: ${error.message}`);
+    return "";
+  });
+
+  if (html) {
+    assertContains(errors, html, `data-replay-slug="${slug}"`, "data-replay-slug marker", page);
+    assertContains(errors, html, "data-step-range", "timeline range", page);
+    assertContains(
+      errors,
+      html,
+      "Local setup gives the best experience. Online replays are static previews with limited live-control features.",
+      "local-experience note",
+      page
+    );
+  }
+
+  const timelinePath = `public-data/replays/${slug}/timeline.json`;
+  const timeline = await readText(base, timelinePath)
+    .then(JSON.parse)
+    .catch((error) => {
+      errors.push(`${timelinePath}: ${error.message}`);
+      return [];
+    });
+
+  if (!Array.isArray(timeline) || timeline.length === 0) {
+    errors.push(`${timelinePath}: expected at least one timeline frame`);
+    return errors;
+  }
+
+  const firstFrame = timeline[0]?.frame_url;
+  if (firstFrame && !(await checkExists(base, `public-data/replays/${slug}/${firstFrame}`))) {
+    errors.push(`${timelinePath}: missing first frame ${firstFrame}`);
+  }
+
+  return errors;
+}
+
 async function main() {
   const arg = process.argv[2] || DEFAULT_BASE;
   if (arg === "-h" || arg === "--help") {
@@ -161,6 +203,9 @@ async function main() {
   }
   for (const entry of catalog.agentPacks || []) {
     allErrors.push(...(await validateAgentPack(base, entry)));
+  }
+  for (const entry of catalog.replays || []) {
+    allErrors.push(...(await validateReplay(base, entry)));
   }
 
   if (allErrors.length) {

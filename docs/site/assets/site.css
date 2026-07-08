@@ -739,6 +739,14 @@ h3 {
   font-size: clamp(2.8rem, 8vw, 6rem);
 }
 
+.replay-note {
+  max-width: 760px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
 .replay-shell {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
