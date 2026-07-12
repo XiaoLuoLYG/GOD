@@ -2,7 +2,7 @@ export default {
     header: {
         title: 'GOD Experiment Setup',
         subtitle: 'Configure the model, then choose a default experiment or create a new live experiment.',
-        language: '中文',
+        language: 'Chinese',
         openCurrent: 'Open Current Experiment',
         refreshStatus: 'Refresh Status',
         mapStudio: 'Map Studio',
@@ -110,6 +110,7 @@ export default {
         mapPackageTooltip: 'Auto-discovered from agentsociety/custom/maps. A package must include map.yaml, Tiled JSON, tileset PNGs, and a Collisions layer.',
         importMap: 'Import Map',
         mapSummary: '{{map}}: {{locations}} locations, {{interactions}} interactions, {{characters}} role images.',
+        mapManifestHidden: 'Custom map manifest path uses non-English local identifiers.',
         noRoleImagesTitle: 'This map package has no dedicated role images yet',
         noRoleImagesDescription: 'You can continue generating the experiment draft. After the draft exists, use Role Studio to complete the replay character images.',
         agentCount: 'Agent count',

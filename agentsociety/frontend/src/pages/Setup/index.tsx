@@ -237,6 +237,8 @@ const help = (text: string) => (
     </Tooltip>
 );
 
+const hasHan = (value: string) => /[\u4e00-\u9fff]/.test(value);
+
 const formLabel = (label: string, tooltip: string) => (
     <Space size={6}>
         <span>{label}</span>
@@ -302,13 +304,29 @@ const normalizeBasicsValues = (
     ),
 });
 
+const withLocalizedBasicsText = (
+    values: Partial<BasicsForm>,
+    defaults: BasicsForm,
+): BasicsForm => normalizeBasicsValues({
+    ...values,
+    title: defaults.title,
+    background: defaults.background,
+    language: defaults.language,
+}, defaults);
+
 const loadStoredBasics = (defaults: BasicsForm = defaultBasics): BasicsForm => {
     if (typeof window === 'undefined') {
         return defaults;
     }
     try {
         const raw = window.localStorage.getItem(BASICS_STORAGE_KEY);
-        return raw ? normalizeBasicsValues(JSON.parse(raw), defaults) : defaults;
+        if (!raw) {
+            return defaults;
+        }
+        const normalized = normalizeBasicsValues(JSON.parse(raw), defaults);
+        return normalized.language !== defaults.language
+            ? withLocalizedBasicsText(normalized, defaults)
+            : normalized;
     } catch {
         return defaults;
     }
@@ -389,7 +407,7 @@ export default function SetupPage() {
     ), [selectedMapId, status?.maps, status?.selected_map_id]);
     const mapLocations = selectedMap?.locations?.length ? selectedMap.locations : (status?.map_locations || []);
     const mapDisplayName = (item: MapPackageSummary | undefined, fallback = basicsValues.map_id) => (
-        item ? localizeMapDisplayName(item, i18n.language) : fallback
+        localizeMapDisplayName(item || { map_id: fallback, display_name: fallback }, i18n.language)
     );
     const locationDisplayName = (location: MapLocation) => (
         localizeMapLocationName(selectedMap?.map_id || selectedMapId, location, i18n.language)
@@ -419,9 +437,18 @@ export default function SetupPage() {
     const locationOptions = useMemo(() => (
         mapLocations.map((location) => ({
             value: location.id,
-            label: `${locationDisplayName(location)} (${location.id})`,
+            label: i18n.language?.startsWith('en') && hasHan(location.id)
+                ? locationDisplayName(location)
+                : `${locationDisplayName(location)} (${location.id})`,
         }))
     ), [i18n.language, mapLocations, selectedMap?.map_id, selectedMapId]);
+    const mapManifestDescription = (map: MapPackageSummary) => {
+        const path = map.manifest_config_path || '';
+        if (i18n.language?.startsWith('en') && hasHan(path)) {
+            return copy('basics.mapManifestHidden');
+        }
+        return path;
+    };
     const draftJsonHasErrors = Boolean(contextJsonError || stepsJsonError);
 
     const renderLaunchPendingAlert = (marginBottom = 18) => (
@@ -598,8 +625,11 @@ export default function SetupPage() {
             setLatestDraftAvailable(true);
             setDraft((current) => (!current || navigateToDraft ? payload.draft : current));
             if (payload.basics) {
-                const normalized = syncBasicsValues({ ...basicsRef.current, ...payload.basics });
-                basicsForm.setFieldsValue(normalized);
+                const latestMatchesUiLanguage = payload.basics.language === localizedDefaultBasics.language;
+                if (navigateToDraft || latestMatchesUiLanguage) {
+                    const normalized = syncBasicsValues({ ...basicsRef.current, ...payload.basics });
+                    basicsForm.setFieldsValue(normalized);
+                }
             }
             if (navigateToDraft) {
                 setCurrentStep(4);
@@ -613,6 +643,15 @@ export default function SetupPage() {
 
     useEffect(() => {
         const previousDefaults = previousDefaultBasicsRef.current;
+        if (basicsRef.current.language !== localizedDefaultBasics.language) {
+            const next = withLocalizedBasicsText(basicsRef.current, localizedDefaultBasics);
+            basicsRef.current = next;
+            setBasicsValues(next);
+            saveStoredBasics(next);
+            basicsForm.setFieldsValue(next);
+            previousDefaultBasicsRef.current = localizedDefaultBasics;
+            return;
+        }
         if (basicsMatch(basicsRef.current, previousDefaults)) {
             basicsRef.current = localizedDefaultBasics;
             setBasicsValues(localizedDefaultBasics);
@@ -1341,7 +1380,7 @@ export default function SetupPage() {
                     })}
                     description={
                         selectedMap.validation_status?.ok
-                            ? selectedMap.manifest_config_path
+                            ? mapManifestDescription(selectedMap)
                             : selectedMap.validation_status?.errors?.join(' ')
                     }
                     style={{ marginBottom: 16 }}

@@ -33,6 +33,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { fetchCustom } from '../../components/fetch';
 import PackageImportModal from '../../components/PackageImportModal';
+import { localizeMapDisplayName, localizeMapLocationName } from '../../utils/runtimeLocalization';
 import {
     jsonStringify,
     parseJsonObject,
@@ -385,11 +386,16 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
         || localizedContextValue(experimentContext, 'world_setting', i18n.language);
     const selectedLocationLabel = labelForChoice(groupById.get('initial_location'), initialLocationValue);
     const agentPackOptions = useMemo(() => agentPacks.flatMap((pack) => (
-        (pack.agents || []).map((agent) => ({
-            value: agentPackAgentSelectionKey(pack, agent),
-            label: `${agent.name || agent.id} · ${pack.display_name}${pack.scope === 'map' ? ` (${pack.map_id || mapId})` : ''}`,
-        }))
-    )), [agentPacks, mapId]);
+        (pack.agents || []).map((agent) => {
+            const scopedMap = pack.scope === 'map'
+                ? localizeMapDisplayName({ map_id: pack.map_id || mapId, display_name: pack.map_id || mapId }, i18n.language)
+                : '';
+            return {
+                value: agentPackAgentSelectionKey(pack, agent),
+                label: `${agent.name || agent.id} · ${pack.display_name}${scopedMap ? ` (${scopedMap})` : ''}`,
+            };
+        })
+    )), [agentPacks, i18n.language, mapId]);
 
     const selectedPackAgentRecord = useMemo(() => {
         const selected = parseAgentPackAgentSelectionKey(selectedPackAgent);
@@ -439,7 +445,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
                     allow_custom: false,
                     options: mapLocations.map((location) => ({
                         id: location.id,
-                        label: String(location.localized?.[locale]?.name || location.name || location.id),
+                        label: localizeMapLocationName(mapId, location, i18n.language),
                     })),
                 };
             }

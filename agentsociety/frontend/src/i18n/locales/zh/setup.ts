@@ -110,6 +110,7 @@ export default {
         mapPackageTooltip: '从 agentsociety/custom/maps 自动扫描的地图包。必须包含 map.yaml、Tiled JSON、tileset PNG 和 Collisions 图层。',
         importMap: '导入地图',
         mapSummary: '{{map}}：{{locations}} 个地点，{{interactions}} 个交互，{{characters}} 个角色形象。',
+        mapManifestHidden: '自定义地图 manifest 路径包含非英文的本地标识。',
         noRoleImagesTitle: '这个地图包还没有专属角色形象',
         noRoleImagesDescription: '可以继续生成实验草案；草案生成后可在角色工作台补全回放中的小人图。',
         agentCount: '智能体数量',

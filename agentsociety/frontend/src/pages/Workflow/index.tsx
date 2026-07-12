@@ -78,7 +78,7 @@ const WorkflowList: React.FC = () => {
                 supervisor: supervisorData.data || []
             });
         } catch (error) {
-            console.error('获取agent classes失败:', error);
+            console.error('Failed to fetch agent classes:', error);
             setAgentClasses({
                 citizen: [],
                 supervisor: []

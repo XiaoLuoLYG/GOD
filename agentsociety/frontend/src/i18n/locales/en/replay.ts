@@ -129,6 +129,7 @@ export default {
             sendTo: "To {{name}}",
             sendToGroup: "To {{name}}{{suffix}}",
             recipientCount: " ({{count}} people)",
+            nonEnglishMessage: "Stored message contains non-English content.",
         },
         residents: {
             title: "Resident Status",
@@ -140,6 +141,7 @@ export default {
             missingCoords: "Missing map coordinates; using fallback placement",
             emotion: "Emotion: {{emotion}}",
             lastReceived: "Recently received: {{message}}",
+            nonEnglishAction: "Stored action contains non-English content.",
             viewDetail: "View Full Details",
             clearSelection: "Clear Selection",
         },

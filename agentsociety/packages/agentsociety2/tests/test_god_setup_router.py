@@ -387,6 +387,50 @@ def test_agent_studio_generate_localizes_known_context_and_locations():
     assert "晚春" not in response.profile_patch["persona"]
 
 
+def test_agent_studio_generate_avoids_chinese_location_label_in_english():
+    response = anyio.run(
+        god_setup.generate_agent_studio_options,
+        AgentStudioGenerateRequest(
+            experiment_context={
+                "title": "Moon Base Study",
+                "background": "A grounded observation scenario on a base map.",
+            },
+            map_id="moon_base",
+            map_locations=[
+                {"id": "moon_base", "name": "月球基地"},
+            ],
+            language="en",
+        ),
+    )
+
+    location_group = next(group for group in response.groups if group.id == "initial_location")
+    assert location_group.options[0].label == "Moon Base (moon_base)"
+    assert response.profile_patch["routine"]["initial_location_label"] == "Moon Base (moon_base)"
+    assert "月球基地" not in response.profile_patch["daily_routine"]
+
+
+def test_agent_studio_generate_hides_chinese_location_id_in_english_label():
+    response = anyio.run(
+        god_setup.generate_agent_studio_options,
+        AgentStudioGenerateRequest(
+            experiment_context={
+                "title": "Custom Map Study",
+                "background": "A grounded observation scenario on a custom map.",
+            },
+            map_id="custom_map",
+            map_locations=[
+                {"id": "月球基地", "name": "月球基地"},
+            ],
+            language="en",
+        ),
+    )
+
+    location_group = next(group for group in response.groups if group.id == "initial_location")
+    assert location_group.options[0].label.startswith("Location ")
+    assert not any("\u4e00" <= char <= "\u9fff" for char in location_group.options[0].label)
+    assert not any("\u4e00" <= char <= "\u9fff" for char in response.profile_patch["daily_routine"])
+
+
 def test_agent_studio_generate_does_not_fallback_to_fake_location():
     response = anyio.run(
         god_setup.generate_agent_studio_options,
@@ -881,6 +925,26 @@ def test_normalize_draft_uses_public_channel_default(monkeypatch, tmp_path):
 
     env = draft["init_config"]["env_modules"][0]["kwargs"]
     assert env["default_group_name"] == "Lab Scenario公开频道"
+
+
+def test_normalize_draft_uses_english_public_channel_default(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    monkeypatch.setattr(god_setup, "_known_location_ids", lambda: ["school", "park", "cafe"])
+    raw = _raw_draft()
+    raw["init_config"]["env_modules"][0]["kwargs"].pop("default_group_name")
+
+    draft = god_setup._normalize_draft(
+        raw,
+        DraftBasics(
+            title="Lab Scenario",
+            background="Coordinate a lab handoff.",
+            agent_count=2,
+            language="en",
+        ),
+    )
+
+    env = draft["init_config"]["env_modules"][0]["kwargs"]
+    assert env["default_group_name"] == "Lab Scenario Public Channel"
 
 
 def test_normalize_draft_backfills_scenario_specific_agents(monkeypatch, tmp_path):

@@ -83,8 +83,10 @@ AGENT_SPRITE_FRAME_SIZE = (32, 32)
 AGENT_SPRITE_GENERATION_ATTEMPTS = 3
 
 
-def _default_public_group_name(title: str) -> str:
+def _default_public_group_name(title: str, language: str = "zh") -> str:
     title = str(title or "").strip()
+    if not _language_is_zh(language):
+        return f"{title} Public Channel" if title else "GOD Public Channel"
     return f"{title}公开频道" if title else "GOD 公开频道"
 
 DEFAULT_DRAFT_BACKGROUND = (
@@ -568,6 +570,28 @@ def _localized_context_value(context: dict[str, Any], field: str, language: str)
     return value or ""
 
 
+def _titleize_identifier(value: str) -> str:
+    return re.sub(r"[_-]+", " ", value).strip().title()
+
+
+def _stable_label_id(value: str) -> str:
+    digest = hashlib.sha1((value or "item").encode("utf-8")).hexdigest()
+    return digest[:6]
+
+
+def _fallback_english_label(fallback: str, kind: str) -> str:
+    title = _titleize_identifier(fallback)
+    if title and not re.search(r"[\u4e00-\u9fff]", title):
+        return title
+    return f"{kind} {_stable_label_id(fallback)}"
+
+
+def _avoid_han_in_english(value: str, fallback: str, language: str, kind: str) -> str:
+    if not _language_is_zh(language) and re.search(r"[\u4e00-\u9fff]", value):
+        return _fallback_english_label(fallback, kind)
+    return value
+
+
 def _studio_slug(text: str, fallback: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9_]+", "_", text.strip().lower()).strip("_")
     return slug[:48] or fallback
@@ -724,10 +748,12 @@ def _studio_location_options(request: AgentStudioGenerateRequest) -> list[AgentS
             continue
         location_id = str(item["id"])
         name = _localized_record_value(item, "name", request.language) or location_id
+        name = _avoid_han_in_english(name, location_id, request.language, "Location")
+        label = name if (not _language_is_zh(request.language) and re.search(r"[\u4e00-\u9fff]", location_id)) else f"{name} ({location_id})"
         options.append(
             AgentStudioOption(
                 id=location_id,
-                label=f"{name} ({location_id})",
+                label=label,
                 description=", ".join(str(value) for value in item.get("interaction_ids", []) or []) or None,
             )
         )
@@ -1648,7 +1674,7 @@ def _normalize_draft(raw: dict[str, Any], basics: DraftBasics) -> dict[str, Any]
             "initial_locations": initial_locations,
             "default_group_name": str(
                 source_env_kwargs.get("default_group_name")
-                or _default_public_group_name(basics.title)
+                or _default_public_group_name(basics.title, basics.language)
             ),
             "map_id": package.map_id,
             "map_manifest_path": relative_manifest_path(package, _map_service_root()),
@@ -1778,6 +1804,17 @@ async def _call_openai_compatible(
         "v1 cannot generate a new map; choose only valid location ids from the selected map package. "
         "You must derive the cast from the operator scenario, not from a fixed template."
     )
+    english_output = not _language_is_zh(basics.language)
+    output_language_requirement = (
+        "- All user-facing titles, profiles, statuses, actions, chat messages, group names, README text, and warnings must be English. Do not mix Chinese except proper nouns.\n"
+        if english_output
+        else "- 所有用户可见的标题、画像、状态、动作、聊天、群名、README 和 warning 都必须使用简体中文；专有名词可保留英文。\n"
+    )
+    display_name_requirement = (
+        "- Every agent must have a natural display name; do not use Agent 1, Jiuwen Agent 1, Participant 1, or numbered placeholder names.\n"
+        if english_output
+        else "- 每个智能体都必须有真实自然的显示名；不要使用 Agent 1、Jiuwen Agent 1、Participant 1 或编号占位名。\n"
+    )
     user_prompt = (
         f"Create a complete experiment draft.\n\n"
         f"Title: {basics.title}\n"
@@ -1790,7 +1827,8 @@ async def _call_openai_compatible(
         f"Available locations and interactions:\n{_map_location_prompt(package)}\n\n"
         "Agent profile requirements:\n"
         f"- Return exactly {basics.agent_count} agents.\n"
-        "- 每个智能体都必须有真实自然的显示名；可以是中文或英文，但不要使用 Agent 1、Jiuwen Agent 1、Participant 1 或编号占位名。\n"
+        f"{output_language_requirement}"
+        f"{display_name_requirement}"
         "- Each profile must be scenario-specific: role, household, persona, daily_routine, relationships, goal, constraints, and scenario_role.\n"
         "- Relationships should reference other generated agent names or roles so the town has social texture.\n"
         "- Do not put skills inside profile. Skills are executable runtime ids on kwargs.common_skill_ids and kwargs.skill_ids.\n"

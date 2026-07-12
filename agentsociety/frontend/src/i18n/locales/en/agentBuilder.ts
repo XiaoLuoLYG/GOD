@@ -149,6 +149,7 @@ export default {
         loadFailed: 'Failed to load init config: {{error}}',
         saved: 'init_config.json saved.',
         saveFailed: 'Failed to save init config: {{error}}',
+        nonEnglishStoredData: 'Stored data contains non-English content.',
         importContentRequired: 'Paste or upload CSV/JSON content first.',
         previewReady: 'Preview ready: {{valid}} valid, {{invalid}} invalid.',
         previewFailed: 'Import preview failed: {{error}}',

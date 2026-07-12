@@ -85,6 +85,7 @@ class AskTarget(BaseModel):
 class AskRequest(BaseModel):
     question: str = Field(..., min_length=1)
     target: AskTarget = Field(default_factory=AskTarget)
+    response_language: Literal["zh", "en"] = "zh"
 
 
 def _default_intervene_target() -> AskTarget:
@@ -94,6 +95,7 @@ def _default_intervene_target() -> AskTarget:
 class InterveneRequest(BaseModel):
     instruction: str = Field(..., min_length=1)
     target: AskTarget = Field(default_factory=_default_intervene_target)
+    response_language: Literal["zh", "en"] = "zh"
 
 
 class CommandResponse(BaseModel):
@@ -600,6 +602,7 @@ class LiveExperimentSession:
                 society,
                 request.question,
                 request.target,
+                request.response_language,
             ),
             metadata={"target": request.target.model_dump(exclude_none=True)},
         )
@@ -613,6 +616,7 @@ class LiveExperimentSession:
                 society,
                 request.instruction,
                 request.target,
+                request.response_language,
             ),
             metadata={"target": request.target.model_dump(exclude_none=True)},
         )
@@ -659,9 +663,17 @@ class LiveExperimentSession:
         society: AgentSociety,
         question: str,
         target: AskTarget,
+        response_language: Literal["zh", "en"] = "zh",
     ) -> str:
+        answer_prompt = question
+        if response_language == "en":
+            answer_prompt = (
+                f"{question}\n\n"
+                "Answer in English only. Preserve the simulation facts and keep "
+                "proper names unchanged unless an established English name is available."
+            )
         if target.type == "society":
-            return await society.ask(question)
+            return await society.ask(answer_prompt)
 
         agents = self._select_agents(society, target)
         if not agents:
@@ -671,39 +683,63 @@ class LiveExperimentSession:
             answer_external_question = getattr(agent, "answer_external_question", None)
             if callable(answer_external_question):
                 return await answer_external_question(
-                    question,
+                    answer_prompt,
                     t=society.current_time,
                     response_type="text",
                 )
-            return await agent.ask(question, readonly=True)
+            return await agent.ask(answer_prompt, readonly=True)
 
         answers = await asyncio.gather(
             *[ask_one(agent) for agent in agents],
             return_exceptions=True,
         )
-        lines = [
-            f"目标: {self._describe_ask_target(target, agents)}",
-            f"仿真时间: {society.current_time.isoformat()}",
-            f"已执行 step: {society.step_count}",
-            "",
-        ]
+        if response_language == "en":
+            lines = [
+                f"Target: {self._describe_ask_target(target, agents, response_language)}",
+                f"Simulation time: {society.current_time.isoformat()}",
+                f"Completed steps: {society.step_count}",
+                "",
+            ]
+        else:
+            lines = [
+                f"目标: {self._describe_ask_target(target, agents)}",
+                f"仿真时间: {society.current_time.isoformat()}",
+                f"已执行 step: {society.step_count}",
+                "",
+            ]
         for agent, answer in zip(agents, answers):
             lines.append(f"### {agent.name} (agent_id={agent.id})")
             if isinstance(answer, Exception):
-                lines.append(f"调用失败: {answer}")
+                lines.append(
+                    f"Call failed: {answer}"
+                    if response_language == "en"
+                    else f"调用失败: {answer}"
+                )
             else:
-                lines.append(str(answer).strip() or "无回复")
+                lines.append(
+                    str(answer).strip()
+                    or ("No response" if response_language == "en" else "无回复")
+                )
             lines.append("")
         return "\n".join(lines).rstrip()
 
-    def _describe_ask_target(self, target: AskTarget, agents: list[Any]) -> str:
+    def _describe_ask_target(
+        self,
+        target: AskTarget,
+        agents: list[Any],
+        response_language: Literal["zh", "en"] = "zh",
+    ) -> str:
         if target.type == "all_agents":
+            if response_language == "en":
+                return f"All residents ({len(agents)})"
             return f"所有居民（{len(agents)} 个）"
         if target.type == "agent":
             agent = agents[0]
             return f"{agent.name} (agent_id={agent.id})"
         if target.type == "agents":
             return ", ".join(f"{agent.name} (agent_id={agent.id})" for agent in agents)
+        if response_language == "en":
+            return "Simulation system"
         return "仿真系统"
 
     async def _intervene_with_target(
@@ -711,20 +747,36 @@ class LiveExperimentSession:
         society: AgentSociety,
         instruction: str,
         target: AskTarget,
+        response_language: Literal["zh", "en"] = "zh",
     ) -> str:
+        intervention_prompt = instruction
+        if response_language == "en":
+            intervention_prompt = (
+                f"{instruction}\n\n"
+                "Process this intervention and respond in English only. Preserve "
+                "the simulation facts and proper names."
+            )
         if target.type == "society":
             agents = self._select_agents(society, AskTarget(type="all_agents"))
             moved = await self._apply_targeted_movement_intervention(
                 society,
                 instruction,
                 agents,
+                response_language,
             )
             if moved:
                 return moved
-            applied = await self._apply_environment_intervention(society, instruction)
+            applied = await self._apply_environment_intervention(
+                society,
+                instruction,
+                response_language,
+            )
             if applied:
                 return applied
-            return await society.intervene(instruction)
+            result = await society.intervene(intervention_prompt)
+            if response_language == "en":
+                return "Intervention accepted and processed by the simulation system."
+            return result
 
         agents = self._select_agents(society, target)
         if not agents:
@@ -737,6 +789,7 @@ class LiveExperimentSession:
             society,
             instruction,
             agents,
+            response_language,
         )
         if moved:
             return moved
@@ -748,11 +801,25 @@ class LiveExperimentSession:
                 queued = queue_fn(instruction)
                 if asyncio.iscoroutine(queued):
                     queued = await queued
-                results.append(f"{agent.name} (agent_id={agent.id}): {queued}")
+                results.append(
+                    f"{agent.name} (agent_id={agent.id}): "
+                    f"{'queued for the next step.' if response_language == 'en' else queued}"
+                )
             else:
-                answer = await agent.ask(instruction, readonly=False)
-                results.append(f"{agent.name} (agent_id={agent.id}): {answer}")
+                answer = await agent.ask(intervention_prompt, readonly=False)
+                results.append(
+                    f"{agent.name} (agent_id={agent.id}): "
+                    f"{'intervention delivered.' if response_language == 'en' else answer}"
+                )
 
+        if response_language == "en":
+            return (
+                f"Intervention accepted and delivered to "
+                f"{self._describe_ask_target(target, agents, response_language)}.\n"
+                "Manual mode does not advance the simulation. Use Run Step or Auto; "
+                "the intervention will be applied on the next step and recorded in replay.\n\n"
+                + "\n".join(results)
+            )
         return (
             f"已接收干预，并投递给 {self._describe_ask_target(target, agents)}。\n"
             "手动模式下不会自动执行下一步；请点击 Run Step 或开启 Auto 后，"
@@ -765,6 +832,7 @@ class LiveExperimentSession:
         society: AgentSociety,
         instruction: str,
         agents: list[Any],
+        response_language: Literal["zh", "en"] = "zh",
     ) -> str:
         location = self._extract_movement_location(instruction)
         if not location or not agents:
@@ -786,12 +854,24 @@ class LiveExperimentSession:
         if move_env is None:
             return ""
 
-        lines = [
-            f"已识别为集合/移动干预，直接调用环境寻路到：{location}",
-            f"目标: {self._describe_ask_target(AskTarget(type='all_agents') if len(agents) != 1 else AskTarget(type='agent', agent_id=int(agents[0].id)), agents)}",
-            "下一次 Run Step/Auto 会推进路径并写入 replay；若 tick 足够大，会在同一个 step 内到达。",
-            "",
-        ]
+        movement_target = AskTarget(
+            type="all_agents" if len(agents) != 1 else "agent",
+            agent_id=int(agents[0].id) if len(agents) == 1 else None,
+        )
+        if response_language == "en":
+            lines = [
+                f"Recognized a gather or movement intervention. Started environment pathfinding to: {location}",
+                f"Target: {self._describe_ask_target(movement_target, agents, response_language)}",
+                "Run Step or Auto will advance the route and record it in replay; a sufficiently large tick may arrive within the same step.",
+                "",
+            ]
+        else:
+            lines = [
+                f"已识别为集合/移动干预，直接调用环境寻路到：{location}",
+                f"目标: {self._describe_ask_target(movement_target, agents)}",
+                "下一次 Run Step/Auto 会推进路径并写入 replay；若 tick 足够大，会在同一个 step 内到达。",
+                "",
+            ]
         ok_count = 0
         for agent in agents:
             move_agent = getattr(move_env, "move_agent")
@@ -800,20 +880,30 @@ class LiveExperimentSession:
                 result = await result
             if isinstance(result, dict) and result.get("ok") is True:
                 ok_count += 1
+                destination = (
+                    result.get("location_id") or result.get("location")
+                    if response_language == "en"
+                    else result.get("location") or result.get("location_id")
+                )
                 lines.append(
                     f"{agent.name} (agent_id={agent.id}): moving -> "
-                    f"{result.get('location') or result.get('location_id')}, "
+                    f"{destination}, "
                     f"path_length={result.get('path_length', 'unknown')}"
                 )
             else:
-                lines.append(
-                    f"{agent.name} (agent_id={agent.id}): move failed: {result}"
-                )
+                if response_language == "en":
+                    lines.append(f"{agent.name} (agent_id={agent.id}): move did not start.")
+                else:
+                    lines.append(
+                        f"{agent.name} (agent_id={agent.id}): move failed: {result}"
+                    )
 
         if ok_count == 0:
             lines.insert(
                 1,
-                "没有 agent 成功开始移动；请检查地点名称是否是地图 manifest 中的 location/alias。",
+                "No agents started moving; check that the location name is a location or alias in the map manifest."
+                if response_language == "en"
+                else "没有 agent 成功开始移动；请检查地点名称是否是地图 manifest 中的 location/alias。",
             )
         return "\n".join(lines)
 
@@ -826,7 +916,6 @@ class LiveExperimentSession:
             "前往",
             "去到",
             "去",
-            "到",
             "集合",
             "集结",
             "集中",
@@ -839,8 +928,9 @@ class LiveExperimentSession:
             return ""
 
         patterns = [
-            r"(?:集中到|集合到|集结到|移动到|前往|去到|去|到)\s*(?P<location>[^，。,；;！!\n]+)",
-            r"(?:在|于)\s*(?P<location>[^，。,；;！!\n]+?)\s*(?:集合|集结|集中|待命)",
+            r"(?:集中到|集合到|集结到|移动到|前往|去到|去)\s*(?P<location>[^，。,；;！!\n]+)",
+            r"(?:在|于|到)\s*(?P<location>[^，。,；;！!\n]+?)\s*(?:集合|集结|集中|待命)",
+            r"\b(?:gather|meet|move)\s+(?:around|at|to|in)\s+(?:the\s+)?(?P<location>[A-Za-z0-9_-]+)",
         ]
         for pattern in patterns:
             match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -864,6 +954,7 @@ class LiveExperimentSession:
         self,
         society: AgentSociety,
         instruction: str,
+        response_language: Literal["zh", "en"] = "zh",
     ) -> str:
         env_router = getattr(society, "_env_router", None)
         env_modules = getattr(env_router, "env_modules", None)
@@ -888,6 +979,12 @@ class LiveExperimentSession:
             )
             if asyncio.iscoroutine(result):
                 result = await result
+            if response_language == "en":
+                return (
+                    "Submitted the system intervention as a public environment event. "
+                    "It will appear in later observation/latest_event and has been "
+                    "broadcast to the town group."
+                )
             return (
                 "已将系统干预写入环境公共事件；"
                 "该事件会出现在后续 observation/latest_event 中，并已广播到小镇群组。\n\n"

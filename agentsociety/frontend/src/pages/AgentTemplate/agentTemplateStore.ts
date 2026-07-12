@@ -66,7 +66,7 @@ class AgentTemplateStore {
         }
       }
     } catch (error) {
-      console.error('获取agent classes失败:', error);
+      console.error('Failed to fetch agent classes:', error);
       this.setAgentClasses([]);
     } finally {
       this.setLoadingAgentClasses(false);
@@ -161,7 +161,7 @@ class AgentTemplateStore {
         if (errorData.detail) {
           throw new Error(typeof errorData.detail === 'object' ? JSON.stringify(errorData.detail) : errorData.detail);
         } else {
-          throw new Error('创建模板失败: ' + JSON.stringify(errorData));
+          throw new Error('Failed to create template: ' + JSON.stringify(errorData));
         }
       }
 

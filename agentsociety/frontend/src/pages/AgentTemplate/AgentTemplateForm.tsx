@@ -38,7 +38,7 @@ const renderDynamicFormItem = (
       </Space>
     ),
     initialValue: paramInfo.default,
-    rules: [{ required: paramInfo.required, message: `请输入${paramName}` }]
+    rules: [{ required: paramInfo.required, message: `Please enter ${paramName}` }]
   };
 
   switch (paramInfo.type.toLowerCase()) {
@@ -772,4 +772,4 @@ const AgentTemplateForm: React.FC = observer(() => {
   );
 });
 
-export default AgentTemplateForm; 
+export default AgentTemplateForm;

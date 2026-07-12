@@ -18,13 +18,13 @@
 //     EDUCATION_COLLEGE = 7;
 // }
 export const PairEducation = [
-    [1, "博士"],
-    [2, "硕士"],
-    [3, "本科"],
-    [4, "高中"],
-    [5, "初中"],
-    [6, "小学"],
-    [7, "大专"],
+    [1, "Doctorate"],
+    [2, "Master"],
+    [3, "Bachelor"],
+    [4, "High school"],
+    [5, "Junior high"],
+    [6, "Primary school"],
+    [7, "College diploma"],
 ]
 export const MapEducation = new Map<number, string>(PairEducation as Iterable<readonly [number, string]>);
 
@@ -38,8 +38,8 @@ export const MapEducation = new Map<number, string>(PairEducation as Iterable<re
 //     GENDER_FEMALE = 2;
 // }
 export const PairGender = [
-    [1, "男性"],
-    [2, "女性"],
+    [1, "Male"],
+    [2, "Female"],
 ]
 export const MapGender = new Map<number, string>(PairGender as Iterable<readonly [number, string]>);
 
@@ -59,37 +59,37 @@ export const MapGender = new Map<number, string>(PairGender as Iterable<readonly
 //     CONSUMPTION_HIGH = 5;
 // }
 export const PairConsumption = [
-    [1, "低"],
-    [2, "较低"],
-    [3, "中等"],
-    [4, "较高"],
-    [5, "高"],
+    [1, "Low"],
+    [2, "Relatively low"],
+    [3, "Medium"],
+    [4, "Relatively high"],
+    [5, "High"],
 ];
 export const MapConsumption = new Map<number, string>(PairConsumption as Iterable<readonly [number, string]>);
 
 export const PairLandUse = [
-    [0, '未指定'],
-    [5, '商服用地'],
-    [6, '工矿仓储用地'],
-    [7, '住宅用地'],
-    [8, '公共管理与公共服务用地'],
-    [10, '交通运输用地'],
-    [12, '其他土地'],
+    [0, 'Unspecified'],
+    [5, 'Commercial land'],
+    [6, 'Industrial and warehouse land'],
+    [7, 'Residential land'],
+    [8, 'Public service land'],
+    [10, 'Transportation land'],
+    [12, 'Other land'],
 ];
 export const MapLandUse = new Map<number, string>(PairLandUse as Iterable<readonly [number, string]>);
 
 export const GetEducationName = (education: number) => {
-    return MapEducation.get(education) || "未知";
+    return MapEducation.get(education) || "Unknown";
 }
 
 export const GetGenderName = (gender: number) => {
-    return MapGender.get(gender) || "未知";
+    return MapGender.get(gender) || "Unknown";
 }
 
 export const GetConsumptionName = (consumption: number) => {
-    return MapConsumption.get(consumption) || "未知";
+    return MapConsumption.get(consumption) || "Unknown";
 }
 
 export const GetLandUseName = (landUse: number) => {
-    return MapLandUse.get(landUse) || "未知";
+    return MapLandUse.get(landUse) || "Unknown";
 }

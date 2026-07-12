@@ -129,6 +129,7 @@ export default {
             sendTo: "发给 {{name}}",
             sendToGroup: "发到 {{name}}{{suffix}}",
             recipientCount: "（{{count}} 人）",
+            nonEnglishMessage: "存量消息包含非英文内容。",
         },
         residents: {
             title: "居民状态",
@@ -140,6 +141,7 @@ export default {
             missingCoords: "缺少地图坐标，使用兼容定位",
             emotion: "情绪：{{emotion}}",
             lastReceived: "最近收到：{{message}}",
+            nonEnglishAction: "存量动作包含非英文内容。",
             viewDetail: "查看完整详情",
             clearSelection: "取消选中",
         },

@@ -149,6 +149,7 @@ export default {
         loadFailed: '加载 init_config 失败：{{error}}',
         saved: 'init_config.json 已保存。',
         saveFailed: '保存 init_config 失败：{{error}}',
+        nonEnglishStoredData: '存量数据包含非英文内容。',
         importContentRequired: '请先粘贴或上传 CSV/JSON 内容。',
         previewReady: '预览完成：{{valid}} 行有效，{{invalid}} 行无效。',
         previewFailed: '导入预览失败：{{error}}',

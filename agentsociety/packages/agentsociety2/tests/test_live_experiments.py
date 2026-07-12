@@ -74,6 +74,10 @@ def test_targeted_live_ask_uses_external_question_api(tmp_path):
     asyncio.run(_targeted_live_ask_uses_external_question_api(tmp_path))
 
 
+def test_targeted_live_ask_uses_english_response_language(tmp_path):
+    asyncio.run(_targeted_live_ask_uses_english_response_language(tmp_path))
+
+
 async def _targeted_live_ask_uses_external_question_api(tmp_path):
     agent = FakeAgent()
     current_time = datetime(2026, 5, 8, 9, 30)
@@ -102,8 +106,68 @@ async def _targeted_live_ask_uses_external_question_api(tmp_path):
     ]
 
 
+async def _targeted_live_ask_uses_english_response_language(tmp_path):
+    agent = FakeAgent()
+    current_time = datetime(2026, 5, 8, 9, 30)
+    society = SimpleNamespace(
+        _agents=[agent],
+        current_time=current_time,
+        step_count=3,
+        ask=None,
+    )
+    session = LiveExperimentSession(
+        workspace_path=tmp_path,
+        hypothesis_id="1",
+        experiment_id="1",
+    )
+
+    result = await session._ask_with_target(
+        society,
+        "What did you do today?",
+        AskTarget(type="agent", agent_id=1),
+        response_language="en",
+    )
+
+    assert agent.external_question_calls == [
+        (
+            "What did you do today?\n\n"
+            "Answer in English only. Preserve the simulation facts and keep "
+            "proper names unchanged unless an established English name is available.",
+            current_time,
+            "text",
+        )
+    ]
+    assert "Target: Alice (agent_id=1)" in result
+    assert "Simulation time: 2026-05-08T09:30:00" in result
+    assert "Completed steps: 3" in result
+    assert "目标：" not in result
+
+
 def test_live_intervene_directly_moves_agents_for_gather_instruction(tmp_path):
     asyncio.run(_live_intervene_directly_moves_agents_for_gather_instruction(tmp_path))
+
+
+def test_event_notices_do_not_trigger_movement_parser(tmp_path):
+    session = LiveExperimentSession(
+        workspace_path=tmp_path,
+        hypothesis_id="1",
+        experiment_id="1",
+    )
+
+    assert session._extract_movement_location(
+        "校内通知：某国领导即将到访校园，并在百周年纪念讲堂进行公开交流。"
+    ) == ""
+    assert session._extract_movement_location(
+        "公共安全通知：校园收到地震预警，请各角色确认人员安全。"
+    ) == ""
+
+
+def test_live_intervene_directly_moves_agents_for_english_gather_instruction(tmp_path):
+    asyncio.run(_live_intervene_directly_moves_agents_for_english_gather_instruction(tmp_path))
+
+
+def test_system_intervene_hides_non_english_model_result_in_english_ui(tmp_path):
+    asyncio.run(_system_intervene_hides_non_english_model_result_in_english_ui(tmp_path))
 
 
 async def _live_intervene_directly_moves_agents_for_gather_instruction(tmp_path):
@@ -135,6 +199,72 @@ async def _live_intervene_directly_moves_agents_for_gather_instruction(tmp_path)
     assert agents[1].queued == []
     assert "直接调用环境寻路" in result
     assert "path_length=4" in result
+
+
+async def _live_intervene_directly_moves_agents_for_english_gather_instruction(tmp_path):
+    agents = [
+        FakeInterventionAgent(1, "Alice"),
+        FakeInterventionAgent(2, "Bob"),
+    ]
+    env = FakeMoveEnv()
+    society = SimpleNamespace(
+        _agents=agents,
+        _env_router=SimpleNamespace(env_modules=[env]),
+        current_time=datetime(2026, 5, 8, 19, 20),
+        step_count=52,
+    )
+    session = LiveExperimentSession(
+        workspace_path=tmp_path,
+        hypothesis_id="1",
+        experiment_id="1",
+    )
+
+    result = await session._intervene_with_target(
+        society,
+        "Gather around library and introduce yourself to each other.",
+        AskTarget(type="all_agents"),
+        response_language="en",
+    )
+
+    assert env.calls == [(1, "library"), (2, "library")]
+    assert agents[0].queued == []
+    assert agents[1].queued == []
+    assert "Started environment pathfinding to: library" in result
+    assert "Alice (agent_id=1): moving -> park, path_length=4" in result
+    assert not any("\u4e00" <= char <= "\u9fff" for char in result)
+
+
+async def _system_intervene_hides_non_english_model_result_in_english_ui(tmp_path):
+    prompts: list[str] = []
+
+    async def intervene(prompt: str) -> str:
+        prompts.append(prompt)
+        return "模型已处理干预"
+
+    society = SimpleNamespace(
+        _agents=[],
+        _env_router=SimpleNamespace(env_modules=[]),
+        intervene=intervene,
+    )
+    session = LiveExperimentSession(
+        workspace_path=tmp_path,
+        hypothesis_id="1",
+        experiment_id="1",
+    )
+
+    result = await session._intervene_with_target(
+        society,
+        "Record this operator check.",
+        AskTarget(type="society"),
+        response_language="en",
+    )
+
+    assert result == "Intervention accepted and processed by the simulation system."
+    assert prompts == [
+        "Record this operator check.\n\n"
+        "Process this intervention and respond in English only. Preserve "
+        "the simulation facts and proper names."
+    ]
 
 
 def test_live_interaction_records_operator_command(monkeypatch, tmp_path):

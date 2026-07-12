@@ -243,6 +243,30 @@ function titleizeId(value: string): string {
         .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function hasHan(value: string): boolean {
+    return /[\u4e00-\u9fff]/.test(value);
+}
+
+function stableLabelId(value: string): string {
+    let hash = 0;
+    Array.from(value || 'item').forEach((char) => {
+        hash = ((hash * 31) + char.charCodeAt(0)) >>> 0;
+    });
+    return hash.toString(36).slice(0, 6) || 'item';
+}
+
+function fallbackEnglishLabel(fallback: string, kind: string): string {
+    const title = titleizeId(fallback);
+    if (title && !hasHan(title)) {
+        return title;
+    }
+    return `${kind} ${stableLabelId(fallback)}`;
+}
+
+function avoidHanInEnglish(value: string, fallback: string, locale: Locale, kind: string): string {
+    return locale === 'en' && hasHan(value) ? fallbackEnglishLabel(fallback, kind) : value;
+}
+
 function readLocalizedString(
     localized: LocalizedFields | undefined,
     locale: Locale,
@@ -357,10 +381,11 @@ export function localizeMapDisplayName(
 ): string {
     const locale = pickLocale(language);
     const mapId = mapIdFor(map);
-    return readLocalizedString(map.localized, locale, 'display_name')
+    const value = readLocalizedString(map.localized, locale, 'display_name')
         || FIRST_PARTY_MAP_LABELS[mapId]?.displayName[locale]
         || String(map.display_name || map.displayName || mapId || '').trim()
         || titleizeId(mapId);
+    return avoidHanInEnglish(value, mapId, locale, 'Map');
 }
 
 export function localizeMapLocationName(
@@ -369,10 +394,11 @@ export function localizeMapLocationName(
     language?: string,
 ): string {
     const locale = pickLocale(language);
-    return readLocalizedString(location.localized, locale, 'name')
+    const value = readLocalizedString(location.localized, locale, 'name')
         || FIRST_PARTY_MAP_LABELS[mapId]?.locations[location.id]?.[locale]
         || String(location.name || '').trim()
         || titleizeId(location.id);
+    return avoidHanInEnglish(value, location.id, locale, 'Location');
 }
 
 export function localizeMapLocationAliases(

@@ -36,6 +36,7 @@ import { useTranslation } from 'react-i18next';
 import LanguageToggle from '../../components/LanguageToggle';
 import { fetchCustom } from '../../components/fetch';
 import PackageImportModal from '../../components/PackageImportModal';
+import { localizeMapDisplayName, localizeMapLocationName } from '../../utils/runtimeLocalization';
 import { AgentEditorModal, type AgentEditorSaveMeta, type AgentStudioLocation } from './AgentEditorModal';
 import {
     jsonStringify,
@@ -128,9 +129,9 @@ type DefaultProfile = {
 
 const DEFAULT_PROFILE: DefaultProfile = {
     name: '',
-    role: '小镇居民',
-    persona: '主动、可靠、会根据小镇当前情况和其他居民协作',
-    goal: '参与小镇日常协作，并在下一次 step 中根据环境变化做出响应。',
+    role: 'Town resident',
+    persona: 'Proactive, reliable, and ready to coordinate with other residents based on current town conditions',
+    goal: 'Join daily town coordination and respond to environment changes in the next step.',
 };
 
 const DEFAULT_COMMON_SKILL_IDS = [
@@ -312,6 +313,8 @@ const shortJson = (value: unknown, maxLength = 120) => {
     return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
 };
 
+const hasHan = (value: string) => /[\u4e00-\u9fff]/.test(value);
+
 const getDuplicateIds = (agents: AgentRecord[]) => {
     const seen = new Set<number>();
     const duplicates = new Set<number>();
@@ -429,7 +432,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
     autoSaveOnAgentSave = false,
     onSaved,
 }) => {
-    const { t } = useTranslation();
+    const { t, i18n } = useTranslation();
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
     const explicitWorkspacePath = initialWorkspacePath || searchParams.get('workspace_path') || '';
@@ -480,8 +483,12 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
     }), [t]);
     const agentPackOptions = useMemo(() => agentPacks.map((pack) => ({
         value: agentPackSelectionKey(pack),
-        label: `${pack.display_name || pack.pack_id} · ${pack.agents.length} · ${pack.scope === 'map' ? mapId : 'global'}`,
-    })), [agentPacks, mapId]);
+        label: `${pack.display_name || pack.pack_id} · ${pack.agents.length} · ${
+            pack.scope === 'map'
+                ? localizeMapDisplayName({ map_id: pack.map_id || mapId, display_name: pack.map_id || mapId }, i18n.language)
+                : 'global'
+        }`,
+    })), [agentPacks, i18n.language, mapId]);
     const selectedAgentPack = useMemo(
         () => agentPacks.find((pack) => agentPackSelectionKey(pack) === selectedAgentPackId),
         [agentPacks, selectedAgentPackId],
@@ -505,6 +512,13 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
 
     const endpointBase = `/api/v1/experiment-configs/${encodeURIComponent(hypothesisId)}/${encodeURIComponent(experimentId)}`;
     const query = `workspace_path=${encodeURIComponent(workspacePath)}`;
+    const jsonPreviewText = (value: unknown, maxLength?: number) => {
+        const text = jsonStringify(value);
+        if (i18n.language?.startsWith('en') && hasHan(text)) {
+            return t('agentBuilder.messages.nonEnglishStoredData');
+        }
+        return maxLength ? shortJson(value, maxLength) : text;
+    };
 
     useEffect(() => {
         fetchCustom('/api/v1/modules/agent_classes')
@@ -963,8 +977,8 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
         {
             title: t('agentBuilder.columns.profile'),
             render: (_, record) => (
-                <Tooltip title={<pre style={{ margin: 0 }}>{jsonStringify(record.kwargs?.profile)}</pre>}>
-                    <Text code>{shortJson(record.kwargs?.profile)}</Text>
+                <Tooltip title={<pre style={{ margin: 0 }}>{jsonPreviewText(record.kwargs?.profile)}</pre>}>
+                    <Text code>{jsonPreviewText(record.kwargs?.profile, 120)}</Text>
                 </Tooltip>
             ),
         },
@@ -973,8 +987,8 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
             render: (_, record) => {
                 const rest = omitKeys(record.kwargs || {}, ['profile']);
                 return (
-                    <Tooltip title={<pre style={{ margin: 0 }}>{jsonStringify(rest)}</pre>}>
-                        <Text code>{shortJson(rest)}</Text>
+                    <Tooltip title={<pre style={{ margin: 0 }}>{jsonPreviewText(rest)}</pre>}>
+                        <Text code>{jsonPreviewText(rest, 120)}</Text>
                     </Tooltip>
                 );
             },
@@ -1258,7 +1272,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
                                             value={agentPackLocationOverrides[String(record.id)] || mapLocations[0]?.id}
                                             options={mapLocations.map((location) => ({
                                                 value: location.id,
-                                                label: location.name || location.id,
+                                                label: localizeMapLocationName(mapId, location, i18n.language),
                                             }))}
                                             disabled={!mapLocations.length}
                                             placeholder={t('agentBuilder.studio.locationUnavailable')}

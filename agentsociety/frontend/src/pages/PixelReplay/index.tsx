@@ -848,7 +848,11 @@ function formatRuntimeFieldValue(value: unknown, key: string, frame: PixelFrame,
         return formatPhase(value, t);
     }
     if (key === 'latest_event') {
-        return localizeSystemEvent(value, language, frame.map, frame.map.locations) ?? emptyValue;
+        return displayStoredText(
+            localizeSystemEvent(value, language, frame.map, frame.map.locations),
+            language,
+            STORED_EVENT_FALLBACK_EN,
+        ) || emptyValue;
     }
     return formatValue(value, emptyValue);
 }
@@ -1183,7 +1187,7 @@ function buildPixelFrame(
     labels: { idleAction: string; defaultLocation: string; language: string },
 ): PixelFrame {
     const envRow = firstEnvRow(bundle);
-    const stepCommunications = parseCommunications(envRow);
+    const stepCommunications = translateStoredCommunications(parseCommunications(envRow), labels.language);
     const agents = profiles.map((profile, index) => {
         const row = findAgentRow(bundle, profile.id);
         const rawDescription = row ? pickDisplayValue(row, ['description', 'action', 'activity', 'state', 'status']) : undefined;
@@ -1196,6 +1200,16 @@ function buildPixelFrame(
         const latestEvent = row ? pickDisplayValue(row, ['latest_event']) : undefined;
         const targetLocationId = row ? pickDisplayValue(row, ['target_location_id']) : undefined;
         const movementStatus = row ? pickDisplayValue(row, ['movement_status']) : undefined;
+        const localizedAction = localizeRuntimeAction(
+            rawDescription,
+            labels.language,
+            walkableMap,
+            walkableMap.locations,
+            walkableMap.interactions,
+            labels.idleAction,
+        );
+        const rawLatestEvent = latestEvent ?? pickDisplayValue(envRow ?? {}, ['latest_event']);
+        const localizedLatestEvent = localizeSystemEvent(rawLatestEvent, labels.language, walkableMap, walkableMap.locations);
         const tileX = pickOptionalNumberValue(row, 'tile_x');
         const tileY = pickOptionalNumberValue(row, 'tile_y');
         const hasReplayTile = tileX !== undefined && tileY !== undefined;
@@ -1212,14 +1226,8 @@ function buildPixelFrame(
             tile,
             movementSegment,
             visualOffset: { x: 0, y: 0 },
-            action: localizeRuntimeAction(
-                rawDescription,
-                labels.language,
-                walkableMap,
-                walkableMap.locations,
-                walkableMap.interactions,
-                labels.idleAction,
-            ),
+            action: translateKnownStoredReplayText(rawDescription, labels.language)
+                ?? displayStoredText(localizedAction, labels.language, STORED_ACTION_FALLBACK_EN),
             status: status ? localizeStatusLabel(status, labels.language) : undefined,
             location: localizeLocationReference(location ?? locationId ?? labels.defaultLocation, labels.language, walkableMap, walkableMap.locations),
             locationId,
@@ -1227,10 +1235,11 @@ function buildPixelFrame(
             targetLocationId: targetLocationId ? localizeLocationReference(targetLocationId, labels.language, walkableMap, walkableMap.locations) : undefined,
             hasReplayTile,
             emotion: localizeEmotionLabel(emotion, labels.language),
-            lastMessage,
+            lastMessage: translateStoredReplayText(lastMessage, labels.language, STORED_MESSAGE_FALLBACK_EN),
             messageCount: pickNumberValue(row, 'message_count'),
             currentPhase: currentPhase ?? pickDisplayValue(envRow ?? {}, ['current_phase']),
-            latestEvent: localizeSystemEvent(latestEvent ?? pickDisplayValue(envRow ?? {}, ['latest_event']), labels.language, walkableMap, walkableMap.locations),
+            latestEvent: translateKnownStoredReplayText(rawLatestEvent, labels.language)
+                ?? translateStoredReplayText(localizedLatestEvent, labels.language, STORED_EVENT_FALLBACK_EN),
             stepCommunications: filterAgentStepCommunications(profile.id, stepCommunications),
             availableInteractions,
         };
@@ -1268,6 +1277,59 @@ const sleep = (ms: number) => new Promise<void>((resolve) => {
 });
 
 const toErrorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+const STORED_MESSAGE_FALLBACK_EN = 'Stored message contains non-English content.';
+const STORED_ACTION_FALLBACK_EN = 'Stored action contains non-English content.';
+const STORED_EVENT_FALLBACK_EN = 'Stored event contains non-English content.';
+
+const STORED_REPLAY_TEXT_EN: Record<string, string> = {
+    'Jiuwen Alice 正在公园和大家碰头': 'Jiuwen Alice is meeting everyone in Johnson Park.',
+    'Jiuwen Charlie 正在学校进行课后答疑': 'Jiuwen Charlie is holding office hours in the school classroom.',
+    'Jiuwen Hana 正在家里做饭': 'Jiuwen Hana is cooking at home.',
+    'Jiuwen Mei 正在市场店铺值班': 'Jiuwen Mei is working a shop shift at The Willows Market.',
+    前往哈维橡树供给店: 'Heading to Harvey Oak Supply Store.',
+    前往学校教室: 'Heading to the school classroom.',
+    前往家: 'Heading home.',
+    前往柳树市场: 'Heading to The Willows Market.',
+    前往约翰逊公园: 'Heading to Johnson Park.',
+    'Jiuwen Bob 正在前往哈维橡树供给店。': 'Jiuwen Bob is heading to Harvey Oak Supply Store.',
+    '我会把当前情况整理清楚，并同步给需要知道的人。': 'I will organize the current situation clearly and update the people who need to know.',
+    '我先把摊位收拾好，再接待顾客。': 'I will tidy the stall first, then help customers.',
+    '我用年轻人听得进去的方式聊。': 'I will talk in a way younger people can actually hear.',
+    'Jiuwen Alice 在公园说：执行社区协调': 'Jiuwen Alice says in Johnson Park: coordinating the community.',
+};
+
+const hasHan = (value: string) => /[\u4e00-\u9fff]/.test(value);
+
+const translateKnownStoredReplayText = (value: unknown, language: string): string | undefined => {
+    const text = String(value || '').trim();
+    if (!language?.startsWith('en') || !text) {
+        return undefined;
+    }
+    return STORED_REPLAY_TEXT_EN[text];
+};
+
+const translateStoredReplayText = (value: unknown, language: string, fallback: string): string | undefined => {
+    const text = String(value || '').trim();
+    if (!text) {
+        return undefined;
+    }
+    if (!language?.startsWith('en')) {
+        return text;
+    }
+    return STORED_REPLAY_TEXT_EN[text] ?? (hasHan(text) ? fallback : text);
+};
+
+const translateStoredCommunications = (communications: Communication[], language: string): Communication[] => (
+    communications.map((item) => ({
+        ...item,
+        content: translateStoredReplayText(item.content, language, STORED_MESSAGE_FALLBACK_EN),
+    }))
+);
+
+const displayStoredText = (value: unknown, language: string, fallback: string) => {
+    return translateStoredReplayText(value, language, fallback) ?? '';
+};
 
 const isReplayDatabaseNotReadyError = (error: unknown) => (
     toErrorMessage(error).includes('Database not found')
@@ -3195,8 +3257,16 @@ export default function PixelReplay() {
             }>(
                 withLiveWorkspace(parsedCommand.mode === 'ask' ? '/ask' : '/intervene'),
                 parsedCommand.mode === 'ask'
-                    ? { question: parsedCommand.prompt, target: parsedCommand.target }
-                    : { instruction: parsedCommand.prompt, target: parsedCommand.target },
+                    ? {
+                        question: parsedCommand.prompt,
+                        target: parsedCommand.target,
+                        response_language: currentLanguage.startsWith('zh') ? 'zh' : 'en',
+                    }
+                    : {
+                        instruction: parsedCommand.prompt,
+                        target: parsedCommand.target,
+                        response_language: currentLanguage.startsWith('zh') ? 'zh' : 'en',
+                    },
             );
             setLiveStatus((status) => status ? {
                 ...status,
@@ -3269,7 +3339,7 @@ export default function PixelReplay() {
         last_environment_effects: selectedAgentSnapshot.last_environment_effects,
     } : undefined;
     const envSnapshot = firstEnvRow(bundle);
-    const communications = parseCommunications(envSnapshot);
+    const communications = translateStoredCommunications(parseCommunications(envSnapshot), currentLanguage);
     const missingReplayTileCount = frame?.agents.filter((agent) => !agent.hasReplayTile).length ?? 0;
 
     const toggleSelectedAgent = useCallback((agentId: number) => {
@@ -3295,6 +3365,7 @@ export default function PixelReplay() {
     const liveCommandMode = liveCommandParseResult.ok ? liveCommandParseResult.mode : undefined;
 
     const handleLiveCommandKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        event.stopPropagation();
         if (event.key === 'Tab' && !event.shiftKey) {
             const completion = completeLivePromptAtCursor(
                 event.currentTarget.value,
@@ -3567,7 +3638,11 @@ export default function PixelReplay() {
                                             </div>
                                             {envSnapshot?.latest_event !== undefined && (
                                                 <Text className="pixel-step-event">
-                                                    {localizeSystemEvent(envSnapshot.latest_event, currentLanguage, frame.map, frame.map.locations)}
+                                                    {displayStoredText(
+                                                        localizeSystemEvent(envSnapshot.latest_event, currentLanguage, frame.map, frame.map.locations),
+                                                        currentLanguage,
+                                                        STORED_EVENT_FALLBACK_EN,
+                                                    )}
                                                 </Text>
                                             )}
                                         </section>
@@ -3604,7 +3679,9 @@ export default function PixelReplay() {
                                                                 suffix: item.recipient_count ? t('replay.pixel.chat.recipientCount', { count: item.recipient_count }) : '',
                                                             })}
                                                     </Text>
-                                                    <Text className="pixel-message-text">{item.content ?? ''}</Text>
+                                                    <Text className="pixel-message-text">
+                                                        {displayStoredText(item.content, currentLanguage, t('replay.pixel.chat.nonEnglishMessage'))}
+                                                    </Text>
                                                 </div>
                                             ))}
                                         </div>
@@ -3635,7 +3712,9 @@ export default function PixelReplay() {
                                             <div className="pixel-replay-selected">
                                                 <Text type="secondary">{t('replay.pixel.residents.selected')}</Text>
                                                 <Text strong>{selectedAgent.name}</Text>
-                                                <Text>{selectedAgent.action}</Text>
+                                                <Text>
+                                                    {displayStoredText(selectedAgent.action, currentLanguage, t('replay.pixel.residents.nonEnglishAction'))}
+                                                </Text>
                                                 <Text type="secondary">{t('replay.pixel.residents.location', { location: selectedAgent.location })}</Text>
                                                 <Space size={4} wrap>
                                                     {selectedAgent.locationId && <Tag>{selectedAgent.locationId}</Tag>}
@@ -3659,7 +3738,11 @@ export default function PixelReplay() {
                                                 )}
                                                 {selectedAgent.emotion && <Text type="secondary">{t('replay.pixel.residents.emotion', { emotion: selectedAgent.emotion })}</Text>}
                                                 {selectedAgent.lastMessage && (
-                                                    <Text className="pixel-message-text">{t('replay.pixel.residents.lastReceived', { message: selectedAgent.lastMessage })}</Text>
+                                                    <Text className="pixel-message-text">
+                                                        {t('replay.pixel.residents.lastReceived', {
+                                                            message: displayStoredText(selectedAgent.lastMessage, currentLanguage, t('replay.pixel.chat.nonEnglishMessage')),
+                                                        })}
+                                                    </Text>
                                                 )}
                                                 <Space size={8} wrap>
                                                     <Button
@@ -3696,14 +3779,22 @@ export default function PixelReplay() {
                                                     }}
                                                 >
                                                     <span className="pixel-agent-name">{agent.name}</span>
-                                                    <span className="pixel-agent-action">{agent.action}</span>
+                                                    <span className="pixel-agent-action">
+                                                        {displayStoredText(agent.action, currentLanguage, t('replay.pixel.residents.nonEnglishAction'))}
+                                                    </span>
                                                     <span className="pixel-agent-location">{agent.location}</span>
                                                     <span className="pixel-agent-location">
                                                         {agent.hasReplayTile
                                                             ? t('replay.pixel.residents.tile', { x: agent.tile.x, y: agent.tile.y })
                                                             : t('replay.pixel.residents.missingCoords')}
                                                     </span>
-                                                    {agent.lastMessage && <span className="pixel-agent-location">{t('replay.pixel.residents.lastReceived', { message: agent.lastMessage })}</span>}
+                                                    {agent.lastMessage && (
+                                                        <span className="pixel-agent-location">
+                                                            {t('replay.pixel.residents.lastReceived', {
+                                                                message: displayStoredText(agent.lastMessage, currentLanguage, t('replay.pixel.chat.nonEnglishMessage')),
+                                                            })}
+                                                        </span>
+                                                    )}
                                                 </div>
                                             ))}
                                         </div>
