@@ -125,6 +125,7 @@ jobs:
         run: |
           uv run pytest -q \
             packages/agentsociety2/tests/test_god_setup_router.py \
+            packages/agentsociety2/tests/test_jiuwenclaw_agent_runtime.py \
             packages/agentsociety2/tests/test_map_packages.py \
             packages/agentsociety2/tests/test_pixel_town_social_env.py
 
@@ -145,6 +146,9 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm ci --prefix agentsociety/frontend
+
+      - name: Test direct and path-proxy serving
+        run: npm run test:proxy --prefix agentsociety/frontend
 
       - name: Build frontend
         run: npm run build --prefix agentsociety/frontend

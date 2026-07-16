@@ -12,6 +12,12 @@ import SetupPage from './pages/Setup'
 import SkillsPage from './pages/Skills'
 import MapStudioPage from './pages/MapStudio'
 
+// Under code-server path proxy (e.g. /proxy/5174/), keep router + asset base aligned.
+const routerBasename = (() => {
+    const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '')
+    return base === '' ? undefined : base
+})()
+
 const router = createBrowserRouter([
     {
         path: "/",
@@ -45,7 +51,7 @@ const router = createBrowserRouter([
         path: "*",
         element: <Navigate to="/" />,
     }
-])
+], { basename: routerBasename })
 
 const theme: ThemeConfig = {
     token: {

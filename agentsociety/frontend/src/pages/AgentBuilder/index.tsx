@@ -34,7 +34,7 @@ import {
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import LanguageToggle from '../../components/LanguageToggle';
-import { fetchCustom } from '../../components/fetch';
+import { fetchCustom, resolveAppUrl } from '../../components/fetch';
 import PackageImportModal from '../../components/PackageImportModal';
 import { localizeMapDisplayName, localizeMapLocationName } from '../../utils/runtimeLocalization';
 import { AgentEditorModal, type AgentEditorSaveMeta, type AgentStudioLocation } from './AgentEditorModal';
@@ -722,7 +722,7 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
         const mapParam = pack.scope === 'map' && pack.map_id
             ? `?map_id=${encodeURIComponent(pack.map_id)}`
             : '';
-        return `/api/v1/god/agent-packs/${encodeURIComponent(pack.pack_id)}/assets/${sprite.path}${mapParam}`;
+        return resolveAppUrl(`/api/v1/god/agent-packs/${encodeURIComponent(pack.pack_id)}/assets/${sprite.path}${mapParam}`);
     };
 
     const buildAgentFromPack = (

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import anyio
+from websockets.asyncio import client as websocket_client
 
 
 def _load_jiuwenclaw_agent_class():
@@ -226,3 +227,28 @@ def test_jiuwenclaw_request_concurrency_invalid_env_falls_back_to_default(monkey
 
     monkeypatch.setenv("AGENTSOCIETY_JIUWENCLAW_REQUEST_CONCURRENCY", "0")
     assert JiuwenClawAgent._request_concurrency_limit() == 1
+
+
+def test_jiuwenclaw_websocket_uses_agent_server_keepalive(monkeypatch):
+    JiuwenClawAgent = _load_jiuwenclaw_agent_class()
+    agent = JiuwenClawAgent(id=1, name="Runtime Tester", profile={"name": "Runtime Tester"})
+    captured = {}
+    expected_socket = object()
+
+    async def connect(uri, **kwargs):
+        captured["uri"] = uri
+        captured["kwargs"] = kwargs
+        return expected_socket
+
+    monkeypatch.setattr(websocket_client, "connect", connect)
+    result = anyio.run(agent._open_websocket, "ws://127.0.0.1:18092")
+
+    assert result is expected_socket
+    assert captured == {
+        "uri": "ws://127.0.0.1:18092",
+        "kwargs": {
+            "origin": "http://127.0.0.1:18092",
+            "ping_interval": 30,
+            "ping_timeout": 300,
+        },
+    }

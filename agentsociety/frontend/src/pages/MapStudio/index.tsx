@@ -33,7 +33,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { fetchCustom } from '../../components/fetch';
+import { fetchCustom, resolveAppUrl } from '../../components/fetch';
 import LanguageToggle from '../../components/LanguageToggle';
 import './style.css';
 
@@ -705,7 +705,7 @@ export default function MapStudioPage() {
                                 >
                                     <img
                                         ref={imageRef}
-                                        src={`${draft.preview_url}?t=${encodeURIComponent(draft.draft_id)}`}
+                                        src={`${resolveAppUrl(draft.preview_url)}?t=${encodeURIComponent(draft.draft_id)}`}
                                         alt="Generated map preview"
                                         draggable={false}
                                     />

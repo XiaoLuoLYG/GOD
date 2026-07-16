@@ -81,7 +81,7 @@ class AgentTemplateStore {
     }
 
     try {
-      const response = await fetch(`/api/agent-param?agent_type=${this.agentType}&agent_class=${this.agentClass}`);
+      const response = await fetchCustom(`/api/agent-param?agent_type=${this.agentType}&agent_class=${this.agentClass}`);
       const data = await response.json();
 
       if (data.data) {

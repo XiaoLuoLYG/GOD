@@ -31,7 +31,7 @@ import {
     UserOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { fetchCustom } from '../../components/fetch';
+import { fetchCustom, resolveAppUrl } from '../../components/fetch';
 import PackageImportModal from '../../components/PackageImportModal';
 import { localizeMapDisplayName, localizeMapLocationName } from '../../utils/runtimeLocalization';
 import {
@@ -306,7 +306,8 @@ const absoluteAssetUrl = (url?: string) => {
     if (!url) return '';
     if (/^https?:\/\//i.test(url)) return url;
     const base = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
-    return `${base}${url.startsWith('/') ? url : `/${url}`}`;
+    const path = url.startsWith('/') ? url : `/${url}`;
+    return base ? `${base}${path}` : resolveAppUrl(path);
 };
 
 const basename = (path: string) => path.split('/').filter(Boolean).pop() || path;
@@ -427,7 +428,7 @@ export const AgentEditorModal: React.FC<AgentEditorModalProps> = ({
     const packAssetUrl = (pack: AgentPackSummary, sprite?: AgentPackSprite) => {
         if (!sprite?.path) return '';
         const query = pack.scope === 'map' && pack.map_id ? `?map_id=${encodeURIComponent(pack.map_id)}` : '';
-        return `/api/v1/god/agent-packs/${encodeURIComponent(pack.pack_id)}/assets/${sprite.path}${query}`;
+        return resolveAppUrl(`/api/v1/god/agent-packs/${encodeURIComponent(pack.pack_id)}/assets/${sprite.path}${query}`);
     };
 
     const buildLocalGroups = (

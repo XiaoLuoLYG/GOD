@@ -1715,7 +1715,15 @@ Initialization example:
         except Exception:
             from websockets import connect
 
-        return await connect(uri, origin=origin)
+        # Match AgentServer defaults (ping_interval=30, ping_timeout=300).
+        # Library defaults (~20s) cause keepalive ping timeout while agent.plan
+        # is blocked on long multi-turn LLM+tool streams under 10-way load.
+        return await connect(
+            uri,
+            origin=origin,
+            ping_interval=30,
+            ping_timeout=300,
+        )
 
     def _build_ws_origin(self, uri: str) -> str | None:
         """Match JiuwenClaw AgentServer's localhost Origin check."""

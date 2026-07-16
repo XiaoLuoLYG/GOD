@@ -33,7 +33,7 @@ import {
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { fetchCustom } from '../../components/fetch';
+import { fetchCustom, resolveAppUrl } from '../../components/fetch';
 import LanguageToggle from '../../components/LanguageToggle';
 import {
     isMovingRuntimeStatus,
@@ -55,7 +55,7 @@ import './style.css';
 const { Text, Title } = Typography;
 
 const TILE_SIZE = 32;
-const CHARACTER_ROOT = '/pixel-town/characters';
+const CHARACTER_ROOT = resolveAppUrl('/pixel-town/characters');
 const DEFAULT_HYPOTHESIS_ID = import.meta.env.VITE_DEFAULT_REPLAY_HYPOTHESIS_ID ?? 'god_town';
 const DEFAULT_EXPERIMENT_ID = import.meta.env.VITE_DEFAULT_REPLAY_EXPERIMENT_ID ?? '1';
 const DEFAULT_WORKSPACE_PATH = import.meta.env.VITE_REPLAY_WORKSPACE_PATH ?? '';
@@ -1150,7 +1150,7 @@ function characterSpritesFromProfiles(profiles: AgentProfile[]): ReplayMapCharac
         const appearance = asRecord(profile.profile?.appearance);
         const asset = asRecord(appearance?.character_asset);
         const name = String(asset?.sprite_name || appearance?.character_sprite || '').trim();
-        const imageUrl = String(asset?.image_url || '').trim();
+        const imageUrl = resolveAppUrl(String(asset?.image_url || '').trim());
         if (!name || !imageUrl || seen.has(name)) {
             return;
         }
@@ -1407,17 +1407,24 @@ async function loadWalkableMap(mapInfo: ReplayMapInfo, profiles: AgentProfile[],
         mapId: mapInfo.map_id,
         displayName: localizeMapDisplayName(mapInfo, language),
         tileSize: mapInfo.tile_size || TILE_SIZE,
-        tiledMapUrl: mapInfo.tiled_map_url,
-        previewUrl: mapInfo.preview_url,
-        tilesets: mapInfo.tilesets,
+        tiledMapUrl: resolveAppUrl(mapInfo.tiled_map_url),
+        previewUrl: resolveAppUrl(mapInfo.preview_url || ''),
+        tilesets: (mapInfo.tilesets || []).map((tileset) => ({
+            ...tileset,
+            image_url: resolveAppUrl(tileset.image_url),
+        })),
         characterSprites: mergeCharacterSprites(
             characterSpritesFromProfiles(profiles),
-            mapInfo.character_sprites || [],
+            (mapInfo.character_sprites || []).map((sprite) => ({
+                ...sprite,
+                image_url: resolveAppUrl(sprite.image_url),
+            })),
         ),
         locations: mapInfo.locations.map((location) => ({
             ...location,
             name: localizeMapLocationName(mapInfo.map_id, location, language),
             aliases: localizeMapLocationAliases(mapInfo.map_id, location, language),
+            visual_asset_url: resolveAppUrl(location.visual_asset_url || ''),
         })),
         interactions: mapInfo.interactions.map((interaction) => (
             localizeMapInteraction(mapInfo.map_id, interaction, language) as ReplayMapInteraction

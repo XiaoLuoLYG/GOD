@@ -643,7 +643,7 @@ stop_runtime_instance() {
 stop_all() {
   log "Stopping GOD services"
   if is_port_open "$GOD_BACKEND_PORT"; then
-    curl -fsS -X POST "$(stop_live_url)" >/dev/null 2>&1 || true
+    curl -fsS --max-time 10 -X POST "$(stop_live_url)" >/dev/null 2>&1 || true
   fi
   kill_pid_file "$FRONTEND_PID_FILE" "control room"
   kill_pid_file "$BACKEND_PID_FILE" "backend"
@@ -1005,12 +1005,67 @@ start_frontend() {
 
   log "Starting control room"
   : > "$LOG_DIR/frontend.log"
+  # code-server strips this prefix before forwarding requests to Vite.
+  local proxy_uri="${VSCODE_PROXY_URI:-}"
+  local vite_base="/"
+  if [[ -n "$proxy_uri" || -n "${CODE_SERVER_PARENT_PID:-}" || -n "${VSCODE_IPC_HOOK_CLI:-}" ]]; then
+    vite_base="/proxy/${GOD_FRONTEND_PORT}/"
+  fi
+  if [[ -n "${VITE_BASE:-}" ]]; then
+    if [[ "$VITE_BASE" == "/" ]]; then
+      vite_base="/"
+    elif [[ "$VITE_BASE" =~ ^/proxy/([0-9]+)/?$ ]]; then
+      vite_base="/proxy/${BASH_REMATCH[1]}/"
+    else
+      log "Ignoring invalid VITE_BASE; expected / or /proxy/<port>/"
+    fi
+  fi
+  log "Control room Vite base: $vite_base"
+  local vite_allowed_host=""
+  local vite_hmr_protocol=""
+  local vite_hmr_client_port=""
+  if [[ -n "$proxy_uri" ]]; then
+    local vite_proxy_settings
+    vite_proxy_settings="$(
+      python3 - "$proxy_uri" <<'PY'
+import re
+import sys
+from urllib.parse import urlsplit
+
+try:
+    parsed = urlsplit(sys.argv[1])
+    hostname = parsed.hostname or ""
+    valid = re.fullmatch(r"[A-Za-z0-9.-]+", hostname) and parsed.scheme in {"http", "https"}
+    if valid:
+        protocol = "wss" if parsed.scheme == "https" else "ws"
+        port = parsed.port or (443 if protocol == "wss" else 80)
+        print(hostname, protocol, port, sep="\t")
+except ValueError:
+    pass
+PY
+    )"
+    IFS=$'\t' read -r vite_allowed_host vite_hmr_protocol vite_hmr_client_port <<< "$vite_proxy_settings"
+  fi
   local frontend_cmd
   frontend_cmd="cd $(shell_quote "$BACKEND_ROOT/frontend")"
   frontend_cmd+=" && export VITE_REPLAY_WORKSPACE_PATH=$(shell_quote "$LIVE_WORKSPACE_PATH")"
   frontend_cmd+=" && export VITE_DEFAULT_REPLAY_HYPOTHESIS_ID=$(shell_quote "$GOD_EXPERIMENT")"
   frontend_cmd+=" && export VITE_DEFAULT_REPLAY_EXPERIMENT_ID=$(shell_quote "$GOD_EXPERIMENT_RUN")"
-  frontend_cmd+=" && exec npm run dev -- --host 127.0.0.1 --port $(shell_quote "$GOD_FRONTEND_PORT") >> $(shell_quote "$LOG_DIR/frontend.log") 2>&1"
+  frontend_cmd+=" && export VITE_BASE=$(shell_quote "$vite_base")"
+  if [[ -n "$vite_allowed_host" ]]; then
+    frontend_cmd+=" && export __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=$(shell_quote "$vite_allowed_host")"
+    frontend_cmd+=" && export VITE_HMR_PROTOCOL=$(shell_quote "$vite_hmr_protocol")"
+    frontend_cmd+=" && export VITE_HMR_CLIENT_PORT=$(shell_quote "$vite_hmr_client_port")"
+  fi
+  frontend_cmd+=" && unset VSCODE_PROXY_URI"
+  # code-server port proxy often dials 0.0.0.0:<port>; bind all interfaces
+  # when path-proxy base is active so ECONNREFUSED 0.0.0.0:5174 cannot happen.
+  local vite_host="127.0.0.1"
+  if [[ "$vite_base" != "/" ]]; then
+    vite_host="0.0.0.0"
+  fi
+  frontend_cmd+=" && export VITE_HOST=$(shell_quote "$vite_host")"
+  frontend_cmd+=" && exec npm run dev -- --host $(shell_quote "$vite_host") --port $(shell_quote "$GOD_FRONTEND_PORT") --base $(shell_quote "$vite_base") >> $(shell_quote "$LOG_DIR/frontend.log") 2>&1"
   start_detached_service "god-frontend" "$FRONTEND_PID_FILE" "$frontend_cmd"
 
   wait_for_port "$GOD_FRONTEND_PORT" "Control room" 120
