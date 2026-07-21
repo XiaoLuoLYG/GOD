@@ -26,6 +26,7 @@
   <a href="#-features">Features</a> ·
   <a href="#-built-in-experiments">Built-in Experiments</a> ·
   <a href="https://xiaoluolyg.github.io/GOD/">Public Site</a> ·
+  <a href="https://atomgit.com/yigeluo/GOD">AtomGit Mirror</a> ·
   <a href="https://xiaoluolyg.github.io/GOD/developer/">Developer Docs</a> ·
   <a href="CONTRIBUTING.md">Contributing</a> ·
   <a href="README.zh-CN.md">🌏 中文</a>
@@ -380,9 +381,9 @@ And takes inspiration from [Generative Agents](https://arxiv.org/abs/2304.03442)
 
 <a href="https://www.star-history.com/?repos=xiaoluolyg%2Fgod&type=date&legend=top-left">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=xiaoluolyg/god&type=date&theme=dark&legend=top-left" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=xiaoluolyg/god&type=date&legend=top-left" />
-    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=xiaoluolyg/god&type=date&legend=top-left" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=xiaoluolyg/god&type=date&theme=dark&legend=top-left&sealed_token=EVX1v_Tx_etRplcYhxDKmwCfPuRUsbW1g7R6m-MlrnyqwVLGN20mQcOZ0Z9eBZHENDjRHOcbl0xGDCF0R7lSDwZ3UFMnT1XVpw512CetsytyjBB9lgq7Dw" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=xiaoluolyg/god&type=date&legend=top-left&sealed_token=EVX1v_Tx_etRplcYhxDKmwCfPuRUsbW1g7R6m-MlrnyqwVLGN20mQcOZ0Z9eBZHENDjRHOcbl0xGDCF0R7lSDwZ3UFMnT1XVpw512CetsytyjBB9lgq7Dw" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=xiaoluolyg/god&type=date&legend=top-left&sealed_token=EVX1v_Tx_etRplcYhxDKmwCfPuRUsbW1g7R6m-MlrnyqwVLGN20mQcOZ0Z9eBZHENDjRHOcbl0xGDCF0R7lSDwZ3UFMnT1XVpw512CetsytyjBB9lgq7Dw" />
   </picture>
 </a>
 

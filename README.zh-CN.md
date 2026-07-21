@@ -26,6 +26,7 @@
   <a href="#-核心能力">核心能力</a> ·
   <a href="#-内置实验">内置实验</a> ·
   <a href="https://xiaoluolyg.github.io/GOD/zh/">公开站</a> ·
+  <a href="https://atomgit.com/yigeluo/GOD">AtomGit 镜像</a> ·
   <a href="https://xiaoluolyg.github.io/GOD/developer/zh/">开发者文档</a> ·
   <a href="CONTRIBUTING.zh-CN.md">参与开发</a> ·
   <a href="README.md">🌏 English</a>
@@ -377,9 +378,9 @@ GOD 构建在开源研究和开源代码之上。仓库内集成了两份精简�
 
 <a href="https://www.star-history.com/?repos=xiaoluolyg%2Fgod&type=date&legend=top-left">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=xiaoluolyg/god&type=date&theme=dark&legend=top-left" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=xiaoluolyg/god&type=date&legend=top-left" />
-    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=xiaoluolyg/god&type=date&legend=top-left" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=xiaoluolyg/god&type=date&theme=dark&legend=top-left&sealed_token=EVX1v_Tx_etRplcYhxDKmwCfPuRUsbW1g7R6m-MlrnyqwVLGN20mQcOZ0Z9eBZHENDjRHOcbl0xGDCF0R7lSDwZ3UFMnT1XVpw512CetsytyjBB9lgq7Dw" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=xiaoluolyg/god&type=date&legend=top-left&sealed_token=EVX1v_Tx_etRplcYhxDKmwCfPuRUsbW1g7R6m-MlrnyqwVLGN20mQcOZ0Z9eBZHENDjRHOcbl0xGDCF0R7lSDwZ3UFMnT1XVpw512CetsytyjBB9lgq7Dw" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=xiaoluolyg/god&type=date&legend=top-left&sealed_token=EVX1v_Tx_etRplcYhxDKmwCfPuRUsbW1g7R6m-MlrnyqwVLGN20mQcOZ0Z9eBZHENDjRHOcbl0xGDCF0R7lSDwZ3UFMnT1XVpw512CetsytyjBB9lgq7Dw" />
   </picture>
 </a>
 
