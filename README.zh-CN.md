@@ -33,6 +33,12 @@
 </p>
 
 <p align="center">
+  <a href="https://atomgit.com/yigeluo/GOD">
+    <img alt="AtomGit G-Star" src="https://atomgit.com/yigeluo/GOD/star/new_badge.svg" />
+  </a>
+  <a href="https://atomgit.com/yigeluo/GOD">
+    <img alt="AtomGit Download" src="https://atomgit.com/yigeluo/GOD/download/badge.svg" />
+  </a>
   <a href="https://github.com/XiaoLuoLYG/GOD/releases/tag/v0.2.0">
     <img alt="Release" src="https://img.shields.io/github/v/release/XiaoLuoLYG/GOD?style=flat-square" />
   </a>
