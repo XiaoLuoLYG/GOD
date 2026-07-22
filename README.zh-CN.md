@@ -36,6 +36,9 @@
   <a href="https://atomgit.com/yigeluo/GOD">
     <img alt="AtomGit G-Star" src="https://atomgit.com/yigeluo/GOD/star/new_badge.svg" />
   </a>
+</p>
+
+<p align="center">
   <a href="https://atomgit.com/yigeluo/GOD">
     <img alt="AtomGit Download" src="https://atomgit.com/yigeluo/GOD/download/badge.svg" />
   </a>
