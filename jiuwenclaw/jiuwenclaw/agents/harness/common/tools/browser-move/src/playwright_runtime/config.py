@@ -50,7 +50,7 @@ def _first_non_empty_env(*keys: str) -> str:
 def _normalize_provider(provider: str) -> str:
     raw = (provider or "").strip()
     lowered = raw.lower()
-    if lowered in {"openai", "openrouter", "siliconflow", "dashscope"}:
+    if lowered in {"openai", "openrouter", "orcarouter", "siliconflow", "dashscope"}:
         return lowered
     if lowered in {"alibaba", "aliyun"}:
         return "dashscope"
@@ -70,6 +70,8 @@ def _infer_provider_from_api_base(api_base: str) -> str:
         return ""
     if "openrouter.ai" in base:
         return "openrouter"
+    if "orcarouter.ai" in base:
+        return "orcarouter"
     if "siliconflow.cn" in base or "siliconflow" in base:
         return "siliconflow"
     if "dashscope.aliyuncs.com" in base or "dashscope" in base:
@@ -172,10 +174,10 @@ def resolve_model_settings() -> Tuple[str, str, str]:
     provider_mode = _normalize_provider(
         _first_non_empty_env("MODEL_PROVIDER", "MODEL_CLIENT_PROVIDER")
     )
-    if provider_mode and provider_mode not in {"openai", "openrouter", "siliconflow", "dashscope"}:
+    if provider_mode and provider_mode not in {"openai", "openrouter", "orcarouter", "siliconflow", "dashscope"}:
         raise ValueError(
             f"Unsupported MODEL_PROVIDER '{provider_mode}'. "
-            "Supported: openai, openrouter, siliconflow, dashscope."
+            "Supported: openai, openrouter, orcarouter, siliconflow, dashscope."
         )
 
     explicit_api_key = _first_non_empty_env("API_KEY", "MODEL_API_KEY")
@@ -187,6 +189,8 @@ def resolve_model_settings() -> Tuple[str, str, str]:
         base_hint = explicit_api_base or _first_non_empty_env(
             "OPENROUTER_BASE_URL",
             "OPENROUTER_API_BASE",
+            "ORCAROUTER_BASE_URL",
+            "ORCAROUTER_API_BASE",
             "SILICONFLOW_BASE_URL",
             "SILICONFLOW_API_BASE",
             "DASHSCOPE_BASE_URL",
@@ -197,10 +201,13 @@ def resolve_model_settings() -> Tuple[str, str, str]:
         provider = _infer_provider_from_api_base(base_hint)
         if not provider:
             has_openrouter_key = bool((os.getenv("OPENROUTER_API_KEY") or "").strip())
+            has_orcarouter_key = bool((os.getenv("ORCAROUTER_API_KEY") or "").strip())
             has_siliconflow_key = bool((os.getenv("SILICONFLOW_API_KEY") or "").strip())
             has_dashscope_key = bool((os.getenv("DASHSCOPE_API_KEY") or "").strip())
             if has_openrouter_key:
                 provider = "openrouter"
+            elif has_orcarouter_key:
+                provider = "orcarouter"
             elif has_siliconflow_key:
                 provider = "siliconflow"
             elif has_dashscope_key:
@@ -221,6 +228,19 @@ def resolve_model_settings() -> Tuple[str, str, str]:
             "OPENROUTER_BASE_URL",
             "OPENROUTER_API_BASE",
         ) or "https://openrouter.ai/api/v1"
+    elif provider == "orcarouter":
+        api_key = _first_non_empty_env(
+            "API_KEY",
+            "MODEL_API_KEY",
+            "ORCAROUTER_API_KEY",
+            "OPENROUTER_API_KEY",
+        )
+        api_base = _first_non_empty_env(
+            "API_BASE",
+            "MODEL_API_BASE",
+            "ORCAROUTER_BASE_URL",
+            "ORCAROUTER_API_BASE",
+        ) or "https://api.orcarouter.ai/v1"
     elif provider == "siliconflow":
         api_key = _first_non_empty_env(
             "API_KEY",

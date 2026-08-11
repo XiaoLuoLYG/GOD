@@ -46,7 +46,7 @@ async def main() -> None:
     provider, api_key, api_base = resolve_model_settings()
     model_name = (os.getenv("MODEL_NAME") or "anthropic/claude-sonnet-4").strip()
     if not api_key:
-        raise RuntimeError("Missing API key. Set API_KEY (or OPENROUTER_API_KEY / OPENAI_API_KEY / DASHSCOPE_API_KEY).")
+        raise RuntimeError("Missing API key. Set API_KEY (or ORCAROUTER_API_KEY / OPENROUTER_API_KEY / OPENAI_API_KEY / DASHSCOPE_API_KEY).")
 
     guardrails = BrowserRunGuardrails(
         max_steps=GUARDRAIL_MAX_STEPS,
