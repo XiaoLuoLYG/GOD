@@ -65,6 +65,7 @@
 
 ## 🗓️ Updates
 
+- **2026-08-27 · 🎉 GOD accepted at EMNLP 2026:** our paper was accepted to the System Demonstrations track. [📄 Read the camera-ready paper](https://xiaoluolyg.github.io/GOD/papers/god-emnlp-2026.pdf).
 - **2026-06-11 · [v0.2.0](https://github.com/XiaoLuoLYG/GOD/releases/tag/v0.2.0):** public site with browser replays;
   Experiment / Map / Agent pack hubs and ZIP import-export; Windows launcher; hardened first-run startup.
   ([#64](https://github.com/XiaoLuoLYG/GOD/pull/64) [#65](https://github.com/XiaoLuoLYG/GOD/pull/65))

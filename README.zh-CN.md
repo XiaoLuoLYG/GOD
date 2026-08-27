@@ -65,6 +65,7 @@
 
 ## 🗓️ 更新
 
+- **2026-08-27 · 🎉 GOD 被 EMNLP 2026 录用：** 论文已被 System Demonstrations track 录用。[📄 阅读 Camera-ready 论文](https://xiaoluolyg.github.io/GOD/papers/god-emnlp-2026.pdf)。
 - **2026-06-11 · [v0.2.0](https://github.com/XiaoLuoLYG/GOD/releases/tag/v0.2.0)：** 公开站与浏览器回放；
   Experiment / Map / Agent 包 hub 与 ZIP 导入导出；Windows 一键启动；首次启动硬化。([#64](https://github.com/XiaoLuoLYG/GOD/pull/64) [#65](https://github.com/XiaoLuoLYG/GOD/pull/65))
 - **2026-06-06 · 公开站与资源包：** 重做公开站与前端；站点资源包改走 release assets；地图包预览页。
