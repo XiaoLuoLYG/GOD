@@ -4,6 +4,12 @@
 </h1>
 
 <p align="center">
+  <a href="https://xiaoluolyg.github.io/GOD/papers/god-emnlp-2026.pdf">
+    <img src="docs/assets/emnlp-2026-banner.svg" alt="GOD 被 EMNLP 2026 System Demonstrations 录用" width="100%" />
+  </a>
+</p>
+
+<p align="center">
   <img src="docs/assets/screenshots/00-hero.png" alt="GOD — Govern · Observe · Direct" width="100%" />
 </p>
 <p align="center">
