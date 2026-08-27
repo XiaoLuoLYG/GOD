@@ -570,22 +570,6 @@ h3 {
   color: var(--muted);
 }
 
-.acceptance-callout {
-  position: relative;
-  overflow: hidden;
-  border-color: rgba(15, 118, 110, 0.24);
-  background: linear-gradient(135deg, #fff 0%, var(--panel-green) 62%, var(--panel-blue) 100%);
-  box-shadow: 0 22px 56px rgba(26, 45, 74, 0.12);
-}
-
-.acceptance-callout h2 {
-  font-size: clamp(1.9rem, 4vw, 3.2rem);
-}
-
-.acceptance-callout__button {
-  white-space: nowrap;
-}
-
 .page-hero {
   width: min(1180px, calc(100% - 32px));
   margin: 0 auto;
