@@ -23,6 +23,7 @@ from openjiuwen.core.foundation.llm.model_clients.deepseek_model_client import D
 _CLIENT_TYPE_REGISTRY: Dict[str, Type[BaseModelClient]] = {
     "OpenAI": OpenAIModelClient,
     "OpenRouter": OpenAIModelClient,
+    "OrcaRouter": OpenAIModelClient,
     "SiliconFlow": SiliconFlowModelClient,
     "DashScope": DashScopeModelClient,
     "DeepSeek": DeepSeekModelClient,

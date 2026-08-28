@@ -37,6 +37,7 @@ _TEMPLATE_NAME = "template_name"
 _PROVIDER_NAME_MAP = {
     "openai": "OpenAI",
     "openrouter": "OpenRouter",
+    "orcarouter": "OrcaRouter",
     "siliconflow": "SiliconFlow",
     "dashscope": "DashScope",
 }
