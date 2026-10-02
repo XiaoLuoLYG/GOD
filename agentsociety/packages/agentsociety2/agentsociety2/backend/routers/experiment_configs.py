@@ -11,7 +11,8 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from agentsociety2.backend.services.map_packages import load_map_package
+from agentsociety2.backend.routers.god_setup import _workspace_path
+from agentsociety2.backend.services.map_packages import load_map_package, safe_resolve
 from agentsociety2.society.models import InitConfig
 
 router = APIRouter(prefix="/api/v1/experiment-configs", tags=["experiment-configs"])
@@ -117,12 +118,20 @@ class ApplyAgentsResponse(BaseModel):
 
 
 def _experiment_path(workspace_path: str, hypothesis_id: str, experiment_id: str) -> Path:
-    workspace = Path(workspace_path).expanduser().resolve()
-    return workspace / f"hypothesis_{hypothesis_id}" / f"experiment_{experiment_id}"
+    root = _workspace_path()
+    try:
+        workspace = safe_resolve(Path.cwd(), workspace_path, root)
+        return safe_resolve(workspace, f"hypothesis_{hypothesis_id}/experiment_{experiment_id}", workspace)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="Experiment path escapes the configured workspace") from exc
 
 
 def _init_config_path(workspace_path: str, hypothesis_id: str, experiment_id: str) -> Path:
-    return _experiment_path(workspace_path, hypothesis_id, experiment_id) / "init" / "init_config.json"
+    experiment = _experiment_path(workspace_path, hypothesis_id, experiment_id)
+    try:
+        return safe_resolve(experiment, "init/init_config.json", experiment)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="Config path escapes the experiment") from exc
 
 
 def _load_init_config(config_path: Path) -> dict[str, Any]:
@@ -138,7 +147,10 @@ def _load_init_config(config_path: Path) -> dict[str, Any]:
 
 
 def _load_experiment_context(config_path: Path, config: dict[str, Any]) -> dict[str, Any] | None:
-    context_path = config_path.parent / "experiment_context.json"
+    try:
+        context_path = safe_resolve(config_path.parent, "experiment_context.json", _workspace_path())
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="Context path escapes the configured workspace") from exc
     if context_path.exists():
         try:
             context = json.loads(context_path.read_text(encoding="utf-8"))

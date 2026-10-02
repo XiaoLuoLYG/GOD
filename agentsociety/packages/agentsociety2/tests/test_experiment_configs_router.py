@@ -2,8 +2,10 @@ import json
 
 import anyio
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
+from agentsociety2.backend.routers import experiment_configs
 from agentsociety2.backend.routers.experiment_configs import (
     ApplyAgentsRequest,
     _preview_agents,
@@ -11,6 +13,97 @@ from agentsociety2.backend.routers.experiment_configs import (
     get_init_config,
     put_init_config,
 )
+
+
+@pytest.fixture(autouse=True)
+def configured_workspace(monkeypatch, tmp_path):
+    monkeypatch.setenv("LIVE_WORKSPACE_PATH", str(tmp_path))
+
+
+@pytest.mark.parametrize("method,suffix,payload", [
+    ("GET", "init", None),
+    ("PUT", "init", {}),
+    ("POST", "agents/import-preview", {"content": "[]", "format": "json"}),
+    ("POST", "agents/apply", {"agents": []}),
+])
+def test_config_routes_reject_outside_workspace(tmp_path, method, suffix, payload):
+    app = FastAPI()
+    app.include_router(experiment_configs.router)
+    response = TestClient(app).request(
+        method, f"/api/v1/experiment-configs/1/1/{suffix}",
+        params={"workspace_path": str(tmp_path.parent)}, json=payload,
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("component", ["workspace", "experiment", "init", "config"])
+def test_config_path_rejects_symlink_escape(monkeypatch, tmp_path, component):
+    root = tmp_path / "allowed"
+    root.mkdir()
+    monkeypatch.setenv("LIVE_WORKSPACE_PATH", str(root))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "init_config.json"
+    sentinel.write_text("unchanged", encoding="utf-8")
+    experiment = root / "hypothesis_1" / "experiment_1"
+    if component == "workspace":
+        workspace = root / "linked"
+        workspace.symlink_to(outside, target_is_directory=True)
+    else:
+        workspace = root
+        link = {"experiment": experiment, "init": experiment / "init", "config": experiment / "init/init_config.json"}[component]
+        link.parent.mkdir(parents=True)
+        link.symlink_to(sentinel if component == "config" else outside)
+
+    with pytest.raises(HTTPException) as exc:
+        anyio.run(put_init_config, "1", "1", _base_config(), str(workspace))
+    assert exc.value.status_code == 403
+    assert sentinel.read_text(encoding="utf-8") == "unchanged"
+
+
+def test_config_path_rejects_traversal_and_allows_nested_workspace(tmp_path):
+    with pytest.raises(HTTPException) as exc:
+        experiment_configs._init_config_path(str(tmp_path), "1", "1/../../../../escape")
+    assert exc.value.status_code == 403
+    nested = tmp_path / "nested"
+    assert experiment_configs._init_config_path(str(nested), "1", "1") == nested / "hypothesis_1/experiment_1/init/init_config.json"
+
+
+@pytest.mark.parametrize("linked_layout", [False, True])
+def test_config_get_rejects_context_symlink_escape(monkeypatch, tmp_path, linked_layout):
+    root = tmp_path / "allowed"
+    monkeypatch.setenv("LIVE_WORKSPACE_PATH", str(root))
+    init_dir = root / "hypothesis_1/experiment_1/init"
+    init_dir.mkdir(parents=True)
+    if linked_layout:
+        init_dir.rmdir()
+        init_dir.parent.rmdir()
+        init_dir.parent.symlink_to(root, target_is_directory=True)
+        init_dir = root / "init"
+        init_dir.mkdir()
+        (root / "config.json").write_text(json.dumps(_base_config()), encoding="utf-8")
+        (init_dir / "init_config.json").symlink_to(root / "config.json")
+    else:
+        (init_dir / "init_config.json").write_text(json.dumps(_base_config()), encoding="utf-8")
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"private": "outside-data"}', encoding="utf-8")
+    ((root if linked_layout else init_dir) / "experiment_context.json").symlink_to(outside)
+    app = FastAPI()
+    app.include_router(experiment_configs.router)
+    response = TestClient(app).get(
+        "/api/v1/experiment-configs/1/1/init", params={"workspace_path": str(root)},
+    )
+    assert response.status_code == 403
+    assert "outside-data" not in response.text
+
+
+def test_config_keeps_cwd_relative_workspace_paths(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("LIVE_WORKSPACE_PATH", "quick_experiments")
+    response = anyio.run(put_init_config, "1", "1", _base_config(), "quick_experiments")
+    expected = tmp_path / "quick_experiments/hypothesis_1/experiment_1/init/init_config.json"
+    assert response.path == str(expected)
+    assert expected.exists()
 
 
 def _base_config() -> dict:
