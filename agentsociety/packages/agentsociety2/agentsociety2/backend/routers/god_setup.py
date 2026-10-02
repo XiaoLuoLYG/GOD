@@ -338,7 +338,18 @@ def _read_env(path: Path | None = None) -> dict[str, str]:
     return values
 
 
+def _validate_env_values(values: dict[str, str]) -> None:
+    # god.sh sources this file, so values must also be safe shell assignment tokens.
+    for key, value in values.items():
+        if not re.fullmatch(r"[\w@%+=:,./\[\]-]*", value):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{key} must not contain whitespace or shell metacharacters",
+            )
+
+
 def _write_env_values(values: dict[str, str]) -> None:
+    _validate_env_values(values)
     path = _env_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     existing_lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
@@ -1058,6 +1069,7 @@ def _resolve_image_config(image_config: dict[str, Any]) -> dict[str, str]:
     submitted = {key: value for key, value in submitted.items() if value}
     resolved = _merged_image_env()
     resolved.update(submitted)
+    _validate_env_values(resolved)
     if not resolved.get("IMAGE_GEN_API_KEY", "").strip():
         raise HTTPException(status_code=400, detail="IMAGE_GEN_API_KEY is required to generate an agent sprite")
     provider = resolved.get("IMAGE_GEN_PROVIDER", "openai").strip().lower()
@@ -2282,6 +2294,12 @@ async def complete_role_visuals(request: CompleteRoleVisualsRequest) -> Complete
 
 @router.post("/publish")
 async def publish_experiment(request: PublishRequest) -> dict[str, Any]:
+    env_values = {
+        key: str(value).strip()
+        for key, value in (request.llm_config.model_dump() if request.llm_config else {}).items()
+        if value is not None and str(value).strip() != ""
+    }
+    _validate_env_values(env_values)
     draft_context = request.draft.get("experiment_context", {}) if isinstance(request.draft.get("experiment_context"), dict) else {}
     draft_env_modules = request.draft.get("init_config", {}).get("env_modules", []) if isinstance(request.draft.get("init_config"), dict) else []
     draft_env_kwargs: dict[str, Any] = {}
@@ -2345,15 +2363,6 @@ async def publish_experiment(request: PublishRequest) -> dict[str, Any]:
         encoding="utf-8",
     )
 
-    env_values: dict[str, str] = {}
-    if request.llm_config:
-        env_values.update(
-            {
-                key: str(value).strip()
-                for key, value in request.llm_config.model_dump().items()
-                if value is not None and str(value).strip() != ""
-            }
-        )
     _write_model_env_values(env_values)
     activation = activate_current_experiment(
         hypothesis_id=hypothesis_id,

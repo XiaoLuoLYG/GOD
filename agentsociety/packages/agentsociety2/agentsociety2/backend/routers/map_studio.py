@@ -115,6 +115,7 @@ def _submitted_image_env(image_config: dict[str, Any] | None) -> dict[str, str]:
             if isinstance(value, str) and value.strip():
                 values[target_key] = value.strip()
                 break
+    god_setup._validate_env_values(values)
     return values
 
 
