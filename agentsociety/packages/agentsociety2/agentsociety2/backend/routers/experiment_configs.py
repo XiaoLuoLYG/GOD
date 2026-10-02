@@ -148,9 +148,9 @@ def _load_init_config(config_path: Path) -> dict[str, Any]:
 
 def _load_experiment_context(config_path: Path, config: dict[str, Any]) -> dict[str, Any] | None:
     try:
-        context_path = safe_resolve(config_path.parent, "experiment_context.json", config_path.parents[1])
+        context_path = safe_resolve(config_path.parent, "experiment_context.json", _workspace_path())
     except ValueError as exc:
-        raise HTTPException(status_code=403, detail="Context path escapes the experiment") from exc
+        raise HTTPException(status_code=403, detail="Context path escapes the configured workspace") from exc
     if context_path.exists():
         try:
             context = json.loads(context_path.read_text(encoding="utf-8"))

@@ -69,15 +69,25 @@ def test_config_path_rejects_traversal_and_allows_nested_workspace(tmp_path):
     assert experiment_configs._init_config_path(str(nested), "1", "1") == nested / "hypothesis_1/experiment_1/init/init_config.json"
 
 
-def test_config_get_rejects_context_symlink_escape(monkeypatch, tmp_path):
+@pytest.mark.parametrize("linked_layout", [False, True])
+def test_config_get_rejects_context_symlink_escape(monkeypatch, tmp_path, linked_layout):
     root = tmp_path / "allowed"
     monkeypatch.setenv("LIVE_WORKSPACE_PATH", str(root))
     init_dir = root / "hypothesis_1/experiment_1/init"
     init_dir.mkdir(parents=True)
-    (init_dir / "init_config.json").write_text(json.dumps(_base_config()), encoding="utf-8")
+    if linked_layout:
+        init_dir.rmdir()
+        init_dir.parent.rmdir()
+        init_dir.parent.symlink_to(root, target_is_directory=True)
+        init_dir = root / "init"
+        init_dir.mkdir()
+        (root / "config.json").write_text(json.dumps(_base_config()), encoding="utf-8")
+        (init_dir / "init_config.json").symlink_to(root / "config.json")
+    else:
+        (init_dir / "init_config.json").write_text(json.dumps(_base_config()), encoding="utf-8")
     outside = tmp_path / "outside.json"
     outside.write_text('{"private": "outside-data"}', encoding="utf-8")
-    (init_dir / "experiment_context.json").symlink_to(outside)
+    ((root if linked_layout else init_dir) / "experiment_context.json").symlink_to(outside)
     app = FastAPI()
     app.include_router(experiment_configs.router)
     response = TestClient(app).get(
