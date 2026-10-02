@@ -125,6 +125,7 @@ jobs:
         run: |
           uv run pytest -q \
             packages/agentsociety2/tests/test_god_setup_router.py \
+            packages/agentsociety2/tests/test_experiment_configs_router.py \
             packages/agentsociety2/tests/test_jiuwenclaw_agent_runtime.py \
             packages/agentsociety2/tests/test_map_packages.py \
             packages/agentsociety2/tests/test_pixel_town_social_env.py
