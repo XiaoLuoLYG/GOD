@@ -758,14 +758,36 @@ def test_model_config_keeps_valid_values_and_filters_unknown_keys(monkeypatch, t
     god_setup._write_model_env_values({
         "GOD_LLM_MODEL": "provider/model-v1:free",
         "GOD_LLM_API_KEY": "sk-test_123+/=",
-        "GOD_LLM_API_BASE": "https://example.com:8443/v1",
+        "GOD_LLM_API_BASE": "http://[::1]:11434/v1",
         "PATH": "/tmp/untrusted",
     })
     values = god_setup._read_env()
     assert values["GOD_LLM_MODEL"] == "provider/model-v1:free"
     assert values["GOD_LLM_API_KEY"] == "sk-test_123+/="
-    assert values["GOD_LLM_API_BASE"] == "https://example.com:8443/v1"
+    assert values["GOD_LLM_API_BASE"] == "http://[::1]:11434/v1"
     assert "PATH" not in values
+
+
+def test_publish_rejects_bad_config_before_creating_experiment(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    _write_test_map_package(tmp_path, "the_ville")
+    with pytest.raises(HTTPException) as exc:
+        anyio.run(god_setup.publish_experiment, PublishRequest(
+            draft=_raw_draft(),
+            model_config=ModelConfigPayload(GOD_LLM_MODEL="model\nINJECTED=1"),
+        ))
+    assert exc.value.status_code == 400
+    assert not (tmp_path / "quick_experiments").exists()
+
+
+def test_image_config_rejects_bad_values_before_generation(monkeypatch, tmp_path):
+    from agentsociety2.backend.routers import map_studio
+
+    _configure_tmp_god(monkeypatch, tmp_path)
+    for resolve in (god_setup._resolve_image_config, map_studio._submitted_image_env):
+        with pytest.raises(HTTPException) as exc:
+            resolve({"image_api_key": "sk-test", "image_model": "model\nINJECTED=1"})
+        assert exc.value.status_code == 400
 
 
 def test_normalize_draft_uses_selected_map_package(monkeypatch, tmp_path):
