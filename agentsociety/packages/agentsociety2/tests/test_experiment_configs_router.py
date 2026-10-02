@@ -69,6 +69,33 @@ def test_config_path_rejects_traversal_and_allows_nested_workspace(tmp_path):
     assert experiment_configs._init_config_path(str(nested), "1", "1") == nested / "hypothesis_1/experiment_1/init/init_config.json"
 
 
+def test_config_get_rejects_context_symlink_escape(monkeypatch, tmp_path):
+    root = tmp_path / "allowed"
+    monkeypatch.setenv("LIVE_WORKSPACE_PATH", str(root))
+    init_dir = root / "hypothesis_1/experiment_1/init"
+    init_dir.mkdir(parents=True)
+    (init_dir / "init_config.json").write_text(json.dumps(_base_config()), encoding="utf-8")
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"private": "outside-data"}', encoding="utf-8")
+    (init_dir / "experiment_context.json").symlink_to(outside)
+    app = FastAPI()
+    app.include_router(experiment_configs.router)
+    response = TestClient(app).get(
+        "/api/v1/experiment-configs/1/1/init", params={"workspace_path": str(root)},
+    )
+    assert response.status_code == 403
+    assert "outside-data" not in response.text
+
+
+def test_config_keeps_cwd_relative_workspace_paths(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("LIVE_WORKSPACE_PATH", "quick_experiments")
+    response = anyio.run(put_init_config, "1", "1", _base_config(), "quick_experiments")
+    expected = tmp_path / "quick_experiments/hypothesis_1/experiment_1/init/init_config.json"
+    assert response.path == str(expected)
+    assert expected.exists()
+
+
 def _base_config() -> dict:
     return {
         "env_modules": [

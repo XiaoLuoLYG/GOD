@@ -120,7 +120,7 @@ class ApplyAgentsResponse(BaseModel):
 def _experiment_path(workspace_path: str, hypothesis_id: str, experiment_id: str) -> Path:
     root = _workspace_path()
     try:
-        workspace = safe_resolve(root, workspace_path, root)
+        workspace = safe_resolve(Path.cwd(), workspace_path, root)
         return safe_resolve(workspace, f"hypothesis_{hypothesis_id}/experiment_{experiment_id}", workspace)
     except ValueError as exc:
         raise HTTPException(status_code=403, detail="Experiment path escapes the configured workspace") from exc
@@ -147,7 +147,10 @@ def _load_init_config(config_path: Path) -> dict[str, Any]:
 
 
 def _load_experiment_context(config_path: Path, config: dict[str, Any]) -> dict[str, Any] | None:
-    context_path = config_path.parent / "experiment_context.json"
+    try:
+        context_path = safe_resolve(config_path.parent, "experiment_context.json", config_path.parents[1])
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="Context path escapes the experiment") from exc
     if context_path.exists():
         try:
             context = json.loads(context_path.read_text(encoding="utf-8"))
