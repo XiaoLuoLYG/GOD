@@ -339,6 +339,13 @@ def _read_env(path: Path | None = None) -> dict[str, str]:
 
 
 def _write_env_values(values: dict[str, str]) -> None:
+    # god.sh sources this file, so values must also be safe shell assignment tokens.
+    for key, value in values.items():
+        if not re.fullmatch(r"[\w@%+=:,./-]*", value):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{key} must not contain whitespace or shell metacharacters",
+            )
     path = _env_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     existing_lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
