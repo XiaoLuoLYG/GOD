@@ -61,7 +61,7 @@ def run_smoke_checks() -> Dict[str, Any]:
     _check(bool(mcp_cfg.server_name), "server_name is empty")
     _check(bool(mcp_cfg.params.get("command")), "MCP command is missing")
     _check(isinstance(mcp_cfg.params.get("args", []), list), "MCP args must be a list")
-    _check(provider in ("openai", "openrouter"), "Unexpected provider")
+    _check(provider in ("openai", "openrouter", "orcarouter"), "Unexpected provider")
     _check(bool(api_base), "api_base is empty")
 
     return {

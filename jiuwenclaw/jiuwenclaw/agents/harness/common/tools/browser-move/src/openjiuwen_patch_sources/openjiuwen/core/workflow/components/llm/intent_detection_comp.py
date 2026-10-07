@@ -77,6 +77,7 @@ KG_SCOPE = "scope"
 _PROVIDER_NAME_MAP = {
     "openai": "OpenAI",
     "openrouter": "OpenRouter",
+    "orcarouter": "OrcaRouter",
     "siliconflow": "SiliconFlow",
     "dashscope": "DashScope",
 }

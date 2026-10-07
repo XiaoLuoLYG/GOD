@@ -68,7 +68,7 @@ def _build_runtime() -> "BrowserAgentRuntime":
 
     provider, api_key, api_base = resolve_model_settings()
     if not api_key:
-        raise RuntimeError("Missing API key. Set OPENROUTER_API_KEY or OPENAI_API_KEY.")
+        raise RuntimeError("Missing API key. Set ORCAROUTER_API_KEY / OPENROUTER_API_KEY or OPENAI_API_KEY.")
 
     model_name = (os.getenv("MODEL_NAME") or "anthropic/claude-sonnet-4.5").strip()
     guardrails = BrowserRunGuardrails(
