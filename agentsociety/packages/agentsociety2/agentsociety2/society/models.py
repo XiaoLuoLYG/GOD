@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Dict, Any, List, Union, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_serializer
 
 __all__ = [
     "EnvModuleConfig",
@@ -58,6 +58,27 @@ class InitConfig(BaseModel):
         default_factory=CodeGenRouterConfig,
         description="CodeGenRouter 配置",
     )
+    agent_backend: Dict[str, Any] | None = Field(
+        default=None,
+        description="可选实验级决策后端。为空时不写入配置，默认仍是 jiuwenclaw",
+    )
+
+    @field_validator("agent_backend", mode="before")
+    @classmethod
+    def _coerce_agent_backend(cls, value: Any) -> Dict[str, Any] | None:
+        if value is None or isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            text = value.strip()
+            return {"type": text} if text else None
+        raise ValueError("agent_backend must be a string or object")
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler):
+        data = handler(self)
+        if isinstance(data, dict) and data.get("agent_backend") is None:
+            data.pop("agent_backend", None)
+        return data
 
 
 class RunStep(BaseModel):
