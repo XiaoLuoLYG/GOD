@@ -313,8 +313,6 @@ const shortJson = (value: unknown, maxLength = 120) => {
     return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
 };
 
-const hasHan = (value: string) => /[\u4e00-\u9fff]/.test(value);
-
 const getDuplicateIds = (agents: AgentRecord[]) => {
     const seen = new Set<number>();
     const duplicates = new Set<number>();
@@ -514,9 +512,6 @@ export const AgentBuilderPanel: React.FC<AgentBuilderPanelProps> = ({
     const query = `workspace_path=${encodeURIComponent(workspacePath)}`;
     const jsonPreviewText = (value: unknown, maxLength?: number) => {
         const text = jsonStringify(value);
-        if (i18n.language?.startsWith('en') && hasHan(text)) {
-            return t('agentBuilder.messages.nonEnglishStoredData');
-        }
         return maxLength ? shortJson(value, maxLength) : text;
     };
 
