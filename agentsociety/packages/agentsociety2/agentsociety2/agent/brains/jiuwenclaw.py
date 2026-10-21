@@ -308,25 +308,71 @@ def extract_response_content(response: dict) -> str:
     return json.dumps(body, ensure_ascii=False)
 
 
-async def reset_websocket(agent: Any) -> None:
-    if agent._ws is None:
+# A peer that has already sent 1011 and stopped reading never finishes the
+# close handshake. websockets then awaits connection_lost with no timeout
+# after abort(), which keeps the request, the agent lock, and the shared
+# semaphore pending. Bound that wait and drop the socket either way.
+_WS_CLOSE_TIMEOUT_S = 2.0
+
+
+def _abort_transport(ws: Any) -> None:
+    transport = getattr(ws, "transport", None)
+    abort = getattr(transport, "abort", None)
+    if not callable(abort):
         return
-    close = getattr(agent._ws, "close", None)
     try:
-        if callable(close):
-            await close()
+        abort()
+    except Exception:
+        return
+
+
+def _consume_task_result(task: asyncio.Task[Any]) -> None:
+    if task.cancelled() or not task.done():
+        return
+    try:
+        task.exception()
+    except (asyncio.CancelledError, Exception):
+        return
+
+
+async def discard_websocket(ws: Any) -> None:
+    """Close a socket, but do not wait forever for the peer to agree."""
+
+    close = getattr(ws, "close", None)
+    if not callable(close):
+        _abort_transport(ws)
+        return
+    task = asyncio.create_task(close())
+    try:
+        done, _pending = await asyncio.wait({task}, timeout=_WS_CLOSE_TIMEOUT_S)
+        if task not in done:
+            task.cancel()
+            _abort_transport(ws)
+            await asyncio.wait({task}, timeout=0.2)
     finally:
-        agent._ws = None
-        agent._pending_response = None
+        if not task.done():
+            task.cancel()
+            _abort_transport(ws)
+            task.add_done_callback(_consume_task_result)
+        else:
+            _consume_task_result(task)
+
+
+async def reset_websocket(agent: Any) -> None:
+    ws = agent._ws
+    agent._ws = None
+    agent._pending_response = None
+    if ws is None:
+        return
+    await discard_websocket(ws)
 
 
 async def close_websocket(agent: Any) -> None:
     if agent is None or agent._ws is None:
         return
-    close = getattr(agent._ws, "close", None)
-    if callable(close):
-        await close()
+    ws = agent._ws
     agent._ws = None
+    await discard_websocket(ws)
 
 
 def with_stream_content(response: dict, content: str) -> dict:

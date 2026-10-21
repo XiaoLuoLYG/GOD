@@ -1,10 +1,12 @@
 import asyncio
 import importlib.util
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
 import anyio
 from websockets.asyncio import client as websocket_client
+from websockets.asyncio.server import serve
 
 
 def _load_jiuwenclaw_agent_class():
@@ -252,3 +254,138 @@ def test_jiuwenclaw_websocket_uses_agent_server_keepalive(monkeypatch):
             "ping_timeout": 300,
         },
     }
+
+
+def _skill_choice_kwargs():
+    return {
+        "tick": 60,
+        "t": datetime(2026, 5, 26, tzinfo=timezone.utc),
+        "observation": {},
+        "catalog": [{"name": "routine.daily", "description": "day"}],
+        "mounted_skill_ids": ["routine.daily", "safety.respond"],
+        "pending_interventions": [],
+        "broadcast_result": "",
+    }
+
+
+class _HungSocket:
+    """Peer accepted the request, then never answers and never finishes close."""
+
+    async def send(self, _payload: str) -> None:
+        return None
+
+    async def recv(self) -> str:
+        await asyncio.Future()
+        return ""
+
+    async def close(self) -> None:
+        await asyncio.Future()
+
+
+def test_gateway_close_fails_pending_request_and_reconnects():
+    JiuwenClawAgent = _load_jiuwenclaw_agent_class()
+
+    async def run_case():
+        seen = {"n": 0}
+        release_half_close = asyncio.Event()
+
+        async def handler(ws):
+            await ws.send(json.dumps({"type": "event", "event": "connection.ack"}))
+            raw = await ws.recv()
+            data = json.loads(raw)
+            seen["n"] += 1
+            if seen["n"] == 1:
+                ws.protocol.send_close(1011, "keepalive ping timeout")
+                for chunk in ws.protocol.data_to_send():
+                    if chunk:
+                        ws.transport.write(chunk)
+                ws.transport.pause_reading()
+                await release_half_close.wait()
+                ws.transport.abort()
+                return
+            content = json.dumps(
+                {
+                    "selected_skill_id": "routine.daily",
+                    "args": {},
+                    "reason": "ok",
+                    "public_summary": "day",
+                }
+            )
+            await ws.send(
+                json.dumps(
+                    {
+                        "request_id": data["request_id"],
+                        "is_final": True,
+                        "body": {"result": {"content": content}},
+                    }
+                )
+            )
+
+        async with serve(handler, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            agent = JiuwenClawAgent(
+                id=4,
+                name="Agent 4",
+                profile={"name": "Agent 4"},
+                jiuwenclaw_ws_url=f"ws://127.0.0.1:{port}",
+                request_timeout=0.8,
+            )
+            loop = asyncio.get_running_loop()
+            try:
+                started = loop.time()
+                decision = await agent._select_next_skill(**_skill_choice_kwargs())
+                assert loop.time() - started < 5
+                assert decision["fallback"] is True
+                assert decision["selected_skill_id"] == "routine.daily"
+                assert agent._ws is None
+                assert agent._last_response.startswith("九问技能选择失败")
+
+                started = loop.time()
+                text = await agent._send_jiuwenclaw_request("again")
+                assert loop.time() - started < 5
+                assert "routine.daily" in text
+                assert agent._ws is not None
+                assert seen["n"] == 2
+            finally:
+                release_half_close.set()
+
+    anyio.run(run_case)
+
+
+def test_hung_websocket_close_releases_request_and_falls_back(monkeypatch):
+    monkeypatch.setenv("AGENTSOCIETY_JIUWENCLAW_REQUEST_CONCURRENCY", "1")
+    JiuwenClawAgent = _load_jiuwenclaw_agent_class()
+    JiuwenClawAgent._request_semaphore = None
+    JiuwenClawAgent._request_semaphore_loop = None
+
+    async def run_case():
+        agents = []
+        for agent_id in (4, 6):
+            agent = JiuwenClawAgent(
+                id=agent_id,
+                name=f"Agent {agent_id}",
+                profile={"name": f"Agent {agent_id}"},
+                request_timeout=0.4,
+            )
+            agent._ws = _HungSocket()
+            agents.append(agent)
+
+        async def choose(agent):
+            return await agent._select_next_skill(**_skill_choice_kwargs())
+
+        tasks = [asyncio.create_task(choose(agent)) for agent in agents]
+        _done, pending = await asyncio.wait(set(tasks), timeout=8)
+        for task in pending:
+            task.cancel()
+        assert pending == set()
+        for agent, task in zip(agents, tasks, strict=True):
+            decision = task.result()
+            assert decision["fallback"] is True
+            assert decision["selected_skill_id"] == "routine.daily"
+            assert agent._ws is None
+            assert agent._last_response.startswith("九问技能选择失败")
+        semaphore, limit = JiuwenClawAgent._request_semaphore_for_current_loop()
+        assert limit == 1
+        assert semaphore.locked() is False
+
+    anyio.run(run_case)
