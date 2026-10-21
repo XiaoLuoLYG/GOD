@@ -153,16 +153,7 @@ async def send_request(agent: Any, prompt: str) -> str:
         async with semaphore:
             queue_ms = (time.perf_counter() - request_started_at) * 1000
             async with agent._ws_lock:
-                await agent._ensure_connected()
-                await agent._ws.send(json.dumps(payload, ensure_ascii=False))
-                try:
-                    response = await asyncio.wait_for(
-                        agent._receive_matching_response(request_id),
-                        timeout=agent._request_timeout,
-                    )
-                except Exception:
-                    await agent._reset_websocket()
-                    raise
+                response = await _exchange_with_deadline(agent, payload, request_id)
             content = agent._extract_response_content(response)
             status = "success"
             return content
@@ -182,9 +173,63 @@ async def send_request(agent: Any, prompt: str) -> str:
         )
 
 
+def _connection_is_usable(ws: Any) -> bool:
+    """A peer close (1001 going away) leaves the object set but not usable."""
+
+    state = getattr(ws, "state", None)
+    if state is None:
+        return True
+    name = getattr(state, "name", "")
+    if isinstance(name, str) and name:
+        return name == "OPEN"
+    return True
+
+
+def _is_connection_closed(exc: BaseException) -> bool:
+    return type(exc).__name__ in {
+        "ConnectionClosed",
+        "ConnectionClosedOK",
+        "ConnectionClosedError",
+    }
+
+
+async def _exchange_once(agent: Any, payload: dict, request_id: str) -> dict:
+    await agent._ensure_connected()
+    await agent._ws.send(json.dumps(payload, ensure_ascii=False))
+    return await agent._receive_matching_response(request_id)
+
+
+async def _exchange_with_deadline(agent: Any, payload: dict, request_id: str) -> dict:
+    """Bound connect, send, and recv by the existing request timeout.
+
+    An open socket that only delivers non-final keepalive chunks never raises.
+    The deadline still ends the attempt. A socket the peer already closed fails
+    in milliseconds; retry that case once on a new connection.
+    """
+
+    loop = asyncio.get_running_loop()
+    timeout = agent._request_timeout
+    for attempt in (1, 2):
+        started = loop.time()
+        try:
+            return await asyncio.wait_for(
+                _exchange_once(agent, payload, request_id),
+                timeout=timeout,
+            )
+        except Exception as exc:
+            await agent._reset_websocket()
+            elapsed = loop.time() - started
+            if attempt == 1 and _is_connection_closed(exc) and elapsed < 2:
+                continue
+            raise
+    raise RuntimeError("JiuwenClaw request was not sent")
+
+
 async def ensure_connected(agent: Any) -> None:
-    if agent._ws is not None:
+    if agent._ws is not None and _connection_is_usable(agent._ws):
         return
+    if agent._ws is not None:
+        await reset_websocket(agent)
     agent._ws = await agent._open_websocket(agent._jiuwenclaw_ws_url)
     await agent._consume_connection_ack_if_present()
 
@@ -308,71 +353,25 @@ def extract_response_content(response: dict) -> str:
     return json.dumps(body, ensure_ascii=False)
 
 
-# A peer that has already sent 1011 and stopped reading never finishes the
-# close handshake. websockets then awaits connection_lost with no timeout
-# after abort(), which keeps the request, the agent lock, and the shared
-# semaphore pending. Bound that wait and drop the socket either way.
-_WS_CLOSE_TIMEOUT_S = 2.0
-
-
-def _abort_transport(ws: Any) -> None:
-    transport = getattr(ws, "transport", None)
-    abort = getattr(transport, "abort", None)
-    if not callable(abort):
-        return
-    try:
-        abort()
-    except Exception:
-        return
-
-
-def _consume_task_result(task: asyncio.Task[Any]) -> None:
-    if task.cancelled() or not task.done():
-        return
-    try:
-        task.exception()
-    except (asyncio.CancelledError, Exception):
-        return
-
-
-async def discard_websocket(ws: Any) -> None:
-    """Close a socket, but do not wait forever for the peer to agree."""
-
-    close = getattr(ws, "close", None)
-    if not callable(close):
-        _abort_transport(ws)
-        return
-    task = asyncio.create_task(close())
-    try:
-        done, _pending = await asyncio.wait({task}, timeout=_WS_CLOSE_TIMEOUT_S)
-        if task not in done:
-            task.cancel()
-            _abort_transport(ws)
-            await asyncio.wait({task}, timeout=0.2)
-    finally:
-        if not task.done():
-            task.cancel()
-            _abort_transport(ws)
-            task.add_done_callback(_consume_task_result)
-        else:
-            _consume_task_result(task)
-
-
 async def reset_websocket(agent: Any) -> None:
-    ws = agent._ws
-    agent._ws = None
-    agent._pending_response = None
-    if ws is None:
+    if agent._ws is None:
         return
-    await discard_websocket(ws)
+    close = getattr(agent._ws, "close", None)
+    try:
+        if callable(close):
+            await close()
+    finally:
+        agent._ws = None
+        agent._pending_response = None
 
 
 async def close_websocket(agent: Any) -> None:
     if agent is None or agent._ws is None:
         return
-    ws = agent._ws
+    close = getattr(agent._ws, "close", None)
+    if callable(close):
+        await close()
     agent._ws = None
-    await discard_websocket(ws)
 
 
 def with_stream_content(response: dict, content: str) -> dict:
