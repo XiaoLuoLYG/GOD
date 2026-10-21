@@ -1,9 +1,13 @@
 import asyncio
 import importlib.util
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
 import anyio
+import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestServer
 from websockets.asyncio import client as websocket_client
 
 
@@ -15,6 +19,102 @@ def _load_jiuwenclaw_agent_class():
     assert spec and spec.loader
     spec.loader.exec_module(module)
     return module.JiuwenClawAgent
+
+
+@pytest.mark.parametrize("case", ["disabled", "missing_key", "success", "unauthorized", "rate_limit", "malformed", "unknown_skill", "invalid_confidence", "llm_failure", "unmounted_baseline", "timeout"])
+def test_jev_shadow_keeps_original_skill_decision(monkeypatch, tmp_path, case):
+    agent_class = _load_jiuwenclaw_agent_class()
+    agent = agent_class(id=1, name="Test Resident", profile={"name": "Test Resident"})
+    monkeypatch.setenv("GOD_JEV_SHADOW", "0" if case == "disabled" else "1")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "" if case == "missing_key" else "test-jev-secret")
+    monkeypatch.setenv("GOD_JEV_MODEL", "jev-test-model")
+    baseline = {"selected_skill_id": "routine.daily", "args": {"kept": "original"}, "reason": "original", "public_summary": "原有决定"}
+    if case == "unmounted_baseline":
+        baseline["selected_skill_id"] = "unmounted.skill"
+    requests = []
+    jev_started = asyncio.Event()
+
+    async def endpoint(request):
+        requests.append(await request.json())
+        jev_started.set()
+        assert request.headers["Authorization"] == "Bearer test-jev-secret"
+        if case in ("unauthorized", "rate_limit"):
+            return web.Response(status=401 if case == "unauthorized" else 429, text="test-jev-secret")
+        if case == "malformed":
+            return web.json_response({})
+        if case == "timeout":
+            await asyncio.sleep(6)
+        return web.json_response({
+            "model": "jev-test-pinned",
+            "answers": {"skill": {
+                "type": "choice",
+                "choice": "unmounted.skill" if case == "unknown_skill" else "social.reply",
+                "confidence": True if case == "invalid_confidence" else 0.9,
+                "probabilities": {"routine.daily": 0.1, "social.reply": 0.9},
+            }},
+            "usage": {"input_tokens": 100, "output_tokens": 0},
+        })
+
+    async def original_request(_prompt):
+        if case == "success":
+            await asyncio.wait_for(jev_started.wait(), timeout=2)
+        if case == "llm_failure":
+            raise RuntimeError("original runtime unavailable")
+        return json.dumps(baseline)
+
+    async def run_case():
+        app = web.Application()
+        app.router.add_post("/v1/systemone", endpoint)
+        async with TestServer(app) as server:
+            # Redirect only the transport; exercise production request/response handling.
+            monkeypatch.setitem(agent_class._select_next_skill.__globals__, "JEV_API_URL", str(server.make_url("/v1/systemone")))
+            agent._send_jiuwenclaw_request = original_request
+            if case == "unmounted_baseline":
+                await agent.init(_Env(tmp_path))
+                async def observe():
+                    return {"location_id": "school"}
+                agent._observe_environment = observe
+                await agent.step(60, datetime(2026, 10, 2, tzinfo=timezone.utc))
+                snapshot = json.loads((tmp_path / "agents/agent_0001/.runtime/logs/agent_state_snapshot.json").read_text())
+                result = snapshot["last_skill_decision"]
+            else:
+                result = await agent._select_next_skill(
+                    tick=60, t=datetime(2026, 10, 2, tzinfo=timezone.utc),
+                    observation={"location_id": "school"},
+                    catalog=[{"name": "routine.daily", "description": "Follow daily routine"}, {"name": "social.reply", "description": "Reply to a message"}],
+                    mounted_skill_ids=["routine.daily", "social.reply"],
+                    pending_interventions=[], broadcast_result="",
+                )
+        assert result["selected_skill_id"] == "routine.daily"
+        if case in ("llm_failure", "unmounted_baseline"):
+            assert result["fallback"] is True
+        else:
+            assert {key: result[key] for key in baseline} == baseline
+        if case == "disabled":
+            assert not requests
+            assert "jev_shadow" not in result
+        elif case == "missing_key":
+            assert not requests
+            assert result["jev_shadow"]["status"] == "skipped"
+        else:
+            assert len(requests) == 1
+            assert requests[0]["model"] == "jev-test-model"
+            assert requests[0]["questions"]["skill"]["type"] == "choice"
+            if case != "unmounted_baseline":
+                assert set(requests[0]["questions"]["skill"]["criteria"]) == {"routine.daily", "social.reply"}
+            comparison = result["jev_shadow"]
+            assert "test-jev-secret" not in json.dumps(comparison)
+            if case in ("success", "llm_failure", "unmounted_baseline"):
+                assert comparison["status"] == "completed"
+                assert comparison["choice"] == "social.reply"
+                assert comparison["matches_selected_skill"] is False
+                assert comparison["model"] == "jev-test-pinned"
+                assert comparison["latency_ms"] >= 0
+                assert comparison["usage"]["input_tokens"] == 100
+            else:
+                assert comparison["status"] == "error"
+
+    anyio.run(run_case)
 
 
 class _Env:
