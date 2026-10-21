@@ -1452,6 +1452,70 @@ function clampZoom(value: number, viewportWidth: number, viewportHeight: number,
     return Phaser.Math.Clamp(value, minZoom, maxZoom);
 }
 
+type TilemapCanvasRenderer = {
+    currentContext: CanvasRenderingContext2D | null;
+};
+
+type TilemapRenderCanvas = (
+    this: Phaser.Tilemaps.TilemapLayer,
+    renderer: TilemapCanvasRenderer,
+    src: Phaser.Tilemaps.TilemapLayer,
+    camera: Phaser.Cameras.Scene2D.Camera,
+    parentMatrix?: Phaser.GameObjects.Components.TransformMatrix,
+) => void;
+
+// Fractional camera scale plus nearest-neighbor canvas tiles leaves 1px gaps of the
+// clear color. Grow each tile by one device pixel so neighbors overlap. Zoom stays put.
+function preventCanvasTileSeams() {
+    const proto = Phaser.Tilemaps.TilemapLayer.prototype as Phaser.Tilemaps.TilemapLayer & {
+        renderCanvas?: TilemapRenderCanvas;
+        tileSeamOverlap?: boolean;
+    };
+    if (proto.tileSeamOverlap || !proto.renderCanvas) {
+        return;
+    }
+    const original = proto.renderCanvas;
+    proto.renderCanvas = function (renderer, src, camera, parentMatrix) {
+        const ctx = renderer.currentContext;
+        if (!ctx) {
+            original.call(this, renderer, src, camera, parentMatrix);
+            return;
+        }
+        const drawImage = ctx.drawImage;
+        const zoom = Math.max(camera.zoomX || camera.zoom || 1, 0.0001);
+        const pad = 1 / zoom;
+        const patchedDraw = (
+            ...args: Parameters<CanvasRenderingContext2D['drawImage']>
+        ) => {
+            if (args.length !== 9) {
+                return drawImage.apply(ctx, args);
+            }
+            const [image, sx, sy, sw, sh, dx, dy, dw, dh] = args;
+            return drawImage.call(
+                ctx,
+                image,
+                sx,
+                sy,
+                sw,
+                sh,
+                dx - pad / 2,
+                dy - pad / 2,
+                dw + pad,
+                dh + pad,
+            );
+        };
+        ctx.drawImage = patchedDraw as typeof ctx.drawImage;
+        try {
+            original.call(this, renderer, src, camera, parentMatrix);
+        } finally {
+            ctx.drawImage = drawImage;
+        }
+    };
+    proto.tileSeamOverlap = true;
+}
+
+preventCanvasTileSeams();
+
 function clampCameraScroll(scene: Phaser.Scene, bridge: PhaserBridge) {
     const camera = scene.cameras.main;
     if (!bridge.mapWidthPixels || !bridge.mapHeightPixels) {
