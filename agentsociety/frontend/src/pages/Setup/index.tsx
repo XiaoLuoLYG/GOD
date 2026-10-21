@@ -168,9 +168,9 @@ type CompleteRoleVisualsResponse = {
 };
 
 type LatestDraftPayload = {
-    generated_at: string;
+    generated_at?: string;
     basics?: Partial<BasicsForm>;
-    draft: DraftPayload;
+    draft?: DraftPayload | null;
 };
 
 type LaunchResult = {
@@ -339,6 +339,42 @@ const saveStoredBasics = (values: BasicsForm) => {
     window.localStorage.setItem(BASICS_STORAGE_KEY, JSON.stringify(values));
 };
 
+const PENDING_LAUNCH_STORAGE_KEY = 'god.setup.pendingLaunch';
+
+const readPendingLaunch = (): LaunchResult | null => {
+    if (typeof window === 'undefined') {
+        return null;
+    }
+    try {
+        const raw = window.sessionStorage.getItem(PENDING_LAUNCH_STORAGE_KEY);
+        if (!raw) {
+            return null;
+        }
+        const parsed = JSON.parse(raw) as Partial<LaunchResult>;
+        if (!parsed.hypothesis_id || !parsed.experiment_id || !parsed.workspace_path) {
+            return null;
+        }
+        return {
+            hypothesis_id: parsed.hypothesis_id,
+            experiment_id: parsed.experiment_id,
+            workspace_path: parsed.workspace_path,
+        };
+    } catch {
+        return null;
+    }
+};
+
+const writePendingLaunch = (result: LaunchResult | null) => {
+    if (typeof window === 'undefined') {
+        return;
+    }
+    if (!result) {
+        window.sessionStorage.removeItem(PENDING_LAUNCH_STORAGE_KEY);
+        return;
+    }
+    window.sessionStorage.setItem(PENDING_LAUNCH_STORAGE_KEY, JSON.stringify(result));
+};
+
 const replayPathForLaunch = (result: LaunchResult) => (
     `/pixel-replay/${encodeURIComponent(result.hypothesis_id)}/${encodeURIComponent(result.experiment_id)}?workspace_path=${encodeURIComponent(result.workspace_path)}`
 );
@@ -369,16 +405,16 @@ export default function SetupPage() {
     );
     const [messageApi, messageContextHolder] = message.useMessage();
     const [status, setStatus] = useState<SetupStatus | null>(null);
-    const [currentStep, setCurrentStep] = useState(0);
+    const [restoredPendingLaunch] = useState(readPendingLaunch);
+    const [currentStep, setCurrentStep] = useState(restoredPendingLaunch ? 1 : 0);
     const [draft, setDraft] = useState<DraftPayload | null>(null);
     const [loadingStatus, setLoadingStatus] = useState(true);
     const [savingModel, setSavingModel] = useState(false);
     const [generating, setGenerating] = useState(false);
     const [publishing, setPublishing] = useState(false);
-    const [startingDefault, setStartingDefault] = useState<string | null>(null);
     const [builtinModalOpen, setBuiltinModalOpen] = useState(false);
     const [latestDraftAvailable, setLatestDraftAvailable] = useState(false);
-    const [launchPending, setLaunchPending] = useState<LaunchResult | null>(null);
+    const [launchPending, setLaunchPending] = useState<LaunchResult | null>(restoredPendingLaunch);
     const [packageImportOpen, setPackageImportOpen] = useState<false | 'map' | 'experiment'>(false);
     const [agentModalOpen, setAgentModalOpen] = useState(false);
     const [editingAgentId, setEditingAgentId] = useState<number | null>(null);
@@ -563,12 +599,19 @@ export default function SetupPage() {
 
     const completeLaunch = (result: LaunchResult, setupMode: boolean, delayMs: number) => {
         if (setupMode) {
+            writePendingLaunch(result);
             setLaunchPending(result);
             return;
         }
+        writePendingLaunch(null);
         window.setTimeout(() => {
             navigate(replayPathForLaunch(result));
         }, delayMs);
+    };
+
+    const abandonPendingLaunch = () => {
+        writePendingLaunch(null);
+        setLaunchPending(null);
     };
 
     const syncBasicsValues = (values: Partial<BasicsForm>) => {
@@ -622,8 +665,13 @@ export default function SetupPage() {
                 throw new Error(await response.text());
             }
             const payload = await response.json() as LatestDraftPayload;
+            const nextDraft = payload.draft;
+            if (!nextDraft) {
+                setLatestDraftAvailable(false);
+                return false;
+            }
             setLatestDraftAvailable(true);
-            setDraft((current) => (!current || navigateToDraft ? payload.draft : current));
+            setDraft((current) => (!current || navigateToDraft ? nextDraft : current));
             if (payload.basics) {
                 const latestMatchesUiLanguage = payload.basics.language === localizedDefaultBasics.language;
                 if (navigateToDraft || latestMatchesUiLanguage) {
@@ -669,6 +717,9 @@ export default function SetupPage() {
     };
 
     const goToStep = async (targetStep: number) => {
+        if (targetStep !== currentStep) {
+            abandonPendingLaunch();
+        }
         if (currentStep === 2 && targetStep > 2) {
             try {
                 await persistBasicsFromForm();
@@ -705,31 +756,54 @@ export default function SetupPage() {
         }
     };
 
-    const startDefaultExperiment = async (experimentKey: string) => {
-        const modelValues = await modelForm.validateFields();
-        if (!status?.model_config.GOD_LLM_API_KEY?.configured && !String(modelValues.GOD_LLM_API_KEY || '').trim()) {
-            messageApi.error(copy('messages.apiKeyRequired'));
-            return;
-        }
-        setStartingDefault(experimentKey);
-        try {
-            const nextStatus = await persistModelConfig(modelValues);
-            setStatus(nextStatus);
-            const result = await fetchJson<LaunchResult>('/api/v1/god/setup/start-default', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ experiment_key: experimentKey }),
-            });
-            const setupMode = Boolean(nextStatus.setup_mode || status?.setup_mode);
-            messageApi.success(setupMode ? copy('messages.defaultQueued') : copy('messages.defaultStarted'));
-            setBuiltinModalOpen(false);
-            completeLaunch(result, setupMode, 700);
-        } catch (error) {
-            messageApi.error(copy('messages.defaultStartFailed', { error: errorText(error) }));
-        } finally {
-            setStartingDefault(null);
-        }
+    const openBuiltinFromScratch = (
+        item: NonNullable<SetupStatus['default_experiments']>[number],
+    ) => {
+        abandonPendingLaunch();
+        const normalized = syncBasicsValues({
+            ...basicsRef.current,
+            map_id: item.map_id,
+        });
+        basicsForm.setFieldsValue(normalized);
+        setBuiltinModalOpen(false);
+        setCurrentStep(2);
     };
+
+    useEffect(() => {
+        if (!launchPending) {
+            return undefined;
+        }
+        let cancelled = false;
+        const pending = launchPending;
+        const checkFirstFrame = async () => {
+            const url = `/api/v1/replay/${encodeURIComponent(pending.hypothesis_id)}`
+                + `/${encodeURIComponent(pending.experiment_id)}/timeline`
+                + `?workspace_path=${encodeURIComponent(pending.workspace_path)}`;
+            try {
+                const response = await fetchCustom(url);
+                if (!response.ok) {
+                    return;
+                }
+                const timeline = await response.json() as unknown;
+                if (cancelled || !Array.isArray(timeline) || timeline.length === 0) {
+                    return;
+                }
+                writePendingLaunch(null);
+                setLaunchPending(null);
+                navigate(replayPathForLaunch(pending));
+            } catch {
+                // The backend is restarting, or the replay database does not exist yet.
+            }
+        };
+        void checkFirstFrame();
+        const timer = window.setInterval(() => {
+            void checkFirstFrame();
+        }, 2000);
+        return () => {
+            cancelled = true;
+            window.clearInterval(timer);
+        };
+    }, [launchPending, navigate]);
 
     const validateContextJsonText = (text: string) => {
         try {
@@ -1161,7 +1235,13 @@ export default function SetupPage() {
                 <Button icon={<SaveOutlined />} loading={savingModel} onClick={saveModelConfig}>
                     {copy('model.save')}
                 </Button>
-                <Tag>{status?.model_config.GOD_LLM_API_KEY?.configured ? copy('model.apiKeyConfigured') : copy('model.apiKeyMissing')}</Tag>
+                {status && (
+                    <Tag>
+                        {status.model_config.GOD_LLM_API_KEY?.configured
+                            ? copy('model.apiKeyConfigured')
+                            : copy('model.apiKeyMissing')}
+                    </Tag>
+                )}
                 <Text type="secondary">{status?.env_file}</Text>
             </Space>
         </Card>
@@ -1189,9 +1269,8 @@ export default function SetupPage() {
                                 <Button
                                     type="primary"
                                     icon={<PlayCircleOutlined />}
-                                    loading={startingDefault === item.key}
                                     disabled={!item.config_exists}
-                                    onClick={() => startDefaultExperiment(item.key)}
+                                    onClick={() => openBuiltinFromScratch(item)}
                                 >
                                     {copy('choice.openDefault')}
                                 </Button>
@@ -1240,7 +1319,10 @@ export default function SetupPage() {
                     <Space direction="vertical" size={10} style={{ width: '100%' }}>
                         <Title level={4} style={{ margin: 0 }}>{copy('choice.customTitle')}</Title>
                         <Text type="secondary">{copy('choice.customDescription')}</Text>
-                        <Button icon={<EditOutlined />} onClick={() => setCurrentStep(2)}>
+                        <Button icon={<EditOutlined />} onClick={() => {
+                            abandonPendingLaunch();
+                            setCurrentStep(2);
+                        }}>
                             {copy('choice.createCustom')}
                         </Button>
                     </Space>

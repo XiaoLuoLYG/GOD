@@ -861,6 +861,17 @@ def test_generate_draft_requires_explicit_model(monkeypatch, tmp_path):
     assert "GOD_LLM_MODEL is required" in str(exc_info.value.detail)
 
 
+def test_latest_draft_route_is_empty_when_missing(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    app = FastAPI()
+    app.include_router(god_setup.router)
+
+    response = TestClient(app).get("/api/v1/god/setup/latest-draft")
+
+    assert response.status_code == 200
+    assert response.json()["draft"] is None
+
+
 def test_latest_draft_route_returns_persisted_setup_draft(monkeypatch, tmp_path):
     _configure_tmp_god(monkeypatch, tmp_path)
     latest_path = tmp_path / ".god" / "run" / "latest-draft.json"
