@@ -413,6 +413,7 @@ export default function SetupPage() {
     const [generating, setGenerating] = useState(false);
     const [publishing, setPublishing] = useState(false);
     const [builtinModalOpen, setBuiltinModalOpen] = useState(false);
+    const [builtinAgentCounts, setBuiltinAgentCounts] = useState<Record<string, number>>({});
     const [latestDraftAvailable, setLatestDraftAvailable] = useState(false);
     const [launchPending, setLaunchPending] = useState<LaunchResult | null>(restoredPendingLaunch);
     const [packageImportOpen, setPackageImportOpen] = useState<false | 'map' | 'experiment'>(false);
@@ -756,6 +757,16 @@ export default function SetupPage() {
         }
     };
 
+    const builtinAgentCountFor = (key: string) => {
+        const selected = builtinAgentCounts[key];
+        const fallback = basicsRef.current.agent_count || 10;
+        const value = selected ?? fallback;
+        if (!Number.isFinite(value)) {
+            return fallback;
+        }
+        return Math.min(50, Math.max(1, Math.round(value)));
+    };
+
     const openBuiltinFromScratch = (
         item: NonNullable<SetupStatus['default_experiments']>[number],
     ) => {
@@ -763,6 +774,7 @@ export default function SetupPage() {
         const normalized = syncBasicsValues({
             ...basicsRef.current,
             map_id: item.map_id,
+            agent_count: builtinAgentCountFor(item.key),
         });
         basicsForm.setFieldsValue(normalized);
         setBuiltinModalOpen(false);
@@ -1265,7 +1277,27 @@ export default function SetupPage() {
                             </Space>
                             <Text type="secondary">{defaultExperimentDescription(item)}</Text>
                             <Text code>{item.hypothesis_id} / experiment_{item.experiment_id}</Text>
-                            <Space wrap>
+                            <Space wrap align="end">
+                                <div>
+                                    <Text type="secondary">{copy('basics.agentCount')}</Text>
+                                    <InputNumber
+                                        min={1}
+                                        max={50}
+                                        precision={0}
+                                        value={builtinAgentCountFor(item.key)}
+                                        aria-label={copy('basics.agentCount')}
+                                        style={{ width: 88, display: 'block', marginTop: 4 }}
+                                        onChange={(value) => {
+                                            const next = Number(value);
+                                            setBuiltinAgentCounts((current) => ({
+                                                ...current,
+                                                [item.key]: Number.isFinite(next)
+                                                    ? Math.min(50, Math.max(1, Math.round(next)))
+                                                    : builtinAgentCountFor(item.key),
+                                            }));
+                                        }}
+                                    />
+                                </div>
                                 <Button
                                     type="primary"
                                     icon={<PlayCircleOutlined />}

@@ -50,6 +50,14 @@ import {
     type LocalizedFields,
 } from '../../utils/runtimeLocalization';
 import { AgentBuilderPanel } from '../AgentBuilder';
+import {
+    displayStoredReplayText,
+    fitZoomOnTileGrid,
+    shouldShowInitialReplayLoader,
+    snapAxisToDevicePixels,
+    snapZoomToTileGrid,
+    translateKnownStoredReplayText,
+} from './replayPure';
 import './style.css';
 
 const { Text, Title } = Typography;
@@ -372,6 +380,7 @@ type PhaserBridge = {
     scene?: Phaser.Scene;
     mapWidthPixels?: number;
     mapHeightPixels?: number;
+    tileSize?: number;
     sprites: Map<number, Phaser.GameObjects.Sprite>;
     labels: Map<number, Phaser.GameObjects.Text>;
     hitZones: Map<number, Phaser.GameObjects.Zone>;
@@ -1277,40 +1286,9 @@ const sleep = (ms: number) => new Promise<void>((resolve) => {
 
 const toErrorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-const STORED_REPLAY_TEXT_EN: Record<string, string> = {
-    'Jiuwen Alice 正在公园和大家碰头': 'Jiuwen Alice is meeting everyone in Johnson Park.',
-    'Jiuwen Charlie 正在学校进行课后答疑': 'Jiuwen Charlie is holding office hours in the school classroom.',
-    'Jiuwen Hana 正在家里做饭': 'Jiuwen Hana is cooking at home.',
-    'Jiuwen Mei 正在市场店铺值班': 'Jiuwen Mei is working a shop shift at The Willows Market.',
-    前往哈维橡树供给店: 'Heading to Harvey Oak Supply Store.',
-    前往学校教室: 'Heading to the school classroom.',
-    前往家: 'Heading home.',
-    前往柳树市场: 'Heading to The Willows Market.',
-    前往约翰逊公园: 'Heading to Johnson Park.',
-    'Jiuwen Bob 正在前往哈维橡树供给店。': 'Jiuwen Bob is heading to Harvey Oak Supply Store.',
-    '我会把当前情况整理清楚，并同步给需要知道的人。': 'I will organize the current situation clearly and update the people who need to know.',
-    '我先把摊位收拾好，再接待顾客。': 'I will tidy the stall first, then help customers.',
-    '我用年轻人听得进去的方式聊。': 'I will talk in a way younger people can actually hear.',
-    'Jiuwen Alice 在公园说：执行社区协调': 'Jiuwen Alice says in Johnson Park: coordinating the community.',
-};
-
-const translateKnownStoredReplayText = (value: unknown, language: string): string | undefined => {
-    const text = String(value || '').trim();
-    if (!language?.startsWith('en') || !text) {
-        return undefined;
-    }
-    return STORED_REPLAY_TEXT_EN[text];
-};
-
 const translateStoredReplayText = (value: unknown, language: string): string | undefined => {
-    const text = String(value || '').trim();
-    if (!text) {
-        return undefined;
-    }
-    if (!language?.startsWith('en')) {
-        return text;
-    }
-    return STORED_REPLAY_TEXT_EN[text] ?? text;
+    const text = displayStoredReplayText(value, language);
+    return text || undefined;
 };
 
 const translateStoredCommunications = (communications: Communication[], language: string): Communication[] => (
@@ -1320,9 +1298,7 @@ const translateStoredCommunications = (communications: Communication[], language
     }))
 );
 
-const displayStoredText = (value: unknown, language: string) => {
-    return translateStoredReplayText(value, language) ?? '';
-};
+const displayStoredText = (value: unknown, language: string) => displayStoredReplayText(value, language);
 
 const isReplayDatabaseNotReadyError = (error: unknown) => (
     toErrorMessage(error).includes('Database not found')
@@ -1447,11 +1423,6 @@ function getMapZoomBounds(viewportWidth: number, viewportHeight: number, mapWidt
     };
 }
 
-function clampZoom(value: number, viewportWidth: number, viewportHeight: number, mapWidth: number, mapHeight: number) {
-    const { minZoom, maxZoom } = getMapZoomBounds(viewportWidth, viewportHeight, mapWidth, mapHeight);
-    return Phaser.Math.Clamp(value, minZoom, maxZoom);
-}
-
 type TilemapCanvasRenderer = {
     currentContext: CanvasRenderingContext2D | null;
 };
@@ -1483,7 +1454,8 @@ function preventCanvasTileSeams() {
         }
         const drawImage = ctx.drawImage;
         const zoom = Math.max(camera.zoomX || camera.zoom || 1, 0.0001);
-        const pad = 1 / zoom;
+        const pixelRatio = typeof window === 'undefined' ? 1 : (window.devicePixelRatio || 1);
+        const pad = Math.max(1, pixelRatio) / zoom;
         const patchedDraw = (
             ...args: Parameters<CanvasRenderingContext2D['drawImage']>
         ) => {
@@ -1532,11 +1504,26 @@ function fitCameraToMap(scene: Phaser.Scene, bridge: PhaserBridge) {
     if (!mapWidth || !mapHeight) {
         return;
     }
-    const { coverZoom } = getMapZoomBounds(camera.width, camera.height, mapWidth, mapHeight);
-    const nextZoom = clampZoom(coverZoom, camera.width, camera.height, mapWidth, mapHeight);
+    const tileSize = bridge.tileSize || TILE_SIZE;
+    const { minZoom, maxZoom } = getMapZoomBounds(camera.width, camera.height, mapWidth, mapHeight);
+    const nextZoom = fitZoomOnTileGrid(
+        camera.width,
+        camera.height,
+        mapWidth,
+        mapHeight,
+        tileSize,
+        minZoom,
+        maxZoom,
+    );
     camera.setZoom(nextZoom);
     camera.centerOn(mapWidth / 2, mapHeight / 2);
     clampCameraScroll(scene, bridge);
+    snapCameraToDevicePixels(camera);
+}
+
+function snapCameraToDevicePixels(camera: Phaser.Cameras.Scene2D.Camera) {
+    camera.scrollX = snapAxisToDevicePixels(camera.scrollX, camera.zoom);
+    camera.scrollY = snapAxisToDevicePixels(camera.scrollY, camera.zoom);
 }
 
 function zoomCameraAtScreenPoint(
@@ -1553,12 +1540,15 @@ function zoomCameraAtScreenPoint(
         return;
     }
     const before = camera.getWorldPoint(screenX, screenY);
-    const nextZoom = clampZoom(camera.zoom + delta, camera.width, camera.height, mapWidth, mapHeight);
+    const { minZoom, maxZoom } = getMapZoomBounds(camera.width, camera.height, mapWidth, mapHeight);
+    const tileSize = bridge.tileSize || TILE_SIZE;
+    const nextZoom = snapZoomToTileGrid(camera.zoom + delta, tileSize, minZoom, maxZoom);
     camera.setZoom(nextZoom);
     const after = camera.getWorldPoint(screenX, screenY);
     camera.scrollX += before.x - after.x;
     camera.scrollY += before.y - after.y;
     clampCameraScroll(scene, bridge);
+    snapCameraToDevicePixels(camera);
 }
 
 function zoomCameraAtCenter(scene: Phaser.Scene, bridge: PhaserBridge, delta: number) {
@@ -1650,8 +1640,21 @@ function getFitScreenPosition(agent: PixelAgent, map: WalkableMap, canvasSize: C
     if (mapWidth <= 0 || mapHeight <= 0) {
         return undefined;
     }
-    const { coverZoom } = getMapZoomBounds(canvasSize.width, canvasSize.height, mapWidth, mapHeight);
-    const zoom = clampZoom(coverZoom, canvasSize.width, canvasSize.height, mapWidth, mapHeight);
+    const { minZoom, maxZoom } = getMapZoomBounds(
+        canvasSize.width,
+        canvasSize.height,
+        mapWidth,
+        mapHeight,
+    );
+    const zoom = fitZoomOnTileGrid(
+        canvasSize.width,
+        canvasSize.height,
+        mapWidth,
+        mapHeight,
+        tileSize,
+        minZoom,
+        maxZoom,
+    );
     const originX = canvasSize.width / 2;
     const originY = canvasSize.height / 2;
     const displayWidth = canvasSize.width / zoom;
@@ -1660,8 +1663,14 @@ function getFitScreenPosition(agent: PixelAgent, map: WalkableMap, canvasSize: C
     const minScrollY = (displayHeight - canvasSize.height) / 2;
     const maxScrollX = Math.max(minScrollX, minScrollX + mapWidth - displayWidth);
     const maxScrollY = Math.max(minScrollY, minScrollY + mapHeight - displayHeight);
-    const scrollX = Phaser.Math.Clamp(mapWidth / 2 - originX, minScrollX, maxScrollX);
-    const scrollY = Phaser.Math.Clamp(mapHeight / 2 - originY, minScrollY, maxScrollY);
+    const scrollX = snapAxisToDevicePixels(
+        Phaser.Math.Clamp(mapWidth / 2 - originX, minScrollX, maxScrollX),
+        zoom,
+    );
+    const scrollY = snapAxisToDevicePixels(
+        Phaser.Math.Clamp(mapHeight / 2 - originY, minScrollY, maxScrollY),
+        zoom,
+    );
     const { x: worldX, y: worldY } = getAgentWorldPosition(agent, tileSize);
     const speechOffsetY = getCompactSpeechBubbleMetrics(tileSize, zoom).offsetY * zoom;
     const screenX = originX + (worldX - scrollX - originX) * zoom;
@@ -1860,6 +1869,8 @@ function PixelTownCanvas({
     const frameRef = useRef<PixelFrame | undefined>(frame);
     const onSelectAgentRef = useRef(onSelectAgent);
     const stepDurationMsRef = useRef(stepDurationMs);
+    const mapRef = useRef(map);
+    mapRef.current = map;
     const agentScreenPositionsRef = useRef<Record<number, AgentScreenPosition>>({});
     const [hoverState, setHoverState] = useState<AgentHoverState | undefined>();
     const [speechHoverAgentId, setSpeechHoverAgentId] = useState<number | undefined>();
@@ -2039,7 +2050,19 @@ function PixelTownCanvas({
         setHoverState({ agentId, x, y });
     }, [clampHoverPosition, readAgentScreenPosition, showSpeechBubbleForAgent, syncAgentScreenPositions]);
 
+    const hoverAgentRef = useRef(handleHoverAgent);
+    hoverAgentRef.current = handleHoverAgent;
+    const syncPositionsRef = useRef(syncAgentScreenPositions);
+    syncPositionsRef.current = syncAgentScreenPositions;
+
     useEffect(() => {
+        const map = mapRef.current;
+        const syncAgentScreenPositions = () => {
+            syncPositionsRef.current();
+        };
+        const handleHoverAgent = (agentId: number | undefined, pointer?: Phaser.Input.Pointer) => {
+            hoverAgentRef.current(agentId, pointer);
+        };
         if (!containerRef.current || gameRef.current) {
             return;
         }
@@ -2095,6 +2118,7 @@ function PixelTownCanvas({
 
                 bridgeRef.current.mapWidthPixels = tilemap.widthInPixels;
                 bridgeRef.current.mapHeightPixels = tilemap.heightInPixels;
+                bridgeRef.current.tileSize = map.tileSize || TILE_SIZE;
                 renderLocationMarkers(this, map, bridgeRef.current);
                 this.cameras.main.setBounds(0, 0, tilemap.widthInPixels, tilemap.heightInPixels);
                 fitCameraToMap(this, bridgeRef.current);
@@ -2174,7 +2198,8 @@ function PixelTownCanvas({
                 locationMarkers: [],
             };
         };
-    }, [handleHoverAgent, map, syncAgentScreenPositions]);
+        // Language-only updates keep this map asset. Recreating the game reloads the first frame.
+    }, [map.mapId, map.tiledMapUrl]);
 
     useEffect(() => {
         const markers = bridgeRef.current.locationMarkers ?? [];
@@ -3071,6 +3096,7 @@ export default function PixelReplay() {
         return () => {
             cancelled = true;
         };
+        // Language is omitted on purpose. Changing it must not reload the town or the first frame.
     }, [liveBaseUrl, refreshReplayData, replayBaseUrl, withLiveWorkspace, withWorkspace, workspacePath]);
 
     const liveSessionReady = Boolean(liveStatus);
@@ -3540,7 +3566,7 @@ export default function PixelReplay() {
         </div>
     );
 
-    if (loading) {
+    if (shouldShowInitialReplayLoader(loading, Boolean(frame))) {
         return (
             <div className="pixel-replay-loading">
                 <Spin size="large" />
