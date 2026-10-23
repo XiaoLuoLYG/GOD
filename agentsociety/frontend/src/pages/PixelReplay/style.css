@@ -28,7 +28,8 @@
 
 .pixel-town-canvas canvas {
     position: absolute;
-    inset: 0;
+    top: 0;
+    left: 0;
     z-index: 1;
     border-radius: 8px;
     image-rendering: pixelated;
