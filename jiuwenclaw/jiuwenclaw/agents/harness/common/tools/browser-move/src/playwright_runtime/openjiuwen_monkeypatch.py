@@ -278,7 +278,9 @@ def _patch_llm_provider_aliases(model_mod: Any) -> None:
         return
 
     registry.setdefault("OpenRouter", openai_client)
+    registry.setdefault("OrcaRouter", openai_client)
     registry.setdefault("openrouter", openai_client)
+    registry.setdefault("orcarouter", openai_client)
     registry.setdefault("openai", openai_client)
 
 
