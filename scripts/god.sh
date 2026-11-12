@@ -303,10 +303,6 @@ configured_state() {
   fi
 }
 
-runtime_workspace() {
-  printf '%s/.jiuwenclaw-instances/%s\n' "$HOME" "$RUNTIME_INSTANCE"
-}
-
 ensure_env_file() {
   local env_was_created=0
   if [[ ! -f "$ENV_FILE" ]]; then
@@ -636,7 +632,7 @@ stop_runtime_instance() {
   command_exists uv || return 0
   (
     cd "$RUNTIME_ROOT"
-    uv run jiuwenclaw-start --stop "$name" >/dev/null 2>&1 || true
+    uv run --locked jiuwenswarm-start --stop "$name" >/dev/null 2>&1 || true
   )
 }
 
@@ -661,31 +657,7 @@ remove_runtime_registry_entries() {
   command_exists uv || return 0
   (
     cd "$RUNTIME_ROOT"
-    uv run python - "$RUNTIME_INSTANCE" $RUNTIME_LEGACY_INSTANCES <<'PY'
-import sys
-from pathlib import Path
-from ruamel.yaml import YAML
-
-names = set(sys.argv[1:])
-path = Path.home() / ".jiuwenclaw" / "instances.yaml"
-if not path.exists():
-    raise SystemExit(0)
-
-yaml = YAML()
-data = yaml.load(path.read_text(encoding="utf-8")) or {}
-instances = data.get("instances")
-if not isinstance(instances, dict):
-    raise SystemExit(0)
-
-for name in names:
-    instances.pop(name, None)
-
-if instances:
-    with path.open("w", encoding="utf-8") as f:
-        yaml.dump(data, f)
-else:
-    path.unlink()
-PY
+    uv run --locked python "$ROOT_DIR/scripts/god_runtime_instance.py" forget "$RUNTIME_INSTANCE" $RUNTIME_LEGACY_INSTANCES
   ) || log "Could not update runtime registry; continuing reset"
 }
 
@@ -712,7 +684,9 @@ factory_reset() {
   remove_experiment_runs
   remove_runtime_registry_entries
   for name in "$RUNTIME_INSTANCE" $RUNTIME_LEGACY_INSTANCES; do
-    remove_path "$HOME/.jiuwenclaw-instances/$name" "runtime instance state"
+    [[ "$name" =~ ^[a-zA-Z0-9_-]{1,64}$ ]] || continue
+    remove_path "$HOME/.jiuwenclaw-instances/$name" "legacy runtime instance state"
+    remove_path "${JIUWENSWARM_HOME:-$HOME}/.jiuwenswarm-instances/$name" "runtime instance state"
   done
 
   remove_path "$ENV_FILE" ".env"
@@ -720,7 +694,7 @@ factory_reset() {
   remove_path "$BACKEND_ROOT/.venv" "backend virtualenv"
   remove_path "$RUNTIME_ROOT/.venv" "runtime virtualenv"
   remove_path "$BACKEND_ROOT/frontend/node_modules" "frontend dependencies"
-  remove_path "$RUNTIME_ROOT/jiuwenclaw/channels/web/frontend/node_modules" "runtime UI dependencies"
+  remove_path "$RUNTIME_ROOT/jiuwenswarm/channels/web/frontend/node_modules" "runtime UI dependencies"
 
   find "$ROOT_DIR" -maxdepth 5 \( -name .pytest_cache -o -name .ruff_cache -o -name __pycache__ \) -type d -prune -exec rm -rf {} + 2>/dev/null || true
 
@@ -739,112 +713,36 @@ setup_deps() {
     (cd "$BACKEND_ROOT" && uv sync)
   fi
 
-  if [[ ! -d "$RUNTIME_ROOT/.venv" || "${GOD_FORCE_SETUP:-0}" == "1" ]]; then
-    log "Syncing agent runtime Python dependencies"
-    (cd "$RUNTIME_ROOT" && uv sync)
-  fi
+  log "Syncing agent runtime Python dependencies"
+  (cd "$RUNTIME_ROOT" && uv sync --locked --quiet)
 
   if [[ ! -d "$BACKEND_ROOT/frontend/node_modules" || "${GOD_FORCE_SETUP:-0}" == "1" ]]; then
     log "Installing control-room dependencies"
     npm install --no-audit --no-fund --loglevel=error --prefix "$BACKEND_ROOT/frontend"
   fi
 
-  local runtime_frontend="$RUNTIME_ROOT/jiuwenclaw/channels/web/frontend"
+  local runtime_frontend="$RUNTIME_ROOT/jiuwenswarm/channels/web/frontend"
   if [[ ! -d "$runtime_frontend/node_modules" || "${GOD_FORCE_SETUP:-0}" == "1" ]]; then
     log "Installing runtime UI dependencies"
-    npm install --no-audit --no-fund --loglevel=error --prefix "$runtime_frontend"
+    npm ci --no-audit --no-fund --loglevel=error --prefix "$runtime_frontend"
   fi
 }
 
 ensure_runtime_instance() {
   setup_deps
-  local existing=0
-  (
+  local workspace
+  workspace="$(
     cd "$RUNTIME_ROOT"
-    uv run jiuwenclaw-start --status "$RUNTIME_INSTANCE" >/dev/null 2>&1
-  ) || existing=1
-
-  if [[ "$existing" != "0" ]]; then
-    log "Initializing agent runtime instance (default language: $RUNTIME_LANGUAGE)"
-    local workspace="$HOME/.jiuwenclaw-instances/$RUNTIME_INSTANCE"
-    : > "$LOG_DIR/runtime-init.log"
-    if [[ -d "$workspace" ]]; then
-      (
-        cd "$RUNTIME_ROOT"
-        printf 'yes\n%s\n' "$RUNTIME_LANGUAGE" | uv run jiuwenclaw-init --name "$RUNTIME_INSTANCE" >> "$LOG_DIR/runtime-init.log" 2>&1
-      ) || {
-        tail -n 80 "$LOG_DIR/runtime-init.log" >&2 || true
-        die "Failed to initialize agent runtime instance"
-      }
-    else
-      (
-        cd "$RUNTIME_ROOT"
-        printf '%s\n' "$RUNTIME_LANGUAGE" | uv run jiuwenclaw-init --name "$RUNTIME_INSTANCE" >> "$LOG_DIR/runtime-init.log" 2>&1
-      ) || {
-        tail -n 80 "$LOG_DIR/runtime-init.log" >&2 || true
-        die "Failed to initialize agent runtime instance"
-      }
-    fi
-  fi
-
-  (
-    cd "$RUNTIME_ROOT"
-    RUNTIME_INSTANCE="$RUNTIME_INSTANCE" \
-    RUNTIME_AGENT_PORT="$RUNTIME_AGENT_PORT" \
-    RUNTIME_WEB_PORT="$RUNTIME_WEB_PORT" \
-    RUNTIME_GATEWAY_PORT="$RUNTIME_GATEWAY_PORT" \
-    RUNTIME_UI_PORT="$RUNTIME_UI_PORT" \
-    uv run python - <<'PY'
-import os
-from pathlib import Path
-from ruamel.yaml import YAML
-
-name = os.environ["RUNTIME_INSTANCE"]
-path = Path.home() / ".jiuwenclaw" / "instances.yaml"
-path.parent.mkdir(parents=True, exist_ok=True)
-yaml = YAML()
-data = yaml.load(path.read_text(encoding="utf-8")) if path.exists() else None
-if not isinstance(data, dict):
-    data = {"instances": {}}
-instances = data.setdefault("instances", {})
-entry = instances.setdefault(name, {})
-workspace = entry.get("workspace") or str(Path.home() / ".jiuwenclaw-instances" / name)
-entry["workspace"] = workspace
-entry["ports"] = {
-    "agent_server": int(os.environ["RUNTIME_AGENT_PORT"]),
-    "web": int(os.environ["RUNTIME_WEB_PORT"]),
-    "gateway": int(os.environ["RUNTIME_GATEWAY_PORT"]),
-    "frontend": int(os.environ["RUNTIME_UI_PORT"]),
-}
-with path.open("w", encoding="utf-8") as f:
-    yaml.dump(data, f)
-
-workspace_path = Path(workspace).expanduser()
-workspace_path.mkdir(parents=True, exist_ok=True)
-bootstrap_env = workspace_path / ".env"
-bootstrap_env.write_text(
-    "\n".join(
-        [
-            f"# Bootstrap .env for runtime instance: {name}",
-            f"JIUWENCLAW_DATA_DIR={workspace_path}",
-            f"JIUWENCLAW_INSTANCE={name}",
-            f"AGENT_SERVER_PORT={os.environ['RUNTIME_AGENT_PORT']}",
-            f"WEB_PORT={os.environ['RUNTIME_WEB_PORT']}",
-            f"GATEWAY_PORT={os.environ['RUNTIME_GATEWAY_PORT']}",
-            f"FRONTEND_PORT={os.environ['RUNTIME_UI_PORT']}",
-            "",
-        ]
-    ),
-    encoding="utf-8",
-)
-PY
-  )
-  sync_runtime_model_env
+    uv run --locked python "$ROOT_DIR/scripts/god_runtime_instance.py" configure \
+      "$RUNTIME_INSTANCE" "$RUNTIME_LANGUAGE" \
+      "$RUNTIME_AGENT_PORT" "$RUNTIME_WEB_PORT" "$RUNTIME_GATEWAY_PORT" "$RUNTIME_UI_PORT" |
+      python3 -c 'import json, sys; print(json.load(sys.stdin)["workspace"])'
+  )"
+  sync_runtime_model_env "$workspace"
 }
 
 sync_runtime_model_env() {
-  local workspace
-  workspace="$(runtime_workspace)"
+  local workspace="$1"
   local config_env="$workspace/config/.env"
   [[ -d "$workspace" ]] || return 0
 
@@ -939,17 +837,8 @@ start_runtime() {
   log "Starting agent runtime"
   : > "$LOG_DIR/runtime.log"
   local runtime_cmd
-  local runtime_data_dir
-  runtime_data_dir="$(runtime_workspace)"
   runtime_cmd="cd $(shell_quote "$RUNTIME_ROOT")"
-  runtime_cmd+=" && export JIUWENCLAW_DATA_DIR=$(shell_quote "$runtime_data_dir")"
-  runtime_cmd+=" && export JIUWENCLAW_ROOT=$(shell_quote "$RUNTIME_ROOT")"
-  runtime_cmd+=" && export JIUWENCLAW_PROJECT_ROOT=$(shell_quote "$RUNTIME_ROOT")"
-  runtime_cmd+=" && export AGENT_SERVER_PORT=$(shell_quote "$RUNTIME_AGENT_PORT")"
-  runtime_cmd+=" && export WEB_PORT=$(shell_quote "$RUNTIME_WEB_PORT")"
-  runtime_cmd+=" && export GATEWAY_PORT=$(shell_quote "$RUNTIME_GATEWAY_PORT")"
-  runtime_cmd+=" && export FRONTEND_PORT=$(shell_quote "$RUNTIME_UI_PORT")"
-  runtime_cmd+=" && exec uv run jiuwenclaw-start $(shell_quote "$RUNTIME_MODE") --name $(shell_quote "$RUNTIME_INSTANCE") >> $(shell_quote "$LOG_DIR/runtime.log") 2>&1"
+  runtime_cmd+=" && exec uv run --locked jiuwenswarm-start $(shell_quote "$RUNTIME_MODE") --name $(shell_quote "$RUNTIME_INSTANCE") >> $(shell_quote "$LOG_DIR/runtime.log") 2>&1"
   start_detached_service "$RUNTIME_INSTANCE" "$RUNTIME_PID_FILE" "$runtime_cmd"
 
   wait_for_port "$RUNTIME_AGENT_PORT" "Agent runtime" 180

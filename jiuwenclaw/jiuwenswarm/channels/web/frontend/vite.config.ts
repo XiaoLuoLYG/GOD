@@ -153,9 +153,15 @@ function safeStringify(v: unknown): string {
 
 /**
  * file-api 使用的项目根目录，需与后端 get_root_dir() 一致。
- * 优先级：环境变量 > 已存在的用户工作区 ~/.jiuwenswarm > 仓库根。
+ * 优先级：命名实例数据目录 > 显式根目录 > 已存在的用户工作区 ~/.jiuwenswarm > 仓库根。
  */
 function resolveProjectRootDir(): string {
+  const envWorkspace = process.env.JIUWENSWARM_DATA_DIR
+  if (envWorkspace) {
+    const resolved = path.resolve(envWorkspace)
+    console.log('[file-api] 使用 JIUWENSWARM_DATA_DIR:', resolved)
+    return resolved
+  }
   const envRoot = process.env.JIUWENSWARM_ROOT || process.env.JIUWENSWARM_PROJECT_ROOT
   if (envRoot) {
     const resolved = path.resolve(envRoot)
@@ -164,12 +170,6 @@ function resolveProjectRootDir(): string {
   }
   const home = process.env.USERPROFILE || process.env.HOME || ''
   if (home) {
-    // 优先检查多实例环境变量
-    const envWorkspace = process.env.JIUWENSWARM_DATA_DIR
-    if (envWorkspace) {
-      console.log('[file-api] 使用 JIUWENSWARM_DATA_DIR:', path.resolve(envWorkspace))
-      return path.resolve(envWorkspace)
-    }
     const userWorkspace = path.join(home, '.jiuwenswarm')
     if (fs.existsSync(userWorkspace)) {
       console.log('[file-api] 使用用户工作区:', path.resolve(userWorkspace))

@@ -19,8 +19,10 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import math
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -268,6 +270,38 @@ def _reap_lingering_tree(child: _Child) -> None:
             os.killpg(proc.pid, signal.SIGKILL)
 
 
+def _wait_for_agent_server(process: subprocess.Popen, env: Mapping[str, str]) -> None:
+    host = (env.get("AGENT_SERVER_HOST") or "").strip() or "127.0.0.1"
+    connect_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
+    port = int(env.get("AGENT_SERVER_PORT") or env.get("AGENT_PORT") or "18092")
+    raw_timeout = (
+        env.get("JIUWENSWARM_AGENT_SERVER_STARTUP_TIMEOUT")
+        or env.get("JIUWENCLAW_AGENT_SERVER_STARTUP_TIMEOUT")
+        or env.get("AGENT_SERVER_STARTUP_TIMEOUT")
+        or "180"
+    )
+    timeout = float(raw_timeout)
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError(f"Invalid AgentServer startup timeout: {raw_timeout}")
+    deadline = time.monotonic() + timeout
+    last_error = None
+    while time.monotonic() < deadline:
+        if (returncode := process.poll()) is not None:
+            raise RuntimeError(
+                f"AgentServer exited before it became ready on {connect_host}:{port} "
+                f"(exit code {returncode})."
+            )
+        try:
+            with socket.create_connection((connect_host, port), timeout=0.5):
+                return
+        except OSError as exc:
+            last_error = exc
+            time.sleep(0.1)
+    raise RuntimeError(
+        f"AgentServer did not become ready on {connect_host}:{port} within {timeout:g}s."
+    ) from last_error
+
+
 def supervise(commands: Mapping[str, Sequence[str]], popen_kwargs: Mapping[str, Any]) -> int:
     """Run *commands* (spawned in order) until one stops for good; return its exit code.
 
@@ -281,6 +315,8 @@ def supervise(commands: Mapping[str, Sequence[str]], popen_kwargs: Mapping[str, 
         # around a spawn would have let it orphan the children already started.
         for child in children:
             child.spawn(popen_kwargs)
+            if child.name == "agentserver" and child.proc is not None:
+                _wait_for_agent_server(child.proc, popen_kwargs.get("env", os.environ))
         while True:
             for child in children:
                 proc = child.proc

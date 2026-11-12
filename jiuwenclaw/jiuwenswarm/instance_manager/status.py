@@ -185,7 +185,10 @@ def _find_pid_by_port(port: int) -> Optional[int]:
                 result = subprocess.run(
                     [
                         _get_system_executable("lsof"),
-                        "-i", f":{port}", "-t"
+                        "-nP",
+                        f"-iTCP:{port}",
+                        "-sTCP:LISTEN",
+                        "-t",
                     ],
                     capture_output=True,
                     text=True,

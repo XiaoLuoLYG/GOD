@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import signal
 import time
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import psutil
@@ -72,6 +73,7 @@ def clock(monkeypatch) -> _Clock:
     )
     monkeypatch.setattr(process_supervision, "sys", SimpleNamespace(platform="linux"))
     monkeypatch.setattr(process_supervision, "_upgrade_pending_for", lambda pid: False)
+    monkeypatch.setattr(process_supervision.socket, "create_connection", lambda *a, **kw: nullcontext())
     return clock
 
 
@@ -313,7 +315,7 @@ def test_posix_respawn_kills_the_dead_childs_process_group(monkeypatch, clock):
     monkeypatch.setattr(
         process_supervision,
         "os",
-        SimpleNamespace(killpg=lambda pgid, sig: killpg_calls.append((pgid, sig))),
+        SimpleNamespace(environ={}, killpg=lambda pgid, sig: killpg_calls.append((pgid, sig))),
     )
 
     assert supervise(_COMMANDS, {"start_new_session": True}) == 0
@@ -334,7 +336,7 @@ def test_posix_respawn_without_own_session_skips_killpg(monkeypatch, clock):
     monkeypatch.setattr(
         process_supervision,
         "os",
-        SimpleNamespace(killpg=lambda pgid, sig: killpg_calls.append((pgid, sig))),
+        SimpleNamespace(environ={}, killpg=lambda pgid, sig: killpg_calls.append((pgid, sig))),
     )
 
     assert supervise(_COMMANDS, {}) == 0
@@ -446,3 +448,41 @@ def test_exit_breadcrumbs_record_the_supervisor_decisions(monkeypatch, clock, br
     assert events[0]["uptime_seconds"] == 40.0
     assert events[0]["pid"]
     assert events[0]["time"]
+
+
+def test_gateway_waits_for_a_slow_agentserver(monkeypatch, clock):
+    spawned = _script_children(
+        monkeypatch, clock, {"agentserver": [(90, 0)], "gateway": [(1, 0)]}
+    )
+
+    def connect(address, timeout):
+        assert address == ("127.0.0.1", 19092)
+        assert len(spawned) == 1
+        if clock.now < 65:
+            raise ConnectionRefusedError
+        return nullcontext()
+
+    monkeypatch.setattr(process_supervision.socket, "create_connection", connect)
+    assert supervise(_COMMANDS, {"env": {"AGENT_SERVER_HOST": "0.0.0.0", "AGENT_SERVER_PORT": "19092"}}) == 0
+    assert [name for name, _ in spawned] == ["agentserver", "gateway"]
+    assert clock.now >= 65
+
+
+def test_readiness_timeout_cleans_up_before_spawning_gateway(monkeypatch, clock):
+    spawned = _script_children(monkeypatch, clock, {"agentserver": [(None, 0)]})
+
+    def connect(*args, **kwargs):
+        raise ConnectionRefusedError
+
+    monkeypatch.setattr(process_supervision.socket, "create_connection", connect)
+    with pytest.raises(RuntimeError, match="within 1s"):
+        supervise(_COMMANDS, {"env": {"JIUWENCLAW_AGENT_SERVER_STARTUP_TIMEOUT": "1"}})
+    assert [name for name, _ in spawned] == ["agentserver"]
+    assert spawned[0][1].terminated
+
+
+def test_agentserver_exit_prevents_gateway_start(monkeypatch, clock):
+    spawned = _script_children(monkeypatch, clock, {"agentserver": [(0, 3)]})
+    with pytest.raises(RuntimeError, match="exited before it became ready.*exit code 3"):
+        supervise(_COMMANDS, {"env": {}})
+    assert [name for name, _ in spawned] == ["agentserver"]

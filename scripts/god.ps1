@@ -102,7 +102,6 @@ $script:StartRequestFile = Join-Path $script:RunDir "start-request.json"
 $script:BackendLog = Join-Path $script:LogDir "backend.log"
 $script:FrontendLog = Join-Path $script:LogDir "frontend.log"
 $script:RuntimeLog = Join-Path $script:LogDir "runtime.log"
-$script:RuntimeInitLog = Join-Path $script:LogDir "runtime-init.log"
 
 function Get-EnvValue {
   param(
@@ -470,10 +469,6 @@ function Get-ConfiguredState {
   return "configured"
 }
 
-function Get-RuntimeWorkspace {
-  return Join-PathMany $HOME ".jiuwenclaw-instances" $script:RuntimeInstance
-}
-
 function Ensure-EnvFile {
   $envWasCreated = $false
   if (-not (Test-Path $script:EnvFile)) {
@@ -834,7 +829,7 @@ function Stop-RuntimeInstance {
   }
   Push-Location $script:RuntimeRoot
   try {
-    Invoke-NativeCommand -FilePath (Get-ToolPath @("uv")) -ArgumentList @("run", "jiuwenclaw-start", "--stop", $Name) *> $null
+    Invoke-NativeCommand -FilePath (Get-ToolPath @("uv")) -ArgumentList @("run", "--locked", "jiuwenswarm-start", "--stop", $Name) *> $null
   } catch {
   } finally {
     Pop-Location
@@ -885,31 +880,13 @@ function Remove-RuntimeRegistryEntries {
     return
   }
   $names = @($script:RuntimeInstance) + $script:RuntimeLegacyInstances
-  $nameArgs = ($names | ForEach-Object { Quote-PSLiteral $_ }) -join ", "
-  $code = @"
-from pathlib import Path
-from ruamel.yaml import YAML
-
-names = {$nameArgs}
-path = Path.home() / ".jiuwenclaw" / "instances.yaml"
-if not path.exists():
-    raise SystemExit(0)
-yaml = YAML()
-data = yaml.load(path.read_text(encoding="utf-8")) or {}
-instances = data.get("instances")
-if not isinstance(instances, dict):
-    raise SystemExit(0)
-for name in names:
-    instances.pop(name, None)
-if instances:
-    with path.open("w", encoding="utf-8") as f:
-        yaml.dump(data, f)
-else:
-    path.unlink()
-"@
+  $helper = Join-PathMany $script:RootDir "scripts" "god_runtime_instance.py"
   Push-Location $script:RuntimeRoot
   try {
-    $code | & (Get-ToolPath @("uv")) run python -
+    & (Get-ToolPath @("uv")) run --locked python $helper forget @names
+    if ($LASTEXITCODE -ne 0) {
+      Write-GodLog "Could not update runtime registry; continuing reset"
+    }
   } catch {
     Write-GodLog "Could not update runtime registry; continuing reset"
   } finally {
@@ -923,15 +900,20 @@ function Reset-Factory {
   Stop-All
   Remove-ExperimentRuns
   Remove-RuntimeRegistryEntries
+  $runtimeHome = Get-EnvValue "JIUWENSWARM_HOME" $HOME
   foreach ($name in @($script:RuntimeInstance) + $script:RuntimeLegacyInstances) {
-    Remove-PathSafe (Join-PathMany $HOME ".jiuwenclaw-instances" $name) "runtime instance state"
+    if ($name -notmatch '^[a-zA-Z0-9_-]{1,64}$') {
+      continue
+    }
+    Remove-PathSafe (Join-PathMany $HOME ".jiuwenclaw-instances" $name) "legacy runtime instance state"
+    Remove-PathSafe (Join-PathMany $runtimeHome ".jiuwenswarm-instances" $name) "runtime instance state"
   }
   Remove-PathSafe $script:EnvFile ".env"
   Remove-PathSafe $script:StateDir "state and logs"
   Remove-PathSafe (Join-Path $script:BackendRoot ".venv") "backend virtualenv"
   Remove-PathSafe (Join-Path $script:RuntimeRoot ".venv") "runtime virtualenv"
   Remove-PathSafe (Join-PathMany $script:BackendRoot "frontend" "node_modules") "frontend dependencies"
-  Remove-PathSafe (Join-PathMany $script:RuntimeRoot "jiuwenclaw" "channels" "web" "frontend" "node_modules") "runtime UI dependencies"
+  Remove-PathSafe (Join-PathMany $script:RuntimeRoot "jiuwenswarm" "channels" "web" "frontend" "node_modules") "runtime UI dependencies"
   Write-GodLog "Factory reset complete."
 }
 
@@ -1030,7 +1012,7 @@ function Setup-Dependencies {
   Invoke-CheckedCommand -FilePath $uv -Arguments @("sync", "--managed-python") -WorkingDirectory $script:BackendRoot
 
   Write-GodLog "Syncing agent runtime Python dependencies"
-  Invoke-CheckedCommand -FilePath $uv -Arguments @("sync", "--managed-python") -WorkingDirectory $script:RuntimeRoot
+  Invoke-CheckedCommand -FilePath $uv -Arguments @("sync", "--locked", "--managed-python") -WorkingDirectory $script:RuntimeRoot
 
   $backendFrontend = Join-Path $script:BackendRoot "frontend"
   if ((-not (Test-Path (Join-Path $backendFrontend "node_modules"))) -or (Get-EnvValue "GOD_FORCE_SETUP" "0") -eq "1") {
@@ -1038,15 +1020,15 @@ function Setup-Dependencies {
     Invoke-CheckedCommand -FilePath $npm -Arguments @("install", "--no-audit", "--no-fund", "--loglevel=error") -WorkingDirectory $backendFrontend
   }
 
-  $runtimeFrontend = Join-PathMany $script:RuntimeRoot "jiuwenclaw" "channels" "web" "frontend"
+  $runtimeFrontend = Join-PathMany $script:RuntimeRoot "jiuwenswarm" "channels" "web" "frontend"
   if ((-not (Test-Path (Join-Path $runtimeFrontend "node_modules"))) -or (Get-EnvValue "GOD_FORCE_SETUP" "0") -eq "1") {
     Write-GodLog "Installing runtime UI dependencies"
-    Invoke-CheckedCommand -FilePath $npm -Arguments @("install", "--no-audit", "--no-fund", "--loglevel=error") -WorkingDirectory $runtimeFrontend
+    Invoke-CheckedCommand -FilePath $npm -Arguments @("ci", "--no-audit", "--no-fund", "--loglevel=error") -WorkingDirectory $runtimeFrontend
   }
 }
 
 function Sync-RuntimeModelEnv {
-  $workspace = Get-RuntimeWorkspace
+  param([string]$Workspace)
   if (-not (Test-Path $workspace)) {
     return
   }
@@ -1072,91 +1054,22 @@ function Sync-RuntimeModelEnv {
 function Ensure-RuntimeInstance {
   Setup-Dependencies
   $uv = Get-ToolPath @("uv")
-  $existing = $false
+  $helper = Join-PathMany $script:RootDir "scripts" "god_runtime_instance.py"
+  $arguments = @(
+    "run", "--locked", "python", $helper, "configure",
+    $script:RuntimeInstance, $script:RuntimeLanguage,
+    $script:RuntimeAgentPort, $script:RuntimeWebPort, $script:RuntimeGatewayPort, $script:RuntimeUiPort
+  )
   Push-Location $script:RuntimeRoot
   try {
-    Invoke-NativeCommand -FilePath $uv -ArgumentList @("run", "jiuwenclaw-start", "--status", $script:RuntimeInstance) *> $null
-    $existing = ($LASTEXITCODE -eq 0)
-  } finally {
-    Pop-Location
-  }
-
-  if (-not $existing) {
-    Write-GodLog "Initializing agent runtime instance (default language: $($script:RuntimeLanguage))"
-    Write-TextUtf8NoBom $script:RuntimeInitLog ""
-    $workspace = Get-RuntimeWorkspace
-    $initInput = if (Test-Path $workspace) { "yes`n$($script:RuntimeLanguage)`n" } else { "$($script:RuntimeLanguage)`n" }
-    Push-Location $script:RuntimeRoot
-    try {
-      $initInput | Invoke-NativeCommand -FilePath $uv -ArgumentList @("run", "jiuwenclaw-init", "--name", $script:RuntimeInstance) -LogPath $script:RuntimeInitLog
-      if ($LASTEXITCODE -ne 0) {
-        Get-Content $script:RuntimeInitLog -Tail 80 -ErrorAction SilentlyContinue | ForEach-Object { Write-GodDiagnostic $_ }
-        Stop-God "Failed to initialize agent runtime instance"
-      }
-    } finally {
-      Pop-Location
-    }
-  }
-
-  $code = @'
-import os
-from pathlib import Path
-from ruamel.yaml import YAML
-
-name = os.environ["RUNTIME_INSTANCE"]
-path = Path.home() / ".jiuwenclaw" / "instances.yaml"
-path.parent.mkdir(parents=True, exist_ok=True)
-yaml = YAML()
-data = yaml.load(path.read_text(encoding="utf-8")) if path.exists() else None
-if not isinstance(data, dict):
-    data = {"instances": {}}
-instances = data.setdefault("instances", {})
-entry = instances.setdefault(name, {})
-workspace = entry.get("workspace") or str(Path.home() / ".jiuwenclaw-instances" / name)
-entry["workspace"] = workspace
-entry["ports"] = {
-    "agent_server": int(os.environ["RUNTIME_AGENT_PORT"]),
-    "web": int(os.environ["RUNTIME_WEB_PORT"]),
-    "gateway": int(os.environ["RUNTIME_GATEWAY_PORT"]),
-    "frontend": int(os.environ["RUNTIME_UI_PORT"]),
-}
-with path.open("w", encoding="utf-8") as f:
-    yaml.dump(data, f)
-
-workspace_path = Path(workspace).expanduser()
-workspace_path.mkdir(parents=True, exist_ok=True)
-bootstrap_env = workspace_path / ".env"
-bootstrap_env.write_text(
-    "\n".join(
-        [
-            f"# Bootstrap .env for runtime instance: {name}",
-            f"JIUWENCLAW_DATA_DIR={workspace_path}",
-            f"JIUWENCLAW_INSTANCE={name}",
-            f"AGENT_SERVER_PORT={os.environ['RUNTIME_AGENT_PORT']}",
-            f"WEB_PORT={os.environ['RUNTIME_WEB_PORT']}",
-            f"GATEWAY_PORT={os.environ['RUNTIME_GATEWAY_PORT']}",
-            f"FRONTEND_PORT={os.environ['RUNTIME_UI_PORT']}",
-            "",
-        ]
-    ),
-    encoding="utf-8",
-)
-'@
-  Set-ProcessEnv "RUNTIME_INSTANCE" $script:RuntimeInstance
-  Set-ProcessEnv "RUNTIME_AGENT_PORT" ([string]$script:RuntimeAgentPort)
-  Set-ProcessEnv "RUNTIME_WEB_PORT" ([string]$script:RuntimeWebPort)
-  Set-ProcessEnv "RUNTIME_GATEWAY_PORT" ([string]$script:RuntimeGatewayPort)
-  Set-ProcessEnv "RUNTIME_UI_PORT" ([string]$script:RuntimeUiPort)
-  Push-Location $script:RuntimeRoot
-  try {
-    $code | Invoke-NativeCommand -FilePath $uv -ArgumentList @("run", "python", "-")
+    $workspace = (Invoke-NativeCommand -FilePath $uv -ArgumentList $arguments | ConvertFrom-Json).workspace
     if ($LASTEXITCODE -ne 0) {
-      Stop-God "Failed to update runtime instance registry"
+      Stop-God "Failed to configure runtime instance"
     }
   } finally {
     Pop-Location
   }
-  Sync-RuntimeModelEnv
+  Sync-RuntimeModelEnv $workspace
 }
 
 function Prepare-Experiment {
@@ -1234,18 +1147,10 @@ function Start-Runtime {
   Write-GodLog "Starting agent runtime"
   Write-TextUtf8NoBom $script:RuntimeLog ""
   $uv = Get-ToolPath @("uv")
-  $runtimeDataDir = Get-RuntimeWorkspace
   $runtimeCmd = @(
     "`$ErrorActionPreference = 'Stop'",
     "Set-Location $(Quote-PSLiteral $script:RuntimeRoot)",
-    "`$env:JIUWENCLAW_DATA_DIR = $(Quote-PSLiteral $runtimeDataDir)",
-    "`$env:JIUWENCLAW_ROOT = $(Quote-PSLiteral $script:RuntimeRoot)",
-    "`$env:JIUWENCLAW_PROJECT_ROOT = $(Quote-PSLiteral $script:RuntimeRoot)",
-    "`$env:AGENT_SERVER_PORT = $(Quote-PSLiteral ([string]$script:RuntimeAgentPort))",
-    "`$env:WEB_PORT = $(Quote-PSLiteral ([string]$script:RuntimeWebPort))",
-    "`$env:GATEWAY_PORT = $(Quote-PSLiteral ([string]$script:RuntimeGatewayPort))",
-    "`$env:FRONTEND_PORT = $(Quote-PSLiteral ([string]$script:RuntimeUiPort))",
-    (Get-DetachedNativeExecLine -FilePath $uv -ArgumentExpression "run jiuwenclaw-start $(Quote-PSLiteral $script:RuntimeMode) --name $(Quote-PSLiteral $script:RuntimeInstance)" -LogPath $script:RuntimeLog)
+    (Get-DetachedNativeExecLine -FilePath $uv -ArgumentExpression "run --locked jiuwenswarm-start $(Quote-PSLiteral $script:RuntimeMode) --name $(Quote-PSLiteral $script:RuntimeInstance)" -LogPath $script:RuntimeLog)
   ) -join "; "
   Start-DetachedService -SessionName $script:RuntimeInstance -PidFile $script:RuntimePidFile -Command $runtimeCmd -LogPath $script:RuntimeLog
 

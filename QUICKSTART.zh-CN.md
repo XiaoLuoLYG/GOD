@@ -44,6 +44,8 @@ Windows PowerShell：
 
 `start` 是日常使用的一键入口；它可以重复执行，已经运行的服务会被复用。
 
+如果正在使用内置 JiuwenClaw 的旧版 GOD，请在更新代码前先运行 `stop`。升级到 JiuwenSwarm 后，首次启动会沿用原有的运行时实例工作区，并将其中的智能体数据复制到新目录。
+
 第一次运行会自动完成：
 
 1. 从 `.env.example` 创建 `.env`。
