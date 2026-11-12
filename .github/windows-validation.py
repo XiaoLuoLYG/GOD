@@ -191,6 +191,7 @@ $probeLog = Join-Path $env:RUNNER_TEMP 'god-stdin-assert.log'
 Set-Content -LiteralPath $probeFile -Encoding Ascii -Value "import sys; print(' '.join(line.hex() for line in sys.stdin.buffer.read().splitlines() if line))"
 $uv = (Get-Command uv.exe).Source
 $beforeEncoding = $OutputEncoding
+$beforeConsoleInput = [Console]::InputEncoding
 $cases = [ordered]@{ "en`n" = '656e'; "zh`n" = '7a68'; "yes`nen`n" = '796573 656e' }
 foreach ($sample in $cases.GetEnumerator()) {
   Remove-Item -LiteralPath $probeLog -ErrorAction SilentlyContinue
@@ -199,6 +200,9 @@ foreach ($sample in $cases.GetEnumerator()) {
   $actualBytes = (Get-Content -LiteralPath $probeLog -Encoding UTF8 -Raw).Trim()
   if ($actualBytes -ne $sample.Value) { throw "Native stdin has unexpected bytes: $actualBytes; expected $($sample.Value)" }
   if (-not [object]::ReferenceEquals($beforeEncoding, $OutputEncoding)) { throw 'Invoke-NativeCommand changed caller OutputEncoding' }
+  if ($beforeConsoleInput.CodePage -ne [Console]::InputEncoding.CodePage -or $beforeConsoleInput.GetPreamble().Length -ne [Console]::InputEncoding.GetPreamble().Length) {
+    throw 'Invoke-NativeCommand changed the caller console input encoding'
+  }
 }
 Write-Host 'PASS exact PowerShell wrapper sends BOM-free en, zh, and yes/en to native uv subprocesses'
 """
