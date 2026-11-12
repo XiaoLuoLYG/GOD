@@ -1048,7 +1048,7 @@ function Setup-Dependencies {
   Write-GodLog "Syncing agent runtime Python dependencies"
   Invoke-CheckedCommand -FilePath $uv -Arguments @("sync", "--locked", "--managed-python") -WorkingDirectory $script:RuntimeRoot
 
-  $runtimeFrontend = Join-PathMany $script:RuntimeRoot "jiuwenclaw" "channels" "web" "frontend"
+  $runtimeFrontend = Join-PathMany $script:RuntimeRoot "jiuwenswarm" "channels" "web" "frontend"
   if ((-not (Test-Path (Join-Path $runtimeFrontend "node_modules"))) -or (Get-EnvValue "GOD_FORCE_SETUP" "0") -eq "1") {
     Write-GodLog "Installing runtime UI dependencies"
     Invoke-CheckedCommand -FilePath $npm -Arguments @("ci", "--no-audit", "--no-fund", "--loglevel=error") -WorkingDirectory $runtimeFrontend
