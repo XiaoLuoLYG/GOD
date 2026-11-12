@@ -236,7 +236,18 @@ Write-Host "PASS idempotent Windows PATH refresh and nested cmd.exe node lookup 
         assert selection["hypothesis_id"] == EXP and selection["map_id"] == "pku"
         assert selection["start_request"]["hypothesis_id"] == EXP
         print("PASS model configuration with key redaction and selection of the PKU experiment", flush=True)
-        assert process.wait(timeout=900) == 0, "launcher start returned failure"
+        start_code = process.wait(timeout=900)
+        if start_code != 0:
+            print(f"Native start exit: {start_code} ({start_code & 0xffffffff:#010x})", flush=True)
+            native_log = LOG.read_bytes()
+            if b"brains\\config.py" in native_log and b"Command failed" in native_log:
+                checker = Path("packages/agentsociety2/agentsociety2/agent/brains/config.py")
+                result = subprocess.run(
+                    ["uv", "run", "--no-project", "--managed-python", "python", str(checker), str(config_path)],
+                    cwd=ROOT / "agentsociety", env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30,
+                )
+                print(f"Direct gate immediately after failure: exit={result.returncode}, stdout={result.stdout!r}, stderr={result.stderr!r}", flush=True)
+        assert start_code == 0, "launcher start returned failure"
         assert (STATE / "run" / "start-request.json.consumed").exists(), "setup start request was not consumed"
         state = live("status")
         assert state["hypothesis_id"] == EXP and state["step_count"] == 1 and not state["error"], state

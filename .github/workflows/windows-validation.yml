@@ -19,9 +19,6 @@ jobs:
           - label: Updated combined / OpenAI compatible / normal PATH
             ref: dc8b0dcbe31b2892cec47f5c68853dedc9854310
             mode: external
-          - label: Updated combined / JiuwenSwarm migration / normal PATH
-            ref: dc8b0dcbe31b2892cec47f5c68853dedc9854310
-            mode: migration
     steps:
       - name: Enable long Git paths
         run: git config --global core.longpaths true
