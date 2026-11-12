@@ -98,7 +98,32 @@ http://127.0.0.1:5174/pixel-replay/god_town/1
 ./scripts/god.sh status
 ```
 
-所有服务都应显示 `up`。
+后端和控制台应显示 `up`。当有居民用九问选择技能或回答 Ask 时，才需要九问服务。
+
+### 选择 Agent 后端
+
+在当前实验的 `init/init_config.json` 中设置 `agent_backend`。居民可以用 `kwargs.brain` 覆盖实验配置。两者都未设置时，GOD 先读取本机的 `GOD_AGENT_BACKEND`，再使用默认的 `jiuwenclaw`。已有的 `JiuwenClawAgent` 记录也可以这样切换后端。
+
+```json
+{
+  "agent_backend": {"type": "jev", "ask_backend": "openai_compat"}
+}
+```
+
+| 后端 | 本机配置 | 能力 |
+| --- | --- | --- |
+| `jiuwenclaw` | GOD 的常规模型配置 | 技能选择和 Ask |
+| `openai_compat` | `GOD_LLM_API_BASE`、`GOD_LLM_API_KEY`、`GOD_LLM_MODEL` | 技能选择和 Ask |
+| `command` | `GOD_AGENT_COMMANDS`，用 JSON 对象把命令配置名映射到参数数组 | 技能选择和 Ask |
+| `jev` | `TYPESAFE_API_KEY` | 技能选择 |
+| `decision_api` | 兼容 System One 的 `GOD_DECISION_API_URL`、`GOD_DECISION_API_KEY`、`GOD_DECISION_MODEL` | 技能选择 |
+| `openai_decisions` | 官方接口用 `OPENAI_API_KEY`，兼容接口用 `GOD_OPENAI_DECISIONS_URL` 和 `GOD_OPENAI_DECISIONS_API_KEY` | 技能选择 |
+
+只做决策的后端从已挂载且没有必填参数的技能里选。可以通过 `ask_backend` 或本机的 `GOD_AGENT_ASK_BACKEND` 单独指定问答后端。GOD 执行技能，并在运行记录中保存 `decision_backend` 和是否触发后备选择。
+
+把服务地址、密钥和命令参数留在本机 `.env`。例如 `{"type":"command","profile":"local-agent"}` 会从本机的 `GOD_AGENT_COMMANDS` 选择命令。受信任的包装脚本从 stdin 读提示词，从 stdout 输出含 `selected_skill_id` 和 `args` 的 JSON，或输出 Ask 的纯文本答案。只需选择和问答时，在包装脚本中禁用工具。
+
+更改后端设置后，运行 `./scripts/god.sh restart`。
 
 ## 6. 重启或重新开跑
 

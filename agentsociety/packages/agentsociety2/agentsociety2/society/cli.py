@@ -48,6 +48,7 @@ def _disable_posthog_import():
 _disable_posthog_import()
 
 from agentsociety2.agent import AgentBase
+from agentsociety2.agent.brains import inject_experiment_backend
 from agentsociety2.env import CodeGenRouter, EnvBase
 from agentsociety2.registry import (
     get_registered_env_modules,
@@ -259,6 +260,7 @@ class ExperimentRunner:
     def _create_agents(
         self,
         agent_args: List[Dict[str, Any]],
+        agent_backend: Any = None,
     ) -> List[AgentBase]:
         """创建 agent 实例。"""
         agents = []
@@ -295,6 +297,11 @@ class ExperimentRunner:
             else:
                 init_kwargs["id"] = int(init_kwargs["id"])
 
+            init_kwargs = inject_experiment_backend(
+                agent_class,
+                init_kwargs,
+                agent_backend,
+            )
             agent = agent_class(**init_kwargs)
             agents.append(agent)
 
@@ -420,7 +427,7 @@ class ExperimentRunner:
             env_router.run_dir = self.run_dir.resolve()
 
             logger.info(f"Creating {len(agent_args)} agents...")
-            agents = self._create_agents(agent_args)
+            agents = self._create_agents(agent_args, agent_backend=config.agent_backend)
 
             logger.info("Creating AgentSociety instance...")
             self.society = AgentSociety(

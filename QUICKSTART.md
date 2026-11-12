@@ -98,7 +98,32 @@ If the browser did not open automatically, open that URL. You should see the pix
 ./scripts/god.sh status
 ```
 
-You should see every service marked `up`.
+The backend and control room should be `up`. JiuwenClaw services are needed when a resident uses JiuwenClaw for skill selection or Ask.
+
+### Choose an agent backend
+
+Set `agent_backend` in the current experiment's `init/init_config.json`. A resident can override it with `kwargs.brain`. GOD then falls back to the local `GOD_AGENT_BACKEND` setting and finally to `jiuwenclaw`. Existing `JiuwenClawAgent` records can use any backend through these settings.
+
+```json
+{
+  "agent_backend": {"type": "jev", "ask_backend": "openai_compat"}
+}
+```
+
+| Backend | Local settings | Capabilities |
+| --- | --- | --- |
+| `jiuwenclaw` | Standard GOD model settings | Skill selection and Ask |
+| `openai_compat` | `GOD_LLM_API_BASE`, `GOD_LLM_API_KEY`, `GOD_LLM_MODEL` | Skill selection and Ask |
+| `command` | `GOD_AGENT_COMMANDS`, a JSON object mapping profile names to argument arrays | Skill selection and Ask |
+| `jev` | `TYPESAFE_API_KEY` | Skill selection |
+| `decision_api` | `GOD_DECISION_API_URL`, `GOD_DECISION_API_KEY`, `GOD_DECISION_MODEL` for a System One-compatible endpoint | Skill selection |
+| `openai_decisions` | `OPENAI_API_KEY` for the OpenAI Decisions endpoint, or `GOD_OPENAI_DECISIONS_URL` and `GOD_OPENAI_DECISIONS_API_KEY` for a compatible endpoint | Skill selection |
+
+The choice-only backends receive mounted skills that have no required arguments. Pair them with an Ask backend using `ask_backend` or the local default `GOD_AGENT_ASK_BACKEND`. GOD runs the selected skill and records `decision_backend` and any fallback in the run data.
+
+Keep provider URLs, keys and command arguments in the local `.env`. A `command` backend such as `{"type":"command","profile":"local-agent"}` selects a profile from that machine's `GOD_AGENT_COMMANDS`. The trusted wrapper reads the prompt from stdin and writes a skill decision object with `selected_skill_id` and `args`, or a plain-text Ask answer, to stdout. Configure wrappers with tools disabled when they only need to select or answer.
+
+Run `./scripts/god.sh restart` after changing the backend settings.
 
 ## 6. Restart or run fresh
 
