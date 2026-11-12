@@ -22,6 +22,7 @@ from agentsociety2.agent.brains.base import (
     decision_from_text,
 )
 
+
 class JiuwenClawBrain(AgentBrain):
     """Default backend. Session memory stays in the JiuwenClaw server."""
 

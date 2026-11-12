@@ -454,6 +454,10 @@ def test_typed_brain_decision_is_used_and_ask_can_use_another_backend(monkeypatc
 
         async def ask(self, req):
             self.answered += 1
+            if req.response_type == "choice":
+                assert req.time == _choice_kwargs()["t"]
+                assert req.readonly
+                return req.choices[0]
             return f"answered: {req.message}"
 
         def dump(self):
@@ -473,11 +477,14 @@ def test_typed_brain_decision_is_used_and_ask_can_use_another_backend(monkeypatc
         assert decision["args"] == {"tone": "warm"}
         assert decision.get("fallback") is not True
         assert await agent.ask("hello") == "answered: hello"
+        assert await agent.answer_external_question(
+            "Morning or evening?", t=_choice_kwargs()["t"], response_type="choice", choices=["Morning", "Evening"]
+        ) == "Morning"
         snapshot = await agent.dump()
-        assert snapshot["backend_states"] == {"ask": {"backend": TestAsk.name, "state": {"answered": 1}}}
+        assert snapshot["backend_states"] == {"ask": {"backend": TestAsk.name, "state": {"answered": 2}}}
         resumed = _agent(brain={"type": TypedChoice.name, "ask_backend": TestAsk.name})
         await resumed.load(snapshot)
-        assert resumed._ask_brain.answered == 1
+        assert resumed._ask_brain.answered == 2
 
     anyio.run(run_case)
 

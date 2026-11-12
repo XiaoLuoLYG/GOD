@@ -204,7 +204,7 @@ def _contains_latin_text_outside_terms(value: Any, allowed_terms: list[str]) -> 
 
 
 class JiuwenClawAgent(AgentBase):
-    """AgentSociety2 AgentBase adapter for a running JiuwenClaw AgentServer."""
+    """AgentSociety2 skill host with selectable decision and Ask backends."""
 
     _request_semaphore: ClassVar[asyncio.Semaphore | None] = None
     _request_semaphore_limit: ClassVar[int | None] = None
@@ -318,9 +318,9 @@ class JiuwenClawAgent(AgentBase):
 
     @classmethod
     def mcp_description(cls) -> str:
-        return """JiuwenClawAgent: AgentSociety2 custom agent backed by JiuwenClaw
+        return """JiuwenClawAgent: AgentSociety2 custom agent with selectable backends
 
-Runs JiuwenClaw as an external AgentServer and communicates over WebSocket.
+The default backend runs JiuwenClaw as an external AgentServer.
 
 Profile fields are free-form. Useful fields:
 - name: display name
@@ -332,15 +332,10 @@ Initialization example:
 {
   "id": 0,
   "profile": {
-    "name": "Jiuwen assistant",
-    "role": "JiuwenClaw-driven simulation agent"
+    "name": "Ada",
+    "role": "Town archivist"
   },
-  "jiuwenclaw_ws_url": "ws://127.0.0.1:18092",
-  "session_id": "agentsociety_agent_0",
-  "mode": "agent.plan",
-  "trusted_dirs": ["<path-to-GOD>/agentsociety"],
-  "enable_memory": true,
-  "enable_skill_runtime": true,
+  "brain": "openai_compat",
   "common_skill_ids": ["routine.daily", "social.reply", "memory.record", "map.navigate", "safety.respond"],
   "skill_ids": ["community.coordinate", "tools.repair"]
 }
@@ -420,12 +415,23 @@ Initialization example:
             f"{CHINESE_OUTPUT_POLICY}\n"
         )
 
-    async def ask(self, message: str, readonly: bool = True) -> str:
+    async def ask(
+        self,
+        message: str,
+        readonly: bool = True,
+        *,
+        response_type: str = "text",
+        choices: list[str] | None = None,
+        t: datetime | None = None,
+    ) -> str:
         if "ask" not in self._ask_brain.capabilities:
             raise RuntimeError(f"agent backend {self._ask_brain.name} does not support ask")
         answer = await self._ask_brain.ask(AskRequest(
             message=message,
             readonly=readonly,
+            response_type=response_type,
+            choices=choices,
+            time=t,
             prompt=self._build_ask_prompt(message, readonly),
         ))
         self._last_response = answer
@@ -447,7 +453,7 @@ Initialization example:
         response_type: str = "text",
         choices: list[str] | None = None,
     ) -> str:
-        """Answer live targeted Ask through the JiuwenClaw agent session."""
+        """Answer a targeted question through the configured Ask backend."""
 
         requirement = self._external_question_output_requirement(
             response_type,
@@ -458,11 +464,11 @@ Initialization example:
             f"当前模拟时间：{t.isoformat()}\n"
             f"输出要求：{requirement}\n"
             f"{CHINESE_OUTPUT_POLICY}\n"
-            "请以该智能体第一人称回答。以当前模拟状态、近期实时提问、角色档案和九问会话上下文为准。"
+            "请以该智能体第一人称回答，使用可用的模拟状态、近期提问、角色档案和会话上下文。"
             "只读提问不得改变 AgentSociety 环境。\n\n"
             f"问题：\n{prompt}"
         )
-        return await self.ask(message, readonly=True)
+        return await self.ask(message, readonly=True, response_type=response_type, choices=choices, t=t)
 
     async def step(self, tick: int, t: datetime) -> str:
         observation = await self._observe_environment()
