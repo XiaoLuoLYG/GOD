@@ -16,15 +16,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: Final PR 107 / OpenAI compatible / normal PATH
-            ref: a2178b146e7296a1d07b39b12e2da8dc726b975b
-            mode: external
-          - label: Final PR 107 / JiuwenClaw / normal PATH
-            ref: a2178b146e7296a1d07b39b12e2da8dc726b975b
-            mode: runtime
-          - label: Final combined / OpenAI compatible / normal PATH
-            ref: 6422dce2d19b6f09177c346fd57fd890a42a778b
-            mode: external
           - label: Final combined / JiuwenSwarm migration / normal PATH
             ref: 6422dce2d19b6f09177c346fd57fd890a42a778b
             mode: migration
