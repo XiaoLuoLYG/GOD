@@ -7,13 +7,15 @@ constructed when a config or ``GOD_AGENT_BACKEND`` selects it.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import time
 from dataclasses import dataclass
 from typing import Any
 
-from agentsociety2.agent.brains.base import AgentBrain, AskRequest, SkillChoiceRequest, SkillDecision
-from agentsociety2.agent.brains.jiuwenclaw import _decision_from_text
+from agentsociety2.agent.brains.base import AgentBrain, AskRequest, SkillChoiceRequest, SkillDecision, decision_from_text
+
+from agentsociety2.agent.brains.http import post_json as _post_json
 
 logger = logging.getLogger(__name__)
 _DEFAULT_TIMEOUT_S = 60.0
@@ -33,41 +35,20 @@ class OpenAICompatBrain(AgentBrain):
     name = "openai_compat"
     capabilities = frozenset({"choose_skill", "ask"})
 
-    def __init__(self, host: Any = None, config: dict[str, Any] | None = None) -> None:
-        self.host = host
-        self.config = dict(config or {})
-
     async def choose_skill(self, req: SkillChoiceRequest) -> SkillDecision:
-        prompt = self.host._build_skill_selection_prompt(
-            tick=req.tick,
-            t=req.time,
-            observation=req.observation,
-            catalog=req.catalog,
-            pending_interventions=req.pending_interventions,
-            broadcast_result=req.broadcast_result,
-        )
         started = time.perf_counter()
-        raw, usage = await self._complete(prompt)
-        decision = _decision_from_text(self.host, prompt, raw)
+        raw, usage = await self._complete(req.prompt)
+        decision = decision_from_text(req.prompt, raw)
         decision.usage = usage
         decision.latency_ms = (time.perf_counter() - started) * 1000
         _log_timing("choose_skill", decision.latency_ms, self._settings().model)
         return decision
 
     async def ask(self, req: AskRequest) -> str:
-        prompt = self.host._build_ask_prompt(message=req.message, readonly=req.readonly)
         started = time.perf_counter()
-        raw, _usage = await self._complete(prompt)
+        raw, _usage = await self._complete(req.prompt)
         _log_timing("ask", (time.perf_counter() - started) * 1000, self._settings().model)
         return raw
-
-    def dump(self) -> dict[str, Any]:
-        settings = self._settings()
-        return {
-            "type": self.name,
-            "model": settings.model,
-            "api_base": settings.api_base,
-        }
 
     def _settings(self) -> LLMSettings:
         return resolve_llm_settings(self.config)
@@ -89,16 +70,12 @@ class OpenAICompatBrain(AgentBrain):
 
 
 def resolve_llm_settings(config: dict[str, Any] | None = None) -> LLMSettings:
-    """Read GOD LLM settings. Overrides may name an env var, not the secret."""
+    """Bind the local connection settings to the operator's configuration."""
 
     values = config or {}
-    key_env = str(values.get("api_key_env") or "GOD_LLM_API_KEY")
-    api_key = os.getenv(key_env, "").strip()
-    if not api_key and key_env == "GOD_LLM_API_KEY":
-        api_key = os.getenv("AGENTSOCIETY_LLM_API_KEY", "").strip()
-    api_base = str(
-        values.get("api_base")
-        or os.getenv("GOD_LLM_API_BASE")
+    api_key = (os.getenv("GOD_LLM_API_KEY") or os.getenv("AGENTSOCIETY_LLM_API_KEY") or "").strip()
+    api_base = (
+        os.getenv("GOD_LLM_API_BASE")
         or os.getenv("AGENTSOCIETY_LLM_API_BASE")
         or "https://api.openai.com/v1"
     ).strip()
@@ -124,7 +101,7 @@ def _timeout_s(value: Any) -> float:
         timeout_s = float(value)
     except (TypeError, ValueError):
         timeout_s = _DEFAULT_TIMEOUT_S
-    return max(1.0, timeout_s)
+    return max(1.0, timeout_s) if math.isfinite(timeout_s) else _DEFAULT_TIMEOUT_S
 
 
 def _message_content(body: dict[str, Any]) -> str:
@@ -158,29 +135,3 @@ def _log_timing(kind: str, latency_ms: float, model: str) -> None:
         latency_ms,
         model,
     )
-
-
-async def _post_json(
-    url: str,
-    api_key: str,
-    payload: dict[str, Any],
-    timeout_s: float,
-) -> dict[str, Any]:
-    """POST a chat completion. Errors omit the response body."""
-
-    import aiohttp
-
-    timeout = aiohttp.ClientTimeout(total=timeout_s)
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post(url, json=payload, headers=headers) as response:
-            status = int(response.status)
-            if status < 200 or status >= 300:
-                raise RuntimeError(f"openai_compat HTTP {status}")
-            data = await response.json(content_type=None)
-    if not isinstance(data, dict):
-        raise RuntimeError("openai_compat response is not a JSON object")
-    return data

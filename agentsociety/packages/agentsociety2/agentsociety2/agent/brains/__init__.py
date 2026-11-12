@@ -1,8 +1,4 @@
-"""Agent decision backends.
-
-Builtin names are ``jiuwenclaw`` (default) and ``openai_compat``. Later backends
-register through :func:`register_brain` or ``custom/brains/*.py``.
-"""
+"""Configurable skill-decision and Ask backends."""
 
 from agentsociety2.agent.brains.base import (
     AgentBrain,
@@ -11,13 +7,11 @@ from agentsociety2.agent.brains.base import (
     SkillChoiceRequest,
     SkillDecision,
 )
+from agentsociety2.agent.brains.config import ResolvedBrain, canonical_brain_name, resolve_brain_spec
 from agentsociety2.agent.brains.registry import (
-    ResolvedBrain,
-    canonical_brain_name,
-    create_agent_brain,
+    create_agent_brains,
     inject_experiment_backend,
     register_brain,
-    resolve_brain_spec,
     scan_custom_brains,
 )
 
@@ -29,7 +23,7 @@ __all__ = [
     "SkillChoiceRequest",
     "SkillDecision",
     "canonical_brain_name",
-    "create_agent_brain",
+    "create_agent_brains",
     "inject_experiment_backend",
     "register_brain",
     "resolve_brain_spec",

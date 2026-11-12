@@ -1,8 +1,7 @@
-"""AgentSociety2 custom agent backed by a JiuwenClaw AgentServer.
+"""GOD skill host with a selectable decision backend.
 
-JiuwenClaw runs as a separate process. This adapter only speaks the
-AgentServer WebSocket protocol shape that JiuwenClaw already accepts, so the
-AgentSociety runtime does not need to import JiuwenClaw or openjiuwen.
+JiuwenClawAgent is the persisted agent type for existing experiments.
+The default backend uses the separate JiuwenClaw AgentServer.
 """
 
 from __future__ import annotations
@@ -10,13 +9,13 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
 
 from agentsociety2.agent.base import AgentBase
-from agentsociety2.agent.brains import AskRequest, BrainContext, SkillChoiceRequest, create_agent_brain
+from agentsociety2.agent.brains import AskRequest, BrainContext, SkillChoiceRequest, create_agent_brains
+from agentsociety2.agent.brains.base import extract_json_object
 from agentsociety2.agent.brains.jiuwenclaw import (
     build_ws_origin,
     consume_connection_ack_if_present,
@@ -310,7 +309,7 @@ class JiuwenClawAgent(AgentBase):
         self._last_skill_decision: dict[str, Any] = {}
         self._last_skill_result: dict[str, Any] = {}
         self._last_environment_effects: list[dict[str, Any]] = []
-        self._brain = create_agent_brain(
+        self._brain, self._ask_brain = create_agent_brains(
             self,
             brain=brain,
             agent_backend=agent_backend,
@@ -379,6 +378,8 @@ Initialization example:
                 "id": self.id,
                 "name": self.name,
                 "profile": _json_safe(self.get_profile()),
+                "decision_backend": self._brain.name,
+                "ask_backend": self._ask_brain.name,
                 "jiuwenclaw_ws_url": self._jiuwenclaw_ws_url,
                 "session_id": self._session_id,
                 "mode": self._mode,
@@ -396,16 +397,19 @@ Initialization example:
 
     async def _start_brain(self) -> None:
         work_dir = None if self._agent_work_dir is None else str(self._agent_work_dir)
-        config = getattr(self._brain, "config", {}) or {}
-        await self._brain.start(
-            BrainContext(
-                agent_id=int(self.id),
-                work_dir=work_dir,
-                experiment_context=self._experiment_context,
-                config=dict(config),
-                name=self.name,
-            )
+        context = BrainContext(
+            agent_id=int(self.id),
+            work_dir=work_dir,
+            experiment_context=self._experiment_context,
+            name=self.name,
         )
+        try:
+            await self._brain.start(context)
+            if self._ask_brain is not self._brain:
+                await self._ask_brain.start(context)
+        except BaseException:
+            await self.close()
+            raise
 
     def _experiment_context_text(self) -> str:
         if not self._experiment_context:
@@ -417,9 +421,13 @@ Initialization example:
         )
 
     async def ask(self, message: str, readonly: bool = True) -> str:
-        if "ask" not in self._brain.capabilities:
-            raise RuntimeError(f"agent backend {self._brain.name} does not support ask")
-        answer = await self._brain.ask(AskRequest(message=message, readonly=readonly))
+        if "ask" not in self._ask_brain.capabilities:
+            raise RuntimeError(f"agent backend {self._ask_brain.name} does not support ask")
+        answer = await self._ask_brain.ask(AskRequest(
+            message=message,
+            readonly=readonly,
+            prompt=self._build_ask_prompt(message, readonly),
+        ))
         self._last_response = answer
         self._recent_live_questions.append(
             {
@@ -596,6 +604,7 @@ Initialization example:
             )
             selected_skill_id = str(decision.get("selected_skill_id") or "").strip()
 
+        decision["decision_backend"] = self._brain.name
         self._last_skill_decision = dict(decision)
         if not selected_skill_id:
             return {
@@ -696,6 +705,14 @@ Initialization example:
             broadcast_result=broadcast_result,
             catalog=list(catalog),
             mounted_skill_ids=list(mounted_skill_ids),
+            prompt=self._build_skill_selection_prompt(
+                tick=tick,
+                t=t,
+                observation=observation,
+                catalog=catalog,
+                pending_interventions=pending_interventions,
+                broadcast_result=broadcast_result,
+            ),
         )
         try:
             if "choose_skill" not in self._brain.capabilities:
@@ -703,12 +720,13 @@ Initialization example:
                     f"agent backend {self._brain.name} does not support choose_skill"
                 )
             outcome = await self._brain.choose_skill(request)
-            raw = str(outcome.raw or "")
+            decision = outcome.as_dict()
+            raw = outcome.raw if outcome.raw is not None else json.dumps(decision, ensure_ascii=False)
             self._last_response = raw
-            self._append_thread_message("user", str(outcome.prompt or ""), tick=tick, t=t)
+            self._append_thread_message("user", outcome.prompt or request.prompt, tick=tick, t=t)
             self._append_thread_message("assistant", raw, tick=tick, t=t)
-            if outcome.parsed and isinstance(outcome.payload, dict):
-                return dict(outcome.payload)
+            if outcome.selected_skill_id:
+                return decision
             return self._fallback_skill_decision(
                 mounted_skill_ids=mounted_skill_ids,
                 observation=observation,
@@ -716,12 +734,13 @@ Initialization example:
                 reason=self._unparsed_decision_reason(),
             )
         except Exception as exc:
-            self._last_response = self._decision_failure_text(exc)
+            reason = str(exc) or type(exc).__name__
+            self._last_response = self._decision_failure_text(reason)
             return self._fallback_skill_decision(
                 mounted_skill_ids=mounted_skill_ids,
                 observation=observation,
                 pending_interventions=pending_interventions,
-                reason=str(exc),
+                reason=reason,
             )
 
     def _unparsed_decision_reason(self) -> str:
@@ -729,10 +748,10 @@ Initialization example:
             return "九问返回的技能决策不是 JSON。"
         return "后端返回的技能决策不是 JSON。"
 
-    def _decision_failure_text(self, exc: Exception) -> str:
+    def _decision_failure_text(self, reason: str) -> str:
         if self._brain.name == "jiuwenclaw":
-            return f"九问技能选择失败：{exc}"
-        return f"技能选择失败：{exc}"
+            return f"九问技能选择失败：{reason}"
+        return f"技能选择失败：{reason}"
 
     def _build_skill_selection_prompt(
         self,
@@ -822,7 +841,7 @@ Initialization example:
         selected_skill_id: str,
     ) -> dict[str, Any]:
         stdout = str(raw_result.get("stdout") or "").strip()
-        parsed = self._extract_json_object(stdout) if stdout else None
+        parsed = extract_json_object(stdout) if stdout else None
         if isinstance(parsed, dict):
             result = parsed
         else:
@@ -1517,7 +1536,15 @@ Initialization example:
         self._write_json(".runtime/logs/agent_state_snapshot.json", snapshot)
 
     async def dump(self) -> dict:
+        backends = {"decision": self._brain}
+        if self._ask_brain is not self._brain:
+            backends["ask"] = self._ask_brain
+        states = {}
+        for role, backend in backends.items():
+            if state := backend.dump():
+                states[role] = {"backend": backend.name, "state": _json_safe(state)}
         return {
+            **({"backend_states": states} if states else {}),
             "id": self._id,
             "profile": _json_safe(self.get_profile()),
             "name": self._name,
@@ -1607,8 +1634,22 @@ Initialization example:
                 item for item in recent_live_questions if isinstance(item, dict)
             ][-10:]
 
+        states = dump_data.get("backend_states")
+        if isinstance(states, dict):
+            for role, backend in (("decision", self._brain), ("ask", self._ask_brain)):
+                if role == "ask" and backend is self._brain:
+                    continue
+                record = states.get(role)
+                if (isinstance(record, dict) and record.get("backend") == backend.name
+                        and isinstance(record.get("state"), dict)):
+                    backend.load(record["state"])
+
     async def close(self) -> None:
-        await self._brain.close()
+        try:
+            await self._brain.close()
+        finally:
+            if self._ask_brain is not self._brain:
+                await self._ask_brain.close()
 
     def _build_ask_prompt(self, message: str, readonly: bool) -> str:
         readonly_text = (
@@ -1722,30 +1763,3 @@ Initialization example:
 
     def _extract_stream_piece(self, response: dict) -> dict[str, Any]:
         return extract_stream_piece(response)
-
-    def _parse_step_decision(self, text: str) -> dict[str, Any]:
-        data = self._extract_json_object(text)
-        if not isinstance(data, dict):
-            return {"_parsed": False, "public_summary": text}
-        data["_parsed"] = True
-        return data
-
-    def _extract_json_object(self, text: str) -> Any:
-        stripped = text.strip()
-        fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", stripped, re.DOTALL)
-        if fence:
-            stripped = fence.group(1).strip()
-        if stripped.startswith("{"):
-            try:
-                return json.loads(stripped)
-            except json.JSONDecodeError:
-                pass
-
-        start = stripped.find("{")
-        while start != -1:
-            try:
-                obj, _ = json.JSONDecoder().raw_decode(stripped[start:])
-                return obj
-            except json.JSONDecodeError:
-                start = stripped.find("{", start + 1)
-        return None

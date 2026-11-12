@@ -8,7 +8,7 @@ import anyio
 from agentsociety2.agent.brains import (
     AgentBrain,
     SkillDecision,
-    create_agent_brain,
+    create_agent_brains,
     inject_experiment_backend,
     register_brain,
     resolve_brain_spec,
@@ -94,7 +94,8 @@ def test_default_backend_does_not_scan_custom_brains(monkeypatch, tmp_path):
         "agentsociety2.agent.brains.registry.scan_custom_brains",
         record_scan,
     )
-    brain = create_agent_brain(host=object(), workspace=tmp_path)
+    brain, ask = create_agent_brains(host=object(), workspace=tmp_path)
+    assert ask is brain
     assert brain.name == "jiuwenclaw"
     assert "choose_skill" in brain.capabilities
     assert "ask" in brain.capabilities
@@ -224,7 +225,7 @@ def test_jiuwenclaw_parse_failure_keeps_legacy_fallback_text(monkeypatch):
     agent = _agent()
 
     async def choose_skill(_request):
-        return SkillDecision(raw="not-json", prompt="prompt text", parsed=False)
+        return SkillDecision(raw="not-json", prompt="prompt text")
 
     async def run_case():
         agent._brain.choose_skill = choose_skill
@@ -308,7 +309,10 @@ def test_openai_compat_mocked_http_chooses_skill_and_answers(monkeypatch):
         "args": {"tone": "warm"},
         "reason": "有人说话",
         "public_summary": "回复邻居",
+        "usage": {"input_tokens": 3, "output_tokens": 5},
+        "latency_ms": decision["latency_ms"],
     }
+    assert decision["latency_ms"] >= 0
     assert answer == "我在广场。"
     assert agent._last_response == "我在广场。"
     assert captured["calls"][0]["url"] == "https://example.test/v1/chat/completions"
@@ -358,7 +362,7 @@ def test_custom_brain_module_can_register_without_replacing_builtin(tmp_path, mo
                 "        self.config = dict(config or {})",
                 "",
                 "    async def choose_skill(self, req):",
-                "        return SkillDecision(parsed=True, payload={'selected_skill_id': 'routine.daily'})",
+                "        return SkillDecision(selected_skill_id='routine.daily')",
                 "",
                 "    async def ask(self, req):",
                 "        return 'no'",
@@ -416,10 +420,171 @@ def test_custom_brain_module_can_register_without_replacing_builtin(tmp_path, mo
             self.host = host
 
         async def choose_skill(self, req):
-            return SkillDecision(parsed=False)
+            return SkillDecision()
 
         async def ask(self, req):
             return "registered"
 
     register_brain("phase1_replacement", Replacement)
     assert brains()["phase1_replacement"] is Replacement
+
+
+def test_typed_brain_decision_is_used_and_ask_can_use_another_backend(monkeypatch):
+    class TypedChoice(AgentBrain):
+        name = "test_typed_choice"
+        capabilities = frozenset({"choose_skill"})
+
+        def __init__(self, *, config):
+            self.config = config
+
+        async def choose_skill(self, req):
+            assert "social.reply" in req.mounted_skill_ids
+            return SkillDecision(selected_skill_id="social.reply", args={"tone": "warm"})
+
+        async def ask(self, req):
+            raise AssertionError("the configured ask backend should answer")
+
+    class TestAsk(AgentBrain):
+        name = "test_independent_ask"
+        capabilities = frozenset({"ask"})
+        answered = 0
+
+        async def choose_skill(self, req):
+            raise AssertionError("the decision backend should select the skill")
+
+        async def ask(self, req):
+            self.answered += 1
+            return f"answered: {req.message}"
+
+        def dump(self):
+            return {"answered": self.answered}
+
+        def load(self, data):
+            self.answered = data["answered"]
+
+    monkeypatch.delenv("GOD_AGENT_ASK_BACKEND", raising=False)
+    register_brain(TypedChoice.name, TypedChoice)
+    register_brain(TestAsk.name, TestAsk)
+    agent = _agent(brain={"type": TypedChoice.name, "ask_backend": TestAsk.name})
+
+    async def run_case():
+        decision = await agent._select_next_skill(**_choice_kwargs())
+        assert decision["selected_skill_id"] == "social.reply"
+        assert decision["args"] == {"tone": "warm"}
+        assert decision.get("fallback") is not True
+        assert await agent.ask("hello") == "answered: hello"
+        snapshot = await agent.dump()
+        assert snapshot["backend_states"] == {"ask": {"backend": TestAsk.name, "state": {"answered": 1}}}
+        resumed = _agent(brain={"type": TypedChoice.name, "ask_backend": TestAsk.name})
+        await resumed.load(snapshot)
+        assert resumed._ask_brain.answered == 1
+
+    anyio.run(run_case)
+
+
+def test_openai_compat_provider_connection_is_local_configuration(monkeypatch):
+    from agentsociety2.agent.brains.openai_compat import resolve_llm_settings
+
+    monkeypatch.setenv("GOD_LLM_API_KEY", "local-test")
+    monkeypatch.setenv("GOD_LLM_API_BASE", "https://local-provider.example/v1")
+    monkeypatch.setenv("GOD_LLM_MODEL", "local-default")
+    settings = resolve_llm_settings({"model": "scenario-model", "api_base": "https://scenario.example/v1"})
+    assert settings.api_base == "https://local-provider.example/v1"
+    assert settings.api_key == "local-test"
+    assert settings.model == "scenario-model"
+
+
+def test_launcher_and_agents_use_the_same_backend_priority():
+    from agentsociety2.agent.brains.config import requires_jiuwenclaw
+
+    agent = {"agent_id": 1, "agent_type": "JiuwenClawAgent", "kwargs": {}}
+    assert requires_jiuwenclaw({"agents": [agent]}, {})
+    assert not requires_jiuwenclaw({"agents": [agent]}, {"GOD_AGENT_BACKEND": "openai_compat"})
+    assert not requires_jiuwenclaw({"agents": [agent], "agent_backend": "jev"}, {})
+    assert requires_jiuwenclaw(
+        {"agents": [agent], "agent_backend": {"type": "jev", "ask_backend": "jiuwenclaw"}}, {}
+    )
+    assert not requires_jiuwenclaw({"agents": [{**agent, "agent_type": "ScriptedPixelTownAgent"}]}, {})
+    override = {**agent, "agent_id": 2, "kwargs": {"brain": "JiuwenClawAgent"}}
+    assert requires_jiuwenclaw({"agents": [agent, override], "agent_backend": "openai_compat"}, {})
+
+
+def test_decision_apis_execute_the_selected_skill(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from aiohttp import web
+
+    expected = {"type": "choice", "choice": "memory.record", "confidence": 0.94}
+
+    async def run_case():
+        calls = []
+
+        async def decide(request):
+            payload = await request.json()
+            calls.append(payload)
+            if isinstance(payload["questions"], list):
+                assert {item["value"] for item in payload["questions"][0]["choices"]} == {
+                    "routine.daily", "memory.record"
+                }
+                return web.json_response({"answers": [{"name": "skill", **expected}]})
+            assert set(payload["questions"]["skill"]["criteria"]) == {"routine.daily", "memory.record"}
+            result = {"answers": {"skill": expected}}
+            if payload["model"] == "fixture-model":
+                return web.json_response({"result": result})
+            return web.json_response(result)
+
+        app = web.Application()
+        app.router.add_post("/choose", decide)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        try:
+            site = web.TCPSite(runner, "127.0.0.1", 0)
+            await site.start()
+            port = runner.addresses[0][1]
+            url = f"http://127.0.0.1:{port}/choose"
+            monkeypatch.setattr("agentsociety2.agent.brains.decision_api.JEV_URL", url)
+            monkeypatch.setenv("TYPESAFE_API_KEY", "local-test")
+            monkeypatch.setenv("GOD_DECISION_API_URL", url)
+            monkeypatch.setenv("GOD_DECISION_API_KEY", "local-test")
+            monkeypatch.setenv("GOD_DECISION_MODEL", "fixture-model")
+            monkeypatch.setenv("GOD_OPENAI_DECISIONS_URL", url)
+            monkeypatch.setenv("GOD_OPENAI_DECISIONS_API_KEY", "local-test")
+            for backend in ("jev", "decision_api", "openai_decisions"):
+                run_dir = tmp_path / backend
+                run_dir.mkdir()
+                agent = _agent(brain=backend, common_skill_ids=["routine.daily", "memory.record"])
+                await agent.init(SimpleNamespace(run_dir=run_dir, env_modules=[]))
+                result = await agent._run_skill_runtime(
+                    tick=60,
+                    t=datetime(2026, 5, 26, tzinfo=timezone.utc),
+                    observation={"latest_event": "The town clock was set to 9 am."},
+                )
+                assert result["ok"]
+                assert result["activated_skills"] == ["memory.record"]
+                assert result["last_skill_decision"]["decision_backend"] == backend
+                assert result["last_skill_decision"]["confidence"] == 0.94
+                await agent.close()
+        finally:
+            await runner.cleanup()
+
+        assert len(calls) == 3
+
+    anyio.run(run_case)
+
+
+def test_command_backend_reads_request_and_returns_a_typed_decision(monkeypatch):
+    import sys
+
+    command = [sys.executable, "-I", "-c", (
+        "import sys; "
+        "assert 'social.reply' in sys.stdin.read(); "
+        "print('{\"selected_skill_id\":\"social.reply\",\"args\":{\"tone\":\"warm\"}}')"
+    )]
+    monkeypatch.setenv("GOD_AGENT_COMMANDS", json.dumps({"fixture": command}))
+    agent = _agent(brain={"type": "command", "profile": "fixture"})
+    request = _choice_kwargs()
+    request["catalog"].append({"name": "social.reply", "description": "reply"})
+    decision = anyio.run(lambda: agent._select_next_skill(**request))
+    assert decision["selected_skill_id"] == "social.reply"
+    assert decision["args"] == {"tone": "warm"}
+    assert decision.get("fallback") is not True

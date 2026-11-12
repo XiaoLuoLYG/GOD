@@ -17,21 +17,10 @@ from urllib.parse import urlsplit
 from agentsociety2.agent.brains.base import (
     AgentBrain,
     AskRequest,
-    BrainContext,
     SkillChoiceRequest,
     SkillDecision,
+    decision_from_text,
 )
-
-_HOST_FIELDS = {
-    "jiuwenclaw_ws_url": "_jiuwenclaw_ws_url",
-    "session_id": "_session_id",
-    "mode": "_mode",
-    "channel_id": "_channel_id",
-    "request_timeout": "_request_timeout",
-    "trusted_dirs": "_trusted_dirs",
-    "enable_memory": "_enable_memory",
-}
-
 
 class JiuwenClawBrain(AgentBrain):
     """Default backend. Session memory stays in the JiuwenClaw server."""
@@ -39,86 +28,21 @@ class JiuwenClawBrain(AgentBrain):
     name = "jiuwenclaw"
     capabilities = frozenset({"choose_skill", "ask", "memory"})
 
-    def __init__(self, host: Any = None, config: dict[str, Any] | None = None) -> None:
+    def __init__(self, config: dict[str, Any] | None = None, *, host: Any = None) -> None:
+        super().__init__(config)
         self.host = host
-        self.config = dict(config or {})
-        self.context: BrainContext | None = None
-        self._apply_overrides(self.config)
-
-    async def start(self, ctx: BrainContext) -> None:
-        self.context = ctx
+        if host is not None and "request_timeout" in self.config:
+            host._request_timeout = float(self.config["request_timeout"])
 
     async def choose_skill(self, req: SkillChoiceRequest) -> SkillDecision:
-        prompt = self.host._build_skill_selection_prompt(
-            tick=req.tick,
-            t=req.time,
-            observation=req.observation,
-            catalog=req.catalog,
-            pending_interventions=req.pending_interventions,
-            broadcast_result=req.broadcast_result,
-        )
-        raw = await self.host._send_jiuwenclaw_request(prompt)
-        return _decision_from_text(self.host, prompt, raw)
+        raw = await self.host._send_jiuwenclaw_request(req.prompt)
+        return decision_from_text(req.prompt, raw)
 
     async def ask(self, req: AskRequest) -> str:
-        prompt = self.host._build_ask_prompt(message=req.message, readonly=req.readonly)
-        return await self.host._send_jiuwenclaw_request(prompt)
+        return await self.host._send_jiuwenclaw_request(req.prompt)
 
     async def close(self) -> None:
         await close_websocket(self.host)
-
-    def dump(self) -> dict[str, Any]:
-        host = self.host
-        if host is None:
-            return {"type": self.name}
-        return {
-            "type": self.name,
-            "jiuwenclaw_ws_url": host._jiuwenclaw_ws_url,
-            "session_id": host._session_id,
-            "mode": host._mode,
-            "channel_id": host._channel_id,
-            "request_timeout": host._request_timeout,
-            "enable_memory": host._enable_memory,
-        }
-
-    def load(self, data: dict[str, Any]) -> None:
-        if isinstance(data, dict):
-            self._apply_overrides(data)
-
-    def _apply_overrides(self, values: dict[str, Any]) -> None:
-        host = self.host
-        if host is None:
-            return
-        for key, attr in _HOST_FIELDS.items():
-            if key not in values:
-                continue
-            value = values[key]
-            if key == "request_timeout":
-                value = float(value)
-            elif key == "enable_memory":
-                value = bool(value)
-            elif key == "trusted_dirs" and isinstance(value, list):
-                value = [str(item) for item in value if str(item)]
-            setattr(host, attr, value)
-
-
-def _decision_from_text(host: Any, prompt: str, raw: str) -> SkillDecision:
-    parsed = host._parse_step_decision(raw)
-    if isinstance(parsed, dict) and parsed.get("_parsed"):
-        payload = dict(parsed)
-        payload.pop("_parsed", None)
-        args = payload.get("args")
-        return SkillDecision(
-            selected_skill_id=str(payload.get("selected_skill_id") or ""),
-            args=args if isinstance(args, dict) else {},
-            reason=str(payload.get("reason") or ""),
-            public_summary=str(payload.get("public_summary") or ""),
-            raw=raw,
-            prompt=prompt,
-            parsed=True,
-            payload=payload,
-        )
-    return SkillDecision(raw=raw, prompt=prompt, parsed=False, payload=None)
 
 
 async def send_request(agent: Any, prompt: str) -> str:
@@ -185,14 +109,6 @@ def _connection_is_usable(ws: Any) -> bool:
     return True
 
 
-def _is_connection_closed(exc: BaseException) -> bool:
-    return type(exc).__name__ in {
-        "ConnectionClosed",
-        "ConnectionClosedOK",
-        "ConnectionClosedError",
-    }
-
-
 async def _exchange_once(agent: Any, payload: dict, request_id: str) -> dict:
     await agent._ensure_connected()
     await agent._ws.send(json.dumps(payload, ensure_ascii=False))
@@ -200,29 +116,15 @@ async def _exchange_once(agent: Any, payload: dict, request_id: str) -> dict:
 
 
 async def _exchange_with_deadline(agent: Any, payload: dict, request_id: str) -> dict:
-    """Bound connect, send, and recv by the existing request timeout.
-
-    An open socket that only delivers non-final keepalive chunks never raises.
-    The deadline still ends the attempt. A socket the peer already closed fails
-    in milliseconds; retry that case once on a new connection.
-    """
-
-    loop = asyncio.get_running_loop()
-    timeout = agent._request_timeout
-    for attempt in (1, 2):
-        started = loop.time()
-        try:
-            return await asyncio.wait_for(
-                _exchange_once(agent, payload, request_id),
-                timeout=timeout,
-            )
-        except Exception as exc:
-            await agent._reset_websocket()
-            elapsed = loop.time() - started
-            if attempt == 1 and _is_connection_closed(exc) and elapsed < 2:
-                continue
-            raise
-    raise RuntimeError("JiuwenClaw request was not sent")
+    # A disconnect during receive may follow a successful submission.
+    try:
+        return await asyncio.wait_for(
+            _exchange_once(agent, payload, request_id),
+            timeout=agent._request_timeout,
+        )
+    except (Exception, asyncio.CancelledError):
+        await agent._reset_websocket()
+        raise
 
 
 async def ensure_connected(agent: Any) -> None:

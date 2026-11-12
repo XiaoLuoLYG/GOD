@@ -9,36 +9,21 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import logging
-import os
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
 from agentsociety2.agent.brains.base import AgentBrain, AskRequest, SkillChoiceRequest, SkillDecision
+from agentsociety2.agent.brains.config import (
+    ResolvedBrain,
+    canonical_brain_name,
+    resolve_ask_brain_spec,
+    resolve_brain_spec,
+)
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_BRAIN_NAME = "jiuwenclaw"
-BRAIN_ENV_VAR = "GOD_AGENT_BACKEND"
-_ALIASES = {
-    "jiuwenclaw": "jiuwenclaw",
-    "jiuwen_claw": "jiuwenclaw",
-    "jiuwenclawagent": "jiuwenclaw",
-    "openai_compat": "openai_compat",
-    "openaicompat": "openai_compat",
-    "openai": "openai_compat",
-}
 _BRAINS: dict[str, type[AgentBrain]] | None = None
 _SCANNED_WORKSPACES: set[str] = set()
-
-
-@dataclass(frozen=True)
-class ResolvedBrain:
-    """A backend name plus non-secret overrides."""
-
-    name: str
-    overrides: dict[str, Any]
-    source: str
 
 
 class UnavailableBrain(AgentBrain):
@@ -56,38 +41,6 @@ class UnavailableBrain(AgentBrain):
 
     async def ask(self, req: AskRequest) -> str:
         raise RuntimeError(self.reason)
-
-
-def canonical_brain_name(name: str) -> str:
-    """Normalize a backend name. ``JiuwenClawAgent`` stays the default alias."""
-
-    normalized = name.strip().lower().replace("-", "_").replace(" ", "")
-    if not normalized:
-        return ""
-    return _ALIASES.get(normalized, normalized)
-
-
-def resolve_brain_spec(
-    *,
-    brain: Any = None,
-    agent_backend: Any = None,
-    environ: Mapping[str, str] | None = None,
-) -> ResolvedBrain:
-    """Pick the backend spec. Blank values fall through to the next source."""
-
-    env = os.environ if environ is None else environ
-    candidates = (
-        ("agent", brain),
-        ("experiment", agent_backend),
-        ("env", env.get(BRAIN_ENV_VAR)),
-    )
-    for source, value in candidates:
-        parsed = _parse_brain_value(value)
-        if parsed is None:
-            continue
-        name, overrides = parsed
-        return ResolvedBrain(name=name, overrides=overrides, source=source)
-    return ResolvedBrain(name=DEFAULT_BRAIN_NAME, overrides={}, source="default")
 
 
 def register_brain(name: str, brain_cls: type[AgentBrain]) -> None:
@@ -123,48 +76,46 @@ def scan_custom_brains(workspace: Path | None) -> None:
         _load_custom_brain_module(path)
 
 
-def create_agent_brain(
-    host: Any,
+def create_agent_brains(
+    host: Any = None,
     *,
     brain: Any = None,
     agent_backend: Any = None,
     workspace: Path | None = None,
     environ: Mapping[str, str] | None = None,
-) -> AgentBrain:
-    """Build a backend. Construction failure becomes an unavailable backend."""
+) -> tuple[AgentBrain, AgentBrain]:
+    """Construct the decision and optional Ask backends."""
+    try:
+        resolved = resolve_brain_spec(brain=brain, agent_backend=agent_backend, environ=environ)
+        ask = resolve_ask_brain_spec(resolved, environ)
+    except (TypeError, ValueError) as exc:
+        invalid = UnavailableBrain("invalid", f"invalid agent backend config: {type(exc).__name__}")
+        return invalid, invalid
+
+    decision = _instantiate_brain(resolved, host=host, workspace=workspace)
+    if ask is None or ask.name == resolved.name == "jiuwenclaw":
+        return decision, decision
+    return decision, _instantiate_brain(ask, host=host, workspace=workspace)
+
+
+def _instantiate_brain(resolved: ResolvedBrain, *, host: Any, workspace: Path | None) -> AgentBrain:
+    from agentsociety2.agent.brains.jiuwenclaw import JiuwenClawBrain
 
     try:
-        resolved = resolve_brain_spec(
-            brain=brain,
-            agent_backend=agent_backend,
-            environ=environ,
-        )
-    except Exception as exc:
-        logger.warning("agent backend config failed: %s", type(exc).__name__)
-        return UnavailableBrain("invalid", f"invalid agent backend config: {type(exc).__name__}")
-    try:
-        return instantiate_brain(resolved, host=host, workspace=workspace)
+        registry = _builtin_brains()
+        brain_cls = registry.get(resolved.name)
+        if brain_cls is None:
+            scan_custom_brains(workspace)
+            brain_cls = registry.get(resolved.name)
+        if brain_cls is None:
+            return UnavailableBrain(resolved.name, f"unknown agent backend: {resolved.name}")
+        config = {key: value for key, value in resolved.overrides.items() if key != "ask_backend"}
+        if brain_cls is JiuwenClawBrain:
+            return brain_cls(host=host, config=config)
+        return brain_cls(config=config)
     except Exception as exc:
         logger.warning("agent backend %s failed to load: %s", resolved.name, type(exc).__name__)
         return UnavailableBrain(resolved.name, f"agent backend {resolved.name} failed to load")
-
-
-def instantiate_brain(
-    resolved: ResolvedBrain,
-    *,
-    host: Any,
-    workspace: Path | None = None,
-) -> AgentBrain:
-    """Construct a resolved backend, scanning custom modules only if needed."""
-
-    registry = _builtin_brains()
-    brain_cls = registry.get(resolved.name)
-    if brain_cls is None:
-        scan_custom_brains(workspace)
-        brain_cls = registry.get(resolved.name)
-    if brain_cls is None:
-        return UnavailableBrain(resolved.name, f"unknown agent backend: {resolved.name}")
-    return brain_cls(host=host, config=dict(resolved.overrides))
 
 
 def inject_experiment_backend(
@@ -193,36 +144,14 @@ def inject_experiment_backend(
 def _builtin_brains() -> dict[str, type[AgentBrain]]:
     global _BRAINS
     if _BRAINS is None:
+        from agentsociety2.agent.brains.command import CommandBrain
+        from agentsociety2.agent.brains.decision_api import DecisionAPIBrain, JevBrain, OpenAIDecisionsBrain
         from agentsociety2.agent.brains.jiuwenclaw import JiuwenClawBrain
         from agentsociety2.agent.brains.openai_compat import OpenAICompatBrain
 
-        _BRAINS = {
-            JiuwenClawBrain.name: JiuwenClawBrain,
-            OpenAICompatBrain.name: OpenAICompatBrain,
-        }
+        backends = (JiuwenClawBrain, OpenAICompatBrain, CommandBrain, DecisionAPIBrain, JevBrain, OpenAIDecisionsBrain)
+        _BRAINS = {backend.name: backend for backend in backends}
     return _BRAINS
-
-
-def _parse_brain_value(value: Any) -> tuple[str, dict[str, Any]] | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        name = canonical_brain_name(value)
-        if not name:
-            return None
-        return name, {}
-    if isinstance(value, dict):
-        raw_name = value.get("type", value.get("name", ""))
-        name = canonical_brain_name(str(raw_name or ""))
-        if not name:
-            return None
-        overrides = {
-            key: item
-            for key, item in value.items()
-            if key not in {"type", "name"}
-        }
-        return name, overrides
-    raise TypeError("brain config must be a string or an object with a type field")
 
 
 def _load_custom_brain_module(path: Path) -> None:
