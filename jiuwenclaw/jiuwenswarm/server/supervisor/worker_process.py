@@ -5,8 +5,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
+import stat
 import subprocess
 import sys
 import time
@@ -25,7 +27,19 @@ def default_socket_path() -> str:
         return override
     home = os.environ.get("JIUWENSWARM_HOME") or os.path.expanduser("~")
     name = "runtime-worker.pipe" if os.name == "nt" else "runtime-worker.sock"
-    return str(Path(home) / ".jiuwenswarm" / "run" / name)
+    path = Path(home) / ".jiuwenswarm" / "run" / name
+    if os.name == "nt" or len(os.fsencode(path)) < 100:
+        return str(path)
+
+    # The resident Worker needs the same short endpoint across Front restarts.
+    uid = os.getuid()
+    directory = Path("/tmp") / f"jiuwenswarm-ipc-{uid}"
+    directory.mkdir(mode=0o700, exist_ok=True)
+    entry = directory.lstat()
+    if not stat.S_ISDIR(entry.st_mode) or entry.st_uid != uid or stat.S_IMODE(entry.st_mode) != 0o700:
+        raise PermissionError(f"Unsafe runtime IPC directory: {directory}")
+    digest = hashlib.sha256(os.fsencode(path.resolve())).hexdigest()[:20]
+    return str(directory / f"{digest}.sock")
 
 
 def build_worker_command(
