@@ -151,5 +151,8 @@ jobs:
       - name: Test direct and path-proxy serving
         run: npm run test:proxy --prefix agentsociety/frontend
 
+      - name: Test replay UI regressions
+        run: node --experimental-strip-types --test agentsociety/frontend/scripts/test-ui-regressions.mjs
+
       - name: Build frontend
         run: npm run build --prefix agentsociety/frontend
