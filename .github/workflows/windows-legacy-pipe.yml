@@ -1,0 +1,42 @@
+name: GOD native Windows legacy stdin diagnosis
+on:
+  push:
+    branches: ['luoyige/god-windows-validation-pr107-legacy-pipe']
+permissions:
+  contents: read
+jobs:
+  windows:
+    name: ${{ matrix.label }} / legacy stdin
+    runs-on: windows-2025
+    timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Main baseline
+            ref: 7b1a02cbb5d94d09ca09362f8e204051e75f1059
+          - label: Updated PR 107
+            ref: 1df53e395a08fe82a1e4fa0c641446732f5c5553
+    steps:
+      - run: git config --global core.longpaths true
+      - uses: actions/checkout@v6
+        with:
+          path: harness
+          persist-credentials: false
+          sparse-checkout: .github/windows-legacy-pipe.ps1
+          sparse-checkout-cone-mode: false
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ matrix.ref }}
+          path: src
+          persist-credentials: false
+          sparse-checkout: scripts/god.ps1
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: false
+      - name: Probe the actual launcher stdin wrapper
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File harness/.github/windows-legacy-pipe.ps1
