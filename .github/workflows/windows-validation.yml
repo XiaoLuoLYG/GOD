@@ -1,0 +1,62 @@
+name: GOD native Windows validation
+
+on:
+  push:
+    branches: ['luoyige/god-windows-validation-*']
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: ${{ matrix.label }}
+    runs-on: windows-2025
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Main baseline / JiuwenClaw
+            ref: 7b1a02cbb5d94d09ca09362f8e204051e75f1059
+            mode: runtime
+          - label: PR 107 / OpenAI compatible
+            ref: 26a1ea1f19a583be30733fb7605d0cb0678f3641
+            mode: external
+          - label: PR 107 / JiuwenClaw
+            ref: 26a1ea1f19a583be30733fb7605d0cb0678f3641
+            mode: runtime
+          - label: PR 109 / JiuwenSwarm migration
+            ref: 47a15b54ab39a059d49c62089b51223c053e5bab
+            mode: migration
+    steps:
+      - name: Enable long Git paths
+        run: git config --global core.longpaths true
+      - name: Check out validation harness
+        uses: actions/checkout@v6
+        with:
+          path: harness
+          persist-credentials: false
+          sparse-checkout: .github/windows-validation.py
+          sparse-checkout-cone-mode: false
+      - name: Check out exact source under test
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ matrix.ref }}
+          path: src
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: false
+      - name: Exercise god.cmd and god.ps1 on native Windows
+        env:
+          UV_PYTHON: '3.11'
+          UV_NO_PROGRESS: '1'
+          LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+          DO_NOT_TRACK: '1'
+        run: python -u harness/.github/windows-validation.py src '${{ matrix.mode }}'
