@@ -1,25 +1,34 @@
-"""AgentSociety2 custom agent backed by a JiuwenClaw AgentServer.
+"""GOD skill host with a selectable decision backend.
 
-JiuwenClaw runs as a separate process. This adapter only speaks the
-AgentServer WebSocket protocol shape that JiuwenClaw already accepts, so the
-AgentSociety runtime does not need to import JiuwenClaw or openjiuwen.
+JiuwenClawAgent is the persisted agent type for existing experiments.
+The default backend uses the separate JiuwenClaw AgentServer.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import os
-import re
-import time
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
-from urllib.parse import urlsplit
 
 from agentsociety2.agent.base import AgentBase
+from agentsociety2.agent.brains import AskRequest, BrainContext, SkillChoiceRequest, create_agent_brains
+from agentsociety2.agent.brains.base import extract_json_object
+from agentsociety2.agent.brains.jiuwenclaw import (
+    build_ws_origin,
+    consume_connection_ack_if_present,
+    decode_wire_message,
+    ensure_connected,
+    extract_response_content,
+    extract_stream_piece,
+    open_websocket,
+    receive_matching_response,
+    reset_websocket,
+    send_request,
+    with_stream_content,
+)
 from agentsociety2.agent.skills import SkillRegistry
 from agentsociety2.agent.skills.runtime import AgentSkillRuntime
 
@@ -29,7 +38,6 @@ DEFAULT_CHANNEL_ID = "agentsociety"
 DEFAULT_MODE = "agent.plan"
 DEFAULT_JIUWENCLAW_REQUEST_CONCURRENCY = 24
 JIUWENCLAW_REQUEST_CONCURRENCY_ENV = "AGENTSOCIETY_JIUWENCLAW_REQUEST_CONCURRENCY"
-logger = logging.getLogger(__name__)
 DEFAULT_COMMON_SKILLS = [
     "routine.daily",
     "social.reply",
@@ -196,7 +204,7 @@ def _contains_latin_text_outside_terms(value: Any, allowed_terms: list[str]) -> 
 
 
 class JiuwenClawAgent(AgentBase):
-    """AgentSociety2 AgentBase adapter for a running JiuwenClaw AgentServer."""
+    """AgentSociety2 skill host with selectable decision and Ask backends."""
 
     _request_semaphore: ClassVar[asyncio.Semaphore | None] = None
     _request_semaphore_limit: ClassVar[int | None] = None
@@ -247,6 +255,8 @@ class JiuwenClawAgent(AgentBase):
         mounted_skill_ids: list[str] | None = None,
         skill_runtime_skill_names: list[str] | None = None,
         experiment_context: Any | None = None,
+        brain: Any | None = None,
+        agent_backend: Any | None = None,
     ) -> None:
         super().__init__(id=id, profile=profile, name=name)
         self._jiuwenclaw_ws_url = jiuwenclaw_ws_url
@@ -299,12 +309,18 @@ class JiuwenClawAgent(AgentBase):
         self._last_skill_decision: dict[str, Any] = {}
         self._last_skill_result: dict[str, Any] = {}
         self._last_environment_effects: list[dict[str, Any]] = []
+        self._brain, self._ask_brain = create_agent_brains(
+            self,
+            brain=brain,
+            agent_backend=agent_backend,
+            workspace=Path(_workspace_root_from_file()),
+        )
 
     @classmethod
     def mcp_description(cls) -> str:
-        return """JiuwenClawAgent: AgentSociety2 custom agent backed by JiuwenClaw
+        return """JiuwenClawAgent: AgentSociety2 custom agent with selectable backends
 
-Runs JiuwenClaw as an external AgentServer and communicates over WebSocket.
+The default backend runs JiuwenClaw as an external AgentServer.
 
 Profile fields are free-form. Useful fields:
 - name: display name
@@ -316,15 +332,10 @@ Initialization example:
 {
   "id": 0,
   "profile": {
-    "name": "Jiuwen assistant",
-    "role": "JiuwenClaw-driven simulation agent"
+    "name": "Ada",
+    "role": "Town archivist"
   },
-  "jiuwenclaw_ws_url": "ws://127.0.0.1:18092",
-  "session_id": "agentsociety_agent_0",
-  "mode": "agent.plan",
-  "trusted_dirs": ["<path-to-GOD>/agentsociety"],
-  "enable_memory": true,
-  "enable_skill_runtime": true,
+  "brain": "openai_compat",
   "common_skill_ids": ["routine.daily", "social.reply", "memory.record", "map.navigate", "safety.respond"],
   "skill_ids": ["community.coordinate", "tools.repair"]
 }
@@ -350,6 +361,7 @@ Initialization example:
         await super().init(env)
         if getattr(env, "run_dir", None) is None:
             self._agent_work_dir = None
+            await self._start_brain()
             return
         self._skill_registry.scan_custom(_workspace_root_from_file())
         self._agent_work_dir = self._skill_runtime.ensure_agent_work_dir(env)
@@ -361,6 +373,8 @@ Initialization example:
                 "id": self.id,
                 "name": self.name,
                 "profile": _json_safe(self.get_profile()),
+                "decision_backend": self._brain.name,
+                "ask_backend": self._ask_brain.name,
                 "jiuwenclaw_ws_url": self._jiuwenclaw_ws_url,
                 "session_id": self._session_id,
                 "mode": self._mode,
@@ -374,6 +388,23 @@ Initialization example:
                 "experiment_context": _json_safe(self._experiment_context),
             },
         )
+        await self._start_brain()
+
+    async def _start_brain(self) -> None:
+        work_dir = None if self._agent_work_dir is None else str(self._agent_work_dir)
+        context = BrainContext(
+            agent_id=int(self.id),
+            work_dir=work_dir,
+            experiment_context=self._experiment_context,
+            name=self.name,
+        )
+        try:
+            await self._brain.start(context)
+            if self._ask_brain is not self._brain:
+                await self._ask_brain.start(context)
+        except BaseException:
+            await self.close()
+            raise
 
     def _experiment_context_text(self) -> str:
         if not self._experiment_context:
@@ -384,9 +415,25 @@ Initialization example:
             f"{CHINESE_OUTPUT_POLICY}\n"
         )
 
-    async def ask(self, message: str, readonly: bool = True) -> str:
-        prompt = self._build_ask_prompt(message=message, readonly=readonly)
-        answer = await self._send_jiuwenclaw_request(prompt)
+    async def ask(
+        self,
+        message: str,
+        readonly: bool = True,
+        *,
+        response_type: str = "text",
+        choices: list[str] | None = None,
+        t: datetime | None = None,
+    ) -> str:
+        if "ask" not in self._ask_brain.capabilities:
+            raise RuntimeError(f"agent backend {self._ask_brain.name} does not support ask")
+        answer = await self._ask_brain.ask(AskRequest(
+            message=message,
+            readonly=readonly,
+            response_type=response_type,
+            choices=choices,
+            time=t,
+            prompt=self._build_ask_prompt(message, readonly),
+        ))
         self._last_response = answer
         self._recent_live_questions.append(
             {
@@ -406,7 +453,7 @@ Initialization example:
         response_type: str = "text",
         choices: list[str] | None = None,
     ) -> str:
-        """Answer live targeted Ask through the JiuwenClaw agent session."""
+        """Answer a targeted question through the configured Ask backend."""
 
         requirement = self._external_question_output_requirement(
             response_type,
@@ -417,11 +464,11 @@ Initialization example:
             f"当前模拟时间：{t.isoformat()}\n"
             f"输出要求：{requirement}\n"
             f"{CHINESE_OUTPUT_POLICY}\n"
-            "请以该智能体第一人称回答。以当前模拟状态、近期实时提问、角色档案和九问会话上下文为准。"
+            "请以该智能体第一人称回答，使用可用的模拟状态、近期提问、角色档案和会话上下文。"
             "只读提问不得改变 AgentSociety 环境。\n\n"
             f"问题：\n{prompt}"
         )
-        return await self.ask(message, readonly=True)
+        return await self.ask(message, readonly=True, response_type=response_type, choices=choices, t=t)
 
     async def step(self, tick: int, t: datetime) -> str:
         observation = await self._observe_environment()
@@ -563,6 +610,7 @@ Initialization example:
             )
             selected_skill_id = str(decision.get("selected_skill_id") or "").strip()
 
+        decision["decision_backend"] = self._brain.name
         self._last_skill_decision = dict(decision)
         if not selected_skill_id:
             return {
@@ -654,37 +702,62 @@ Initialization example:
                 pending_interventions=pending_interventions,
                 reason="没有可用的已挂载技能。",
             )
-        prompt = self._build_skill_selection_prompt(
+        request = SkillChoiceRequest(
             tick=tick,
-            t=t,
+            time=t,
+            profile=_json_safe(self.get_profile()),
             observation=observation,
-            catalog=catalog,
-            pending_interventions=pending_interventions,
+            pending_interventions=list(pending_interventions),
             broadcast_result=broadcast_result,
+            catalog=list(catalog),
+            mounted_skill_ids=list(mounted_skill_ids),
+            prompt=self._build_skill_selection_prompt(
+                tick=tick,
+                t=t,
+                observation=observation,
+                catalog=catalog,
+                pending_interventions=pending_interventions,
+                broadcast_result=broadcast_result,
+            ),
         )
         try:
-            raw = await self._send_jiuwenclaw_request(prompt)
+            if "choose_skill" not in self._brain.capabilities:
+                raise RuntimeError(
+                    f"agent backend {self._brain.name} does not support choose_skill"
+                )
+            outcome = await self._brain.choose_skill(request)
+            decision = outcome.as_dict()
+            raw = outcome.raw if outcome.raw is not None else json.dumps(decision, ensure_ascii=False)
             self._last_response = raw
-            self._append_thread_message("user", prompt, tick=tick, t=t)
+            self._append_thread_message("user", outcome.prompt or request.prompt, tick=tick, t=t)
             self._append_thread_message("assistant", raw, tick=tick, t=t)
-            decision = self._parse_step_decision(raw)
-            if isinstance(decision, dict) and decision.get("_parsed"):
-                decision.pop("_parsed", None)
+            if outcome.selected_skill_id:
                 return decision
             return self._fallback_skill_decision(
                 mounted_skill_ids=mounted_skill_ids,
                 observation=observation,
                 pending_interventions=pending_interventions,
-                reason="九问返回的技能决策不是 JSON。",
+                reason=self._unparsed_decision_reason(),
             )
         except Exception as exc:
-            self._last_response = f"九问技能选择失败：{exc}"
+            reason = str(exc) or type(exc).__name__
+            self._last_response = self._decision_failure_text(reason)
             return self._fallback_skill_decision(
                 mounted_skill_ids=mounted_skill_ids,
                 observation=observation,
                 pending_interventions=pending_interventions,
-                reason=str(exc),
+                reason=reason,
             )
+
+    def _unparsed_decision_reason(self) -> str:
+        if self._brain.name == "jiuwenclaw":
+            return "九问返回的技能决策不是 JSON。"
+        return "后端返回的技能决策不是 JSON。"
+
+    def _decision_failure_text(self, reason: str) -> str:
+        if self._brain.name == "jiuwenclaw":
+            return f"九问技能选择失败：{reason}"
+        return f"技能选择失败：{reason}"
 
     def _build_skill_selection_prompt(
         self,
@@ -774,7 +847,7 @@ Initialization example:
         selected_skill_id: str,
     ) -> dict[str, Any]:
         stdout = str(raw_result.get("stdout") or "").strip()
-        parsed = self._extract_json_object(stdout) if stdout else None
+        parsed = extract_json_object(stdout) if stdout else None
         if isinstance(parsed, dict):
             result = parsed
         else:
@@ -1469,7 +1542,15 @@ Initialization example:
         self._write_json(".runtime/logs/agent_state_snapshot.json", snapshot)
 
     async def dump(self) -> dict:
+        backends = {"decision": self._brain}
+        if self._ask_brain is not self._brain:
+            backends["ask"] = self._ask_brain
+        states = {}
+        for role, backend in backends.items():
+            if state := backend.dump():
+                states[role] = {"backend": backend.name, "state": _json_safe(state)}
         return {
+            **({"backend_states": states} if states else {}),
             "id": self._id,
             "profile": _json_safe(self.get_profile()),
             "name": self._name,
@@ -1559,12 +1640,22 @@ Initialization example:
                 item for item in recent_live_questions if isinstance(item, dict)
             ][-10:]
 
+        states = dump_data.get("backend_states")
+        if isinstance(states, dict):
+            for role, backend in (("decision", self._brain), ("ask", self._ask_brain)):
+                if role == "ask" and backend is self._brain:
+                    continue
+                record = states.get(role)
+                if (isinstance(record, dict) and record.get("backend") == backend.name
+                        and isinstance(record.get("state"), dict)):
+                    backend.load(record["state"])
+
     async def close(self) -> None:
-        if self._ws is not None:
-            close = getattr(self._ws, "close", None)
-            if callable(close):
-                await close()
-            self._ws = None
+        try:
+            await self._brain.close()
+        finally:
+            if self._ask_brain is not self._brain:
+                await self._ask_brain.close()
 
     def _build_ask_prompt(self, message: str, readonly: bool) -> str:
         readonly_text = (
@@ -1645,249 +1736,36 @@ Initialization example:
         )
 
     async def _send_jiuwenclaw_request(self, prompt: str) -> str:
-        request_id = f"agentsociety_{self.id}_{uuid.uuid4().hex[:12]}"
-        payload = {
-            "request_id": request_id,
-            "channel_id": self._channel_id,
-            "session_id": self._session_id,
-            "req_method": "chat.send",
-            "params": {
-                "query": prompt,
-                "mode": self._mode,
-                "trusted_dirs": list(self._trusted_dirs),
-            },
-            "is_stream": True,
-            "timestamp": time.time(),
-            "metadata": {
-                "source": "agentsociety",
-                "agent_id": self.id,
-                "agent_name": self.name,
-                "enable_memory": self._enable_memory,
-            },
-        }
-
-        request_started_at = time.perf_counter()
-        queue_ms = 0.0
-        status = "error"
-        semaphore, concurrency_limit = self._request_semaphore_for_current_loop()
-        try:
-            async with semaphore:
-                queue_ms = (time.perf_counter() - request_started_at) * 1000
-                async with self._ws_lock:
-                    await self._ensure_connected()
-                    await self._ws.send(json.dumps(payload, ensure_ascii=False))
-                    try:
-                        response = await asyncio.wait_for(
-                            self._receive_matching_response(request_id),
-                            timeout=self._request_timeout,
-                        )
-                    except Exception:
-                        await self._reset_websocket()
-                        raise
-                content = self._extract_response_content(response)
-                status = "success"
-                return content
-        finally:
-            total_ms = (time.perf_counter() - request_started_at) * 1000
-            logger.info(
-                "[JiuwenClawAgent] request timing: agent_id=%s request_id=%s "
-                "status=%s queue_ms=%.1f total_ms=%.1f prompt_chars=%s "
-                "concurrency_limit=%s",
-                self.id,
-                request_id,
-                status,
-                queue_ms,
-                total_ms,
-                len(prompt),
-                concurrency_limit,
-            )
+        return await send_request(self, prompt)
 
     async def _ensure_connected(self) -> None:
-        if self._ws is not None:
-            return
-        self._ws = await self._open_websocket(self._jiuwenclaw_ws_url)
-        await self._consume_connection_ack_if_present()
+        await ensure_connected(self)
 
     async def _open_websocket(self, uri: str) -> Any:
-        origin = self._build_ws_origin(uri)
-        try:
-            from websockets.asyncio.client import connect
-        except Exception:
-            from websockets import connect
-
-        # Match AgentServer defaults (ping_interval=30, ping_timeout=300).
-        # Library defaults (~20s) cause keepalive ping timeout while agent.plan
-        # is blocked on long multi-turn LLM+tool streams under 10-way load.
-        return await connect(
-            uri,
-            origin=origin,
-            ping_interval=30,
-            ping_timeout=300,
-        )
+        return await open_websocket(uri)
 
     def _build_ws_origin(self, uri: str) -> str | None:
         """Match JiuwenClaw AgentServer's localhost Origin check."""
 
-        try:
-            parsed = urlsplit(uri)
-        except ValueError:
-            return None
-        if not parsed.netloc:
-            return None
-        scheme = "https" if parsed.scheme == "wss" else "http"
-        return f"{scheme}://{parsed.netloc}"
+        return build_ws_origin(uri)
 
     async def _consume_connection_ack_if_present(self) -> None:
-        try:
-            raw = await asyncio.wait_for(self._ws.recv(), timeout=2.0)
-        except asyncio.TimeoutError:
-            return
-        data = self._decode_wire_message(raw)
-        if data.get("type") == "event" and data.get("event") == "connection.ack":
-            return
-        self._pending_response = data
+        await consume_connection_ack_if_present(self)
 
     async def _receive_matching_response(self, request_id: str) -> dict:
-        content_parts: list[str] = []
-        final_content: str = ""
-        pending = getattr(self, "_pending_response", None)
-        if isinstance(pending, dict):
-            self._pending_response = None
-            if str(pending.get("request_id") or "") == request_id:
-                piece = self._extract_stream_piece(pending)
-                if piece["final"]:
-                    final_content = piece["text"]
-                elif piece["text"]:
-                    content_parts.append(piece["text"])
-                if pending.get("is_final"):
-                    return self._with_stream_content(
-                        pending,
-                        final_content or "".join(content_parts),
-                    )
-
-        while True:
-            raw = await self._ws.recv()
-            data = self._decode_wire_message(raw)
-            if data.get("type") == "event":
-                continue
-            if str(data.get("request_id") or "") == request_id:
-                piece = self._extract_stream_piece(data)
-                if piece["final"]:
-                    final_content = piece["text"]
-                elif piece["text"]:
-                    content_parts.append(piece["text"])
-                if data.get("is_final"):
-                    return self._with_stream_content(
-                        data,
-                        final_content or "".join(content_parts),
-                    )
+        return await receive_matching_response(self, request_id)
 
     def _decode_wire_message(self, raw: str | bytes) -> dict:
-        if isinstance(raw, bytes):
-            raw = raw.decode("utf-8")
-        data = json.loads(raw)
-        if not isinstance(data, dict):
-            raise ValueError("JiuwenClaw WebSocket response must be a JSON object")
-        return data
+        return decode_wire_message(raw)
 
     def _extract_response_content(self, response: dict) -> str:
-        if "ok" in response:
-            if not response.get("ok", True):
-                payload = response.get("payload") or {}
-                raise RuntimeError(str(payload.get("error") or payload))
-            payload = response.get("payload") or {}
-            return str(payload.get("content") or payload.get("result") or payload)
-
-        body = response.get("body") or {}
-        status = str(response.get("status") or "")
-        response_kind = str(response.get("response_kind") or "")
-        if status == "failed" or response_kind.endswith(".error"):
-            raise RuntimeError(str(body.get("message") or body.get("error") or body))
-
-        result = body.get("result")
-        if isinstance(result, dict):
-            if "content" in result:
-                content = result["content"]
-                if isinstance(content, dict):
-                    if "output" in content:
-                        return str(content["output"])
-                    if "content" in content:
-                        return str(content["content"])
-                return str(content)
-            return json.dumps(result, ensure_ascii=False)
-        if result is not None:
-            return str(result)
-        if "content" in body:
-            return str(body["content"])
-        return json.dumps(body, ensure_ascii=False)
+        return extract_response_content(response)
 
     async def _reset_websocket(self) -> None:
-        if self._ws is None:
-            return
-        close = getattr(self._ws, "close", None)
-        try:
-            if callable(close):
-                await close()
-        finally:
-            self._ws = None
-            self._pending_response = None
+        await reset_websocket(self)
 
     def _with_stream_content(self, response: dict, content: str) -> dict:
-        if not content:
-            return response
-        next_response = dict(response)
-        body = dict(next_response.get("body") or {})
-        body["result"] = {"content": content}
-        next_response["body"] = body
-        return next_response
+        return with_stream_content(response, content)
 
     def _extract_stream_piece(self, response: dict) -> dict[str, Any]:
-        body = response.get("body") or {}
-        delta = body.get("delta")
-        if isinstance(delta, dict):
-            event_type = str(delta.get("event_type") or body.get("event_type") or "")
-            content = delta.get("content")
-            if content is None:
-                content = delta.get("delta")
-            if event_type == "chat.final" and content is not None:
-                return {"text": str(content), "final": True}
-            if event_type in {"chat.delta", "text.delta"} and content is not None:
-                return {"text": str(content), "final": False}
-        if body.get("delta_kind") == "text" and isinstance(delta, str):
-            return {"text": delta, "final": False}
-        payload = response.get("payload")
-        if isinstance(payload, dict):
-            event_type = str(payload.get("event_type") or "")
-            content = payload.get("content")
-            if event_type == "chat.final" and content is not None:
-                return {"text": str(content), "final": True}
-            if event_type == "chat.delta" and content is not None:
-                return {"text": str(content), "final": False}
-        return {"text": "", "final": False}
-
-    def _parse_step_decision(self, text: str) -> dict[str, Any]:
-        data = self._extract_json_object(text)
-        if not isinstance(data, dict):
-            return {"_parsed": False, "public_summary": text}
-        data["_parsed"] = True
-        return data
-
-    def _extract_json_object(self, text: str) -> Any:
-        stripped = text.strip()
-        fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", stripped, re.DOTALL)
-        if fence:
-            stripped = fence.group(1).strip()
-        if stripped.startswith("{"):
-            try:
-                return json.loads(stripped)
-            except json.JSONDecodeError:
-                pass
-
-        start = stripped.find("{")
-        while start != -1:
-            try:
-                obj, _ = json.JSONDecoder().raw_decode(stripped[start:])
-                return obj
-            except json.JSONDecodeError:
-                start = stripped.find("{", start + 1)
-        return None
+        return extract_stream_piece(response)

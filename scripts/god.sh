@@ -471,7 +471,9 @@ open_frontend_pages() {
   command_exists open || return 0
   log "Opening frontend pages"
   open_browser_window "$(replay_url)"
-  open_browser_window "$runtime_ui_url"
+  if is_port_open "$RUNTIME_UI_PORT"; then
+    open_browser_window "$runtime_ui_url"
+  fi
 }
 
 setup_url() {
@@ -512,6 +514,18 @@ has_current_experiment_config() {
   local config_path
   config_path="$(current_experiment_config_path)" || return 1
   [[ -f "$config_path" ]] || return 1
+}
+
+experiment_config_path() {
+  printf '%s/hypothesis_%s/experiment_%s/init/init_config.json\n' \
+    "$LIVE_WORKSPACE_PATH" "$GOD_EXPERIMENT" "$GOD_EXPERIMENT_RUN"
+}
+
+experiment_requires_runtime() {
+  local config_path
+  config_path="$(experiment_config_path)"
+  python3 "$BACKEND_ROOT/packages/agentsociety2/agentsociety2/agent/brains/config.py" "$config_path" \
+    || die "Could not resolve agent backends in $config_path"
 }
 
 has_pending_start_request() {
@@ -633,10 +647,11 @@ start_detached_service() {
 stop_runtime_instance() {
   local name="$1"
   [[ -d "$RUNTIME_ROOT" ]] || return 0
-  command_exists uv || return 0
   (
     cd "$RUNTIME_ROOT"
-    uv run jiuwenclaw-start --stop "$name" >/dev/null 2>&1 || true
+    local launcher="${UV_PROJECT_ENVIRONMENT:-.venv}/bin/jiuwenclaw-start"
+    [[ -x "$launcher" ]] || return 0
+    "$launcher" --stop "$name" >/dev/null 2>&1 || true
   )
 }
 
@@ -734,19 +749,26 @@ setup_deps() {
     return 0
   fi
 
+  local runtime_required="${1:-1}"
+  if [[ $# == 0 && -f "$(experiment_config_path)" ]]; then
+    runtime_required="$(experiment_requires_runtime)"
+  fi
+
   if [[ ! -d "$BACKEND_ROOT/.venv" || "${GOD_FORCE_SETUP:-0}" == "1" ]]; then
     log "Syncing backend Python dependencies"
     (cd "$BACKEND_ROOT" && uv sync)
   fi
 
-  if [[ ! -d "$RUNTIME_ROOT/.venv" || "${GOD_FORCE_SETUP:-0}" == "1" ]]; then
-    log "Syncing agent runtime Python dependencies"
-    (cd "$RUNTIME_ROOT" && uv sync)
-  fi
-
   if [[ ! -d "$BACKEND_ROOT/frontend/node_modules" || "${GOD_FORCE_SETUP:-0}" == "1" ]]; then
     log "Installing control-room dependencies"
     npm install --no-audit --no-fund --loglevel=error --prefix "$BACKEND_ROOT/frontend"
+  fi
+
+  [[ "$runtime_required" == "1" ]] || return 0
+
+  if [[ ! -d "$RUNTIME_ROOT/.venv" || "${GOD_FORCE_SETUP:-0}" == "1" ]]; then
+    log "Syncing agent runtime Python dependencies"
+    (cd "$RUNTIME_ROOT" && uv sync)
   fi
 
   local runtime_frontend="$RUNTIME_ROOT/jiuwenclaw/channels/web/frontend"
@@ -757,7 +779,6 @@ setup_deps() {
 }
 
 ensure_runtime_instance() {
-  setup_deps
   local existing=0
   (
     cd "$RUNTIME_ROOT"
@@ -872,13 +893,15 @@ sync_runtime_model_env() {
 }
 
 prepare_experiment() {
-  local experiment_path="$LIVE_WORKSPACE_PATH/hypothesis_${GOD_EXPERIMENT}/experiment_${GOD_EXPERIMENT_RUN}"
-  local config_path="$experiment_path/init/init_config.json"
+  local config_path runtime_required
+  config_path="$(experiment_config_path)"
   [[ -f "$config_path" ]] || die "Experiment config not found: $config_path"
+  runtime_required="${1:-$(experiment_requires_runtime)}"
 
   local session_prefix="${GOD_SESSION_PREFIX:-${GOD_EXPERIMENT}_run_${GOD_EXPERIMENT_RUN}}"
   log "Preparing experiment: $GOD_EXPERIMENT (run $GOD_EXPERIMENT_RUN)"
   BACKEND_ROOT="$BACKEND_ROOT" \
+  RUNTIME_REQUIRED="$runtime_required" \
   RUNTIME_AGENT_PORT="$RUNTIME_AGENT_PORT" \
   GOD_SESSION_PREFIX="$session_prefix" \
   GOD_MAP_ID_WAS_EXPLICIT="$GOD_MAP_ID_WAS_EXPLICIT" \
@@ -891,6 +914,7 @@ from pathlib import Path
 
 path = Path(sys.argv[1])
 config = json.loads(path.read_text(encoding="utf-8"))
+runtime_required = os.environ["RUNTIME_REQUIRED"] == "1"
 agent_root = str(Path(os.environ["BACKEND_ROOT"]).resolve())
 ws_url = f"ws://127.0.0.1:{os.environ['RUNTIME_AGENT_PORT']}"
 session_prefix = os.environ["GOD_SESSION_PREFIX"]
@@ -916,6 +940,8 @@ for module in config.get("env_modules", []):
                 kwargs["map_manifest_path"] = f"custom/maps/{map_id}/map.yaml"
 
 for agent in config.get("agents", []):
+    if not runtime_required or agent.get("agent_type") != "JiuwenClawAgent":
+        continue
     kwargs = agent.setdefault("kwargs", {})
     agent_id = int(agent.get("agent_id") or kwargs.get("id") or 0)
     kwargs["jiuwenclaw_ws_url"] = ws_url
@@ -1072,7 +1098,7 @@ PY
 }
 
 start_setup_services() {
-  setup_deps
+  setup_deps 0
   export GOD_SETUP_MODE=1
   ensure_env_file
   rm -f "$START_REQUEST_FILE"
@@ -1186,10 +1212,14 @@ create_session() {
 start_all() {
   load_env
   require_current_experiment_config
-  setup_deps
   ensure_env_file
-  prepare_experiment
-  start_runtime
+  local runtime_required
+  runtime_required="$(experiment_requires_runtime)"
+  setup_deps "$runtime_required"
+  prepare_experiment "$runtime_required"
+  if [[ "$runtime_required" == "1" ]]; then
+    start_runtime
+  fi
   start_backend
   start_frontend
   create_session

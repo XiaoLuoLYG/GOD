@@ -1,10 +1,13 @@
 import asyncio
 import importlib.util
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
 import anyio
+import pytest
 from websockets.asyncio import client as websocket_client
+from websockets.asyncio.server import serve
 
 
 def _load_jiuwenclaw_agent_class():
@@ -252,3 +255,215 @@ def test_jiuwenclaw_websocket_uses_agent_server_keepalive(monkeypatch):
             "ping_timeout": 300,
         },
     }
+
+
+def _skill_choice_kwargs():
+    return {
+        "tick": 60,
+        "t": datetime(2026, 5, 26, tzinfo=timezone.utc),
+        "observation": {},
+        "catalog": [{"name": "routine.daily", "description": "day"}],
+        "mounted_skill_ids": ["routine.daily", "safety.respond"],
+        "pending_interventions": [],
+        "broadcast_result": "",
+    }
+
+
+def _ack() -> str:
+    return json.dumps({"type": "event", "event": "connection.ack"})
+
+
+def _final_frame(request_id: str, content: str) -> str:
+    return json.dumps(
+        {
+            "request_id": request_id,
+            "is_final": True,
+            "body": {"result": {"content": content}},
+        }
+    )
+
+
+def _keepalive_frame(request_id: str) -> str:
+    return json.dumps(
+        {
+            "request_id": request_id,
+            "is_final": False,
+            "payload": {"event_type": "keepalive"},
+        }
+    )
+
+
+def test_silent_open_socket_fails_at_request_timeout_and_reconnects():
+    """Session cancel leaves the socket ESTABLISHED and sends no final frame.
+
+    recv() does not raise. The request deadline must still end the attempt,
+    release the shared semaphore, and let the next request open a new socket.
+    """
+
+    JiuwenClawAgent = _load_jiuwenclaw_agent_class()
+    JiuwenClawAgent._request_semaphore = None
+    JiuwenClawAgent._request_semaphore_loop = None
+
+    async def run_case():
+        seen = {"n": 0}
+
+        async def handler(ws):
+            await ws.send(_ack())
+            raw = await ws.recv()
+            data = json.loads(raw)
+            seen["n"] += 1
+            if seen["n"] == 1:
+                try:
+                    while True:
+                        await ws.recv()
+                except Exception:
+                    return
+            await ws.send(_final_frame(data["request_id"], '{"selected_skill_id":"routine.daily"}'))
+
+        async with serve(handler, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            agent = JiuwenClawAgent(
+                id=6,
+                name="Agent 6",
+                profile={"name": "Agent 6"},
+                jiuwenclaw_ws_url=f"ws://127.0.0.1:{port}",
+                request_timeout=0.4,
+            )
+            loop = asyncio.get_running_loop()
+            started = loop.time()
+            decision = await agent._select_next_skill(**_skill_choice_kwargs())
+            elapsed = loop.time() - started
+            assert elapsed < 1.2
+            assert elapsed >= 0.4
+            assert decision["fallback"] is True
+            assert decision["selected_skill_id"] == "routine.daily"
+            assert agent._ws is None
+            assert agent._last_response.startswith("九问技能选择失败")
+            assert seen["n"] == 1
+            _semaphore, limit = agent._request_semaphore_for_current_loop()
+            assert limit == 24
+
+            started = loop.time()
+            text = await agent._send_jiuwenclaw_request("again")
+            assert loop.time() - started < 2
+            assert "routine.daily" in text
+            assert agent._ws is not None
+            assert seen["n"] == 2
+
+    anyio.run(run_case)
+
+
+def test_nonfinal_chunks_do_not_extend_the_request_deadline():
+    JiuwenClawAgent = _load_jiuwenclaw_agent_class()
+
+    async def run_case():
+        seen = {"n": 0}
+
+        async def handler(ws):
+            await ws.send(_ack())
+            raw = await ws.recv()
+            data = json.loads(raw)
+            seen["n"] += 1
+            if seen["n"] == 1:
+                try:
+                    while True:
+                        await ws.send(_keepalive_frame(data["request_id"]))
+                        await asyncio.sleep(0.05)
+                except Exception:
+                    return
+            await ws.send(_final_frame(data["request_id"], "done"))
+
+        async with serve(handler, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            agent = JiuwenClawAgent(
+                id=7,
+                name="Agent 7",
+                profile={"name": "Agent 7"},
+                jiuwenclaw_ws_url=f"ws://127.0.0.1:{port}",
+                request_timeout=0.45,
+            )
+            loop = asyncio.get_running_loop()
+            started = loop.time()
+            with pytest.raises(TimeoutError):
+                await agent._send_jiuwenclaw_request("keepalive only")
+            elapsed = loop.time() - started
+            assert elapsed < 0.9
+            assert seen["n"] == 1
+
+            text = await agent._send_jiuwenclaw_request("again")
+            assert text == "done"
+            assert seen["n"] == 2
+
+    anyio.run(run_case)
+
+
+def test_connect_is_inside_the_request_deadline():
+    JiuwenClawAgent = _load_jiuwenclaw_agent_class()
+
+    async def run_case():
+        agent = JiuwenClawAgent(
+            id=1,
+            name="Agent 1",
+            profile={"name": "Agent 1"},
+            request_timeout=0.3,
+        )
+
+        async def hang_connect(_uri: str):
+            await asyncio.Future()
+
+        agent._open_websocket = hang_connect
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        with pytest.raises(TimeoutError):
+            await agent._send_jiuwenclaw_request("connect hangs")
+        assert loop.time() - started < 1.0
+        assert agent._ws is None
+
+    anyio.run(run_case)
+
+
+def test_peer_going_away_reconnects_on_next_ask():
+    JiuwenClawAgent = _load_jiuwenclaw_agent_class()
+
+    async def run_case():
+        seen = {"n": 0}
+
+        async def handler(ws):
+            await ws.send(_ack())
+            raw = await ws.recv()
+            data = json.loads(raw)
+            seen["n"] += 1
+            if seen["n"] == 1:
+                await ws.send(_final_frame(data["request_id"], "first-answer"))
+                await ws.close(code=1001, reason="going away")
+                return
+            await ws.send(_final_frame(data["request_id"], "second-answer"))
+
+        async with serve(handler, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            agent = JiuwenClawAgent(
+                id=1,
+                name="Jiuwen Alice",
+                profile={"name": "Jiuwen Alice"},
+                jiuwenclaw_ws_url=f"ws://127.0.0.1:{port}",
+                request_timeout=2,
+            )
+            first = await agent._send_jiuwenclaw_request("hello")
+            assert first == "first-answer"
+            assert agent._ws is not None
+            for _ in range(50):
+                state = getattr(agent._ws, "state", None)
+                if getattr(state, "name", "") == "CLOSED":
+                    break
+                await asyncio.sleep(0.02)
+            assert getattr(getattr(agent._ws, "state", None), "name", "") == "CLOSED"
+
+            loop = asyncio.get_running_loop()
+            started = loop.time()
+            answer = await agent.ask("现在在做什么？")
+            assert loop.time() - started < 2
+            assert "1001" not in answer
+            assert answer == "second-answer"
+            assert seen["n"] == 2
+
+    anyio.run(run_case)
