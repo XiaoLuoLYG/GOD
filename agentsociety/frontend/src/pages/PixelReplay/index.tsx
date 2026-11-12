@@ -50,6 +50,14 @@ import {
     type LocalizedFields,
 } from '../../utils/runtimeLocalization';
 import { AgentBuilderPanel } from '../AgentBuilder';
+import {
+    displayStoredReplayText,
+    getMapZoomBounds,
+    shouldShowInitialReplayLoader,
+    snapAxisToDevicePixels,
+    snapZoomToTileGrid,
+    translateKnownStoredReplayText,
+} from './replayPure';
 import './style.css';
 
 const { Text, Title } = Typography;
@@ -65,8 +73,6 @@ const LEGACY_PATH_SEGMENT_TILE_COUNT = 8;
 const PHASER_TEXT_FONT_FAMILY = 'Arial, "PingFang SC", "Microsoft YaHei", sans-serif';
 const AGENT_NAME_LABEL_HEIGHT = 17;
 const SPEECH_BUBBLE_LABEL_GAP = 6;
-const CAMERA_MIN_ZOOM_FLOOR = 0.01;
-const CAMERA_MAX_ZOOM = 1.8;
 const AGENT_OVERLAP_SINGLE_RING_LIMIT = 8;
 const AGENT_OVERLAP_FIRST_RING_CAPACITY = 6;
 const AGENT_OVERLAP_RING_CAPACITY_STEP = 6;
@@ -372,6 +378,7 @@ type PhaserBridge = {
     scene?: Phaser.Scene;
     mapWidthPixels?: number;
     mapHeightPixels?: number;
+    tileSize?: number;
     sprites: Map<number, Phaser.GameObjects.Sprite>;
     labels: Map<number, Phaser.GameObjects.Text>;
     hitZones: Map<number, Phaser.GameObjects.Zone>;
@@ -851,7 +858,6 @@ function formatRuntimeFieldValue(value: unknown, key: string, frame: PixelFrame,
         return displayStoredText(
             localizeSystemEvent(value, language, frame.map, frame.map.locations),
             language,
-            STORED_EVENT_FALLBACK_EN,
         ) || emptyValue;
     }
     return formatValue(value, emptyValue);
@@ -1227,7 +1233,7 @@ function buildPixelFrame(
             movementSegment,
             visualOffset: { x: 0, y: 0 },
             action: translateKnownStoredReplayText(rawDescription, labels.language)
-                ?? displayStoredText(localizedAction, labels.language, STORED_ACTION_FALLBACK_EN),
+                ?? displayStoredText(localizedAction, labels.language),
             status: status ? localizeStatusLabel(status, labels.language) : undefined,
             location: localizeLocationReference(location ?? locationId ?? labels.defaultLocation, labels.language, walkableMap, walkableMap.locations),
             locationId,
@@ -1235,11 +1241,11 @@ function buildPixelFrame(
             targetLocationId: targetLocationId ? localizeLocationReference(targetLocationId, labels.language, walkableMap, walkableMap.locations) : undefined,
             hasReplayTile,
             emotion: localizeEmotionLabel(emotion, labels.language),
-            lastMessage: translateStoredReplayText(lastMessage, labels.language, STORED_MESSAGE_FALLBACK_EN),
+            lastMessage: translateStoredReplayText(lastMessage, labels.language),
             messageCount: pickNumberValue(row, 'message_count'),
             currentPhase: currentPhase ?? pickDisplayValue(envRow ?? {}, ['current_phase']),
             latestEvent: translateKnownStoredReplayText(rawLatestEvent, labels.language)
-                ?? translateStoredReplayText(localizedLatestEvent, labels.language, STORED_EVENT_FALLBACK_EN),
+                ?? translateStoredReplayText(localizedLatestEvent, labels.language),
             stepCommunications: filterAgentStepCommunications(profile.id, stepCommunications),
             availableInteractions,
         };
@@ -1278,58 +1284,19 @@ const sleep = (ms: number) => new Promise<void>((resolve) => {
 
 const toErrorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-const STORED_MESSAGE_FALLBACK_EN = 'Stored message contains non-English content.';
-const STORED_ACTION_FALLBACK_EN = 'Stored action contains non-English content.';
-const STORED_EVENT_FALLBACK_EN = 'Stored event contains non-English content.';
-
-const STORED_REPLAY_TEXT_EN: Record<string, string> = {
-    'Jiuwen Alice 正在公园和大家碰头': 'Jiuwen Alice is meeting everyone in Johnson Park.',
-    'Jiuwen Charlie 正在学校进行课后答疑': 'Jiuwen Charlie is holding office hours in the school classroom.',
-    'Jiuwen Hana 正在家里做饭': 'Jiuwen Hana is cooking at home.',
-    'Jiuwen Mei 正在市场店铺值班': 'Jiuwen Mei is working a shop shift at The Willows Market.',
-    前往哈维橡树供给店: 'Heading to Harvey Oak Supply Store.',
-    前往学校教室: 'Heading to the school classroom.',
-    前往家: 'Heading home.',
-    前往柳树市场: 'Heading to The Willows Market.',
-    前往约翰逊公园: 'Heading to Johnson Park.',
-    'Jiuwen Bob 正在前往哈维橡树供给店。': 'Jiuwen Bob is heading to Harvey Oak Supply Store.',
-    '我会把当前情况整理清楚，并同步给需要知道的人。': 'I will organize the current situation clearly and update the people who need to know.',
-    '我先把摊位收拾好，再接待顾客。': 'I will tidy the stall first, then help customers.',
-    '我用年轻人听得进去的方式聊。': 'I will talk in a way younger people can actually hear.',
-    'Jiuwen Alice 在公园说：执行社区协调': 'Jiuwen Alice says in Johnson Park: coordinating the community.',
-};
-
-const hasHan = (value: string) => /[\u4e00-\u9fff]/.test(value);
-
-const translateKnownStoredReplayText = (value: unknown, language: string): string | undefined => {
-    const text = String(value || '').trim();
-    if (!language?.startsWith('en') || !text) {
-        return undefined;
-    }
-    return STORED_REPLAY_TEXT_EN[text];
-};
-
-const translateStoredReplayText = (value: unknown, language: string, fallback: string): string | undefined => {
-    const text = String(value || '').trim();
-    if (!text) {
-        return undefined;
-    }
-    if (!language?.startsWith('en')) {
-        return text;
-    }
-    return STORED_REPLAY_TEXT_EN[text] ?? (hasHan(text) ? fallback : text);
+const translateStoredReplayText = (value: unknown, language: string): string | undefined => {
+    const text = displayStoredReplayText(value, language);
+    return text || undefined;
 };
 
 const translateStoredCommunications = (communications: Communication[], language: string): Communication[] => (
     communications.map((item) => ({
         ...item,
-        content: translateStoredReplayText(item.content, language, STORED_MESSAGE_FALLBACK_EN),
+        content: translateStoredReplayText(item.content, language),
     }))
 );
 
-const displayStoredText = (value: unknown, language: string, fallback: string) => {
-    return translateStoredReplayText(value, language, fallback) ?? '';
-};
+const displayStoredText = (value: unknown, language: string) => displayStoredReplayText(value, language);
 
 const isReplayDatabaseNotReadyError = (error: unknown) => (
     toErrorMessage(error).includes('Database not found')
@@ -1443,21 +1410,70 @@ function formatTime(value?: string | null): string {
     return value.replace('T', ' ').replace(/\.\d+$/, '');
 }
 
-function getMapZoomBounds(viewportWidth: number, viewportHeight: number, mapWidth: number, mapHeight: number) {
-    const containZoom = Math.min(viewportWidth / mapWidth, viewportHeight / mapHeight);
-    const coverZoom = Math.max(viewportWidth / mapWidth, viewportHeight / mapHeight);
-    const minZoom = Math.max(CAMERA_MIN_ZOOM_FLOOR, containZoom);
-    return {
-        coverZoom,
-        minZoom,
-        maxZoom: Math.max(CAMERA_MAX_ZOOM, coverZoom, minZoom),
+type TilemapCanvasRenderer = {
+    currentContext: CanvasRenderingContext2D | null;
+};
+
+type TilemapRenderCanvas = (
+    this: Phaser.Tilemaps.TilemapLayer,
+    renderer: TilemapCanvasRenderer,
+    src: Phaser.Tilemaps.TilemapLayer,
+    camera: Phaser.Cameras.Scene2D.Camera,
+    parentMatrix?: Phaser.GameObjects.Components.TransformMatrix,
+) => void;
+
+// Fractional camera scale plus nearest-neighbor canvas tiles leaves 1px gaps of the
+// clear color. Grow each tile by one device pixel so neighbors overlap. Zoom stays put.
+function preventCanvasTileSeams() {
+    const proto = Phaser.Tilemaps.TilemapLayer.prototype as Phaser.Tilemaps.TilemapLayer & {
+        renderCanvas?: TilemapRenderCanvas;
+        tileSeamOverlap?: boolean;
     };
+    if (proto.tileSeamOverlap || !proto.renderCanvas) {
+        return;
+    }
+    const original = proto.renderCanvas;
+    proto.renderCanvas = function (renderer, src, camera, parentMatrix) {
+        const ctx = renderer.currentContext;
+        if (!ctx) {
+            original.call(this, renderer, src, camera, parentMatrix);
+            return;
+        }
+        const drawImage = ctx.drawImage;
+        const zoom = Math.max(camera.zoomX || camera.zoom || 1, 0.0001);
+        const pixelRatio = typeof window === 'undefined' ? 1 : (window.devicePixelRatio || 1);
+        const pad = Math.max(1, pixelRatio) / zoom;
+        const patchedDraw = (
+            ...args: Parameters<CanvasRenderingContext2D['drawImage']>
+        ) => {
+            if (args.length !== 9) {
+                return drawImage.apply(ctx, args);
+            }
+            const [image, sx, sy, sw, sh, dx, dy, dw, dh] = args;
+            return drawImage.call(
+                ctx,
+                image,
+                sx,
+                sy,
+                sw,
+                sh,
+                dx - pad / 2,
+                dy - pad / 2,
+                dw + pad,
+                dh + pad,
+            );
+        };
+        ctx.drawImage = patchedDraw as typeof ctx.drawImage;
+        try {
+            original.call(this, renderer, src, camera, parentMatrix);
+        } finally {
+            ctx.drawImage = drawImage;
+        }
+    };
+    proto.tileSeamOverlap = true;
 }
 
-function clampZoom(value: number, viewportWidth: number, viewportHeight: number, mapWidth: number, mapHeight: number) {
-    const { minZoom, maxZoom } = getMapZoomBounds(viewportWidth, viewportHeight, mapWidth, mapHeight);
-    return Phaser.Math.Clamp(value, minZoom, maxZoom);
-}
+preventCanvasTileSeams();
 
 function clampCameraScroll(scene: Phaser.Scene, bridge: PhaserBridge) {
     const camera = scene.cameras.main;
@@ -1475,11 +1491,17 @@ function fitCameraToMap(scene: Phaser.Scene, bridge: PhaserBridge) {
     if (!mapWidth || !mapHeight) {
         return;
     }
-    const { coverZoom } = getMapZoomBounds(camera.width, camera.height, mapWidth, mapHeight);
-    const nextZoom = clampZoom(coverZoom, camera.width, camera.height, mapWidth, mapHeight);
-    camera.setZoom(nextZoom);
+    const tileSize = bridge.tileSize || TILE_SIZE;
+    const { fitZoom } = getMapZoomBounds(camera.width, camera.height, mapWidth, mapHeight, tileSize);
+    camera.setZoom(fitZoom);
     camera.centerOn(mapWidth / 2, mapHeight / 2);
     clampCameraScroll(scene, bridge);
+    snapCameraToDevicePixels(camera);
+}
+
+function snapCameraToDevicePixels(camera: Phaser.Cameras.Scene2D.Camera) {
+    camera.scrollX = snapAxisToDevicePixels(camera.scrollX, camera.zoom);
+    camera.scrollY = snapAxisToDevicePixels(camera.scrollY, camera.zoom);
 }
 
 function zoomCameraAtScreenPoint(
@@ -1496,12 +1518,15 @@ function zoomCameraAtScreenPoint(
         return;
     }
     const before = camera.getWorldPoint(screenX, screenY);
-    const nextZoom = clampZoom(camera.zoom + delta, camera.width, camera.height, mapWidth, mapHeight);
+    const tileSize = bridge.tileSize || TILE_SIZE;
+    const { minZoom, maxZoom } = getMapZoomBounds(camera.width, camera.height, mapWidth, mapHeight, tileSize);
+    const nextZoom = snapZoomToTileGrid(camera.zoom + delta, tileSize, minZoom, maxZoom);
     camera.setZoom(nextZoom);
     const after = camera.getWorldPoint(screenX, screenY);
     camera.scrollX += before.x - after.x;
     camera.scrollY += before.y - after.y;
     clampCameraScroll(scene, bridge);
+    snapCameraToDevicePixels(camera);
 }
 
 function zoomCameraAtCenter(scene: Phaser.Scene, bridge: PhaserBridge, delta: number) {
@@ -1593,8 +1618,7 @@ function getFitScreenPosition(agent: PixelAgent, map: WalkableMap, canvasSize: C
     if (mapWidth <= 0 || mapHeight <= 0) {
         return undefined;
     }
-    const { coverZoom } = getMapZoomBounds(canvasSize.width, canvasSize.height, mapWidth, mapHeight);
-    const zoom = clampZoom(coverZoom, canvasSize.width, canvasSize.height, mapWidth, mapHeight);
+    const { fitZoom: zoom } = getMapZoomBounds(canvasSize.width, canvasSize.height, mapWidth, mapHeight, tileSize);
     const originX = canvasSize.width / 2;
     const originY = canvasSize.height / 2;
     const displayWidth = canvasSize.width / zoom;
@@ -1603,8 +1627,14 @@ function getFitScreenPosition(agent: PixelAgent, map: WalkableMap, canvasSize: C
     const minScrollY = (displayHeight - canvasSize.height) / 2;
     const maxScrollX = Math.max(minScrollX, minScrollX + mapWidth - displayWidth);
     const maxScrollY = Math.max(minScrollY, minScrollY + mapHeight - displayHeight);
-    const scrollX = Phaser.Math.Clamp(mapWidth / 2 - originX, minScrollX, maxScrollX);
-    const scrollY = Phaser.Math.Clamp(mapHeight / 2 - originY, minScrollY, maxScrollY);
+    const scrollX = snapAxisToDevicePixels(
+        Phaser.Math.Clamp(mapWidth / 2 - originX, minScrollX, maxScrollX),
+        zoom,
+    );
+    const scrollY = snapAxisToDevicePixels(
+        Phaser.Math.Clamp(mapHeight / 2 - originY, minScrollY, maxScrollY),
+        zoom,
+    );
     const { x: worldX, y: worldY } = getAgentWorldPosition(agent, tileSize);
     const speechOffsetY = getCompactSpeechBubbleMetrics(tileSize, zoom).offsetY * zoom;
     const screenX = originX + (worldX - scrollX - originX) * zoom;
@@ -1788,7 +1818,7 @@ function PixelTownCanvas({
     onOpenSetup: () => void;
     onOpenSkills: () => void;
 }) {
-    const { t } = useTranslation();
+    const { t, i18n } = useTranslation();
     const containerRef = useRef<HTMLDivElement | null>(null);
     const gameRef = useRef<Phaser.Game | null>(null);
     const bridgeRef = useRef<PhaserBridge>({
@@ -1803,6 +1833,8 @@ function PixelTownCanvas({
     const frameRef = useRef<PixelFrame | undefined>(frame);
     const onSelectAgentRef = useRef(onSelectAgent);
     const stepDurationMsRef = useRef(stepDurationMs);
+    const mapRef = useRef(map);
+    mapRef.current = map;
     const agentScreenPositionsRef = useRef<Record<number, AgentScreenPosition>>({});
     const [hoverState, setHoverState] = useState<AgentHoverState | undefined>();
     const [speechHoverAgentId, setSpeechHoverAgentId] = useState<number | undefined>();
@@ -1982,7 +2014,19 @@ function PixelTownCanvas({
         setHoverState({ agentId, x, y });
     }, [clampHoverPosition, readAgentScreenPosition, showSpeechBubbleForAgent, syncAgentScreenPositions]);
 
+    const hoverAgentRef = useRef(handleHoverAgent);
+    hoverAgentRef.current = handleHoverAgent;
+    const syncPositionsRef = useRef(syncAgentScreenPositions);
+    syncPositionsRef.current = syncAgentScreenPositions;
+
     useEffect(() => {
+        const map = mapRef.current;
+        const syncAgentScreenPositions = () => {
+            syncPositionsRef.current();
+        };
+        const handleHoverAgent = (agentId: number | undefined, pointer?: Phaser.Input.Pointer) => {
+            hoverAgentRef.current(agentId, pointer);
+        };
         if (!containerRef.current || gameRef.current) {
             return;
         }
@@ -2038,6 +2082,7 @@ function PixelTownCanvas({
 
                 bridgeRef.current.mapWidthPixels = tilemap.widthInPixels;
                 bridgeRef.current.mapHeightPixels = tilemap.heightInPixels;
+                bridgeRef.current.tileSize = map.tileSize || TILE_SIZE;
                 renderLocationMarkers(this, map, bridgeRef.current);
                 this.cameras.main.setBounds(0, 0, tilemap.widthInPixels, tilemap.heightInPixels);
                 fitCameraToMap(this, bridgeRef.current);
@@ -2117,7 +2162,23 @@ function PixelTownCanvas({
                 locationMarkers: [],
             };
         };
-    }, [handleHoverAgent, map, syncAgentScreenPositions]);
+        // Language-only updates keep this map asset. Recreating the game reloads the first frame.
+    }, [map.mapId, map.tiledMapUrl]);
+
+    useEffect(() => {
+        const markers = bridgeRef.current.locationMarkers ?? [];
+        markers.forEach((marker) => {
+            if (!(marker instanceof Phaser.GameObjects.Text)) {
+                return;
+            }
+            const locationId = String(marker.getData('locationId') || '');
+            const location = map.locations.find((item) => item.id === locationId);
+            if (!location) {
+                return;
+            }
+            marker.setText(localizeMapLocationName(map.mapId, location, i18n.language));
+        });
+    }, [i18n.language, map]);
 
     useEffect(() => {
         if (bridgeRef.current.scene) {
@@ -2191,7 +2252,9 @@ function PixelTownCanvas({
                 />
             ) : null}
             <div className="pixel-canvas-controls">
-                <Tooltip title={t('replay.pixel.canvas.resetFit', { map: map.displayName })}>
+                <Tooltip title={t('replay.pixel.canvas.resetFit', {
+                    map: localizeMapDisplayName(map, i18n.language),
+                })}>
                     <Button
                         shape="circle"
                         icon={<AimOutlined />}
@@ -2332,6 +2395,7 @@ function renderLocationMarkers(scene: Phaser.Scene, map: WalkableMap, bridge: Ph
                 backgroundColor: 'rgba(15, 23, 42, 0.68)',
                 padding: { x: 3, y: 1 },
             });
+            label.setData('locationId', location.id);
             label.setOrigin(0.5, 1);
             label.setDepth(22);
             label.setAlpha(0.82);
@@ -2805,6 +2869,10 @@ function updateSelection(bridge: PhaserBridge) {
 export default function PixelReplay() {
     const { t, i18n } = useTranslation();
     const currentLanguage = i18n.language;
+    const translationRef = useRef(t);
+    translationRef.current = t;
+    const languageRef = useRef(currentLanguage);
+    languageRef.current = currentLanguage;
     const [messageApi, messageContextHolder] = message.useMessage();
     const navigate = useNavigate();
     const { hypothesisId, experimentId } = useParams();
@@ -2905,7 +2973,7 @@ export default function PixelReplay() {
 
         async function init() {
             if (!workspacePath) {
-                setError(t('replay.pixel.error.missingWorkspace'));
+                setError(translationRef.current('replay.pixel.error.missingWorkspace'));
                 setLoading(false);
                 return;
             }
@@ -2924,7 +2992,7 @@ export default function PixelReplay() {
                         let liveStartupError: unknown;
                         if (liveBaseUrl) {
                             try {
-                                setLoadingDetail(t('replay.pixel.loading.startingLive'));
+                                setLoadingDetail(translationRef.current('replay.pixel.loading.startingLive'));
                                 loadedLiveStatus = await ensureInitialLiveReplayFrame(liveBaseUrl, withLiveWorkspace);
                             } catch (err) {
                                 liveStartupError = err;
@@ -2944,13 +3012,21 @@ export default function PixelReplay() {
                             }
                             throw err;
                         }
-                        const loadedMap = await loadWalkableMap(mapInfo, initialProfiles, t, currentLanguage);
+                        const loadedMap = await loadWalkableMap(
+                            mapInfo,
+                            initialProfiles,
+                            translationRef.current,
+                            languageRef.current,
+                        );
                         await refreshReplayData(true);
                         return { nextMap: loadedMap, nextLiveStatus: loadedLiveStatus };
                     },
                     (err, attempt) => {
                         if (!cancelled) {
-                            setLoadingDetail(t('replay.pixel.loading.retry', { attempt, error: toErrorMessage(err) }));
+                            setLoadingDetail(translationRef.current('replay.pixel.loading.retry', {
+                                attempt,
+                                error: toErrorMessage(err),
+                            }));
                         }
                     },
                     () => cancelled,
@@ -2984,7 +3060,8 @@ export default function PixelReplay() {
         return () => {
             cancelled = true;
         };
-    }, [currentLanguage, liveBaseUrl, refreshReplayData, replayBaseUrl, t, withLiveWorkspace, workspacePath]);
+        // Language is omitted on purpose. Changing it must not reload the town or the first frame.
+    }, [liveBaseUrl, refreshReplayData, replayBaseUrl, withLiveWorkspace, withWorkspace, workspacePath]);
 
     const liveSessionReady = Boolean(liveStatus);
 
@@ -3453,7 +3530,7 @@ export default function PixelReplay() {
         </div>
     );
 
-    if (loading) {
+    if (shouldShowInitialReplayLoader(loading, Boolean(frame))) {
         return (
             <div className="pixel-replay-loading">
                 <Spin size="large" />
@@ -3621,7 +3698,9 @@ export default function PixelReplay() {
                                             <div className="pixel-replay-stats">
                                                 <Tag>{t('replay.pixel.overview.residents', { count: info?.agent_count ?? profiles.length })}</Tag>
                                                 <Tag>{t('replay.pixel.overview.steps', { count: info?.total_steps ?? timeline.length })}</Tag>
-                                                <Tag color="geekblue">{frame.map.displayName}</Tag>
+                                                <Tag color="geekblue">
+                                                    {localizeMapDisplayName(frame.map, currentLanguage)}
+                                                </Tag>
                                                 {envSnapshot?.total_messages_sent !== undefined && (
                                                     <Tag color="green">{t('replay.pixel.overview.messages', { count: Number(envSnapshot.total_messages_sent) || 0 })}</Tag>
                                                 )}
@@ -3646,9 +3725,13 @@ export default function PixelReplay() {
                                             {envSnapshot?.latest_event !== undefined && (
                                                 <Text className="pixel-step-event">
                                                     {displayStoredText(
-                                                        localizeSystemEvent(envSnapshot.latest_event, currentLanguage, frame.map, frame.map.locations),
+                                                        localizeSystemEvent(
+                                                            envSnapshot.latest_event,
+                                                            currentLanguage,
+                                                            frame.map,
+                                                            frame.map.locations,
+                                                        ),
                                                         currentLanguage,
-                                                        STORED_EVENT_FALLBACK_EN,
                                                     )}
                                                 </Text>
                                             )}
@@ -3687,7 +3770,7 @@ export default function PixelReplay() {
                                                             })}
                                                     </Text>
                                                     <Text className="pixel-message-text">
-                                                        {displayStoredText(item.content, currentLanguage, t('replay.pixel.chat.nonEnglishMessage'))}
+                                                        {displayStoredText(item.content, currentLanguage)}
                                                     </Text>
                                                 </div>
                                             ))}
@@ -3720,7 +3803,7 @@ export default function PixelReplay() {
                                                 <Text type="secondary">{t('replay.pixel.residents.selected')}</Text>
                                                 <Text strong>{selectedAgent.name}</Text>
                                                 <Text>
-                                                    {displayStoredText(selectedAgent.action, currentLanguage, t('replay.pixel.residents.nonEnglishAction'))}
+                                                    {displayStoredText(selectedAgent.action, currentLanguage)}
                                                 </Text>
                                                 <Text type="secondary">{t('replay.pixel.residents.location', { location: selectedAgent.location })}</Text>
                                                 <Space size={4} wrap>
@@ -3747,7 +3830,10 @@ export default function PixelReplay() {
                                                 {selectedAgent.lastMessage && (
                                                     <Text className="pixel-message-text">
                                                         {t('replay.pixel.residents.lastReceived', {
-                                                            message: displayStoredText(selectedAgent.lastMessage, currentLanguage, t('replay.pixel.chat.nonEnglishMessage')),
+                                                            message: displayStoredText(
+                                                                selectedAgent.lastMessage,
+                                                                currentLanguage,
+                                                            ),
                                                         })}
                                                     </Text>
                                                 )}
@@ -3787,7 +3873,7 @@ export default function PixelReplay() {
                                                 >
                                                     <span className="pixel-agent-name">{agent.name}</span>
                                                     <span className="pixel-agent-action">
-                                                        {displayStoredText(agent.action, currentLanguage, t('replay.pixel.residents.nonEnglishAction'))}
+                                                        {displayStoredText(agent.action, currentLanguage)}
                                                     </span>
                                                     <span className="pixel-agent-location">{agent.location}</span>
                                                     <span className="pixel-agent-location">
@@ -3798,7 +3884,10 @@ export default function PixelReplay() {
                                                     {agent.lastMessage && (
                                                         <span className="pixel-agent-location">
                                                             {t('replay.pixel.residents.lastReceived', {
-                                                                message: displayStoredText(agent.lastMessage, currentLanguage, t('replay.pixel.chat.nonEnglishMessage')),
+                                                                message: displayStoredText(
+                                                                    agent.lastMessage,
+                                                                    currentLanguage,
+                                                                ),
                                                             })}
                                                         </span>
                                                     )}

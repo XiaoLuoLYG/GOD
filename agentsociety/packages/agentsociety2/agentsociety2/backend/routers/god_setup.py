@@ -2083,7 +2083,7 @@ async def setup_status() -> dict[str, Any]:
 async def latest_draft() -> dict[str, Any]:
     payload = _read_latest_draft()
     if payload is None:
-        raise HTTPException(status_code=404, detail="No generated setup draft found")
+        return {"generated_at": None, "basics": None, "draft": None}
     return payload
 
 
