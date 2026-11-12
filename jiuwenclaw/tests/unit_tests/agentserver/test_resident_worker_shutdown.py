@@ -7,13 +7,17 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from pathlib import Path
 import uuid
 
 import pytest
 
 from jiuwenswarm.server.ipc.protocol import KIND_HELLO, KIND_SHUTDOWN
 from jiuwenswarm.server.ipc.server import IpcServer
-from jiuwenswarm.server.supervisor.worker_process import request_resident_worker_shutdown
+from jiuwenswarm.server.supervisor.worker_process import (
+    default_socket_path,
+    request_resident_worker_shutdown,
+)
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="unix socket endpoint")
 
@@ -68,5 +72,24 @@ async def test_request_shutdown_rejects_non_worker_endpoint() -> None:
         with pytest.raises(RuntimeError):
             await request_resident_worker_shutdown(path)
         await asyncio.wait_for(serve_task, 2)
+    finally:
+        await server.close()
+
+
+@pytest.mark.asyncio
+async def test_long_home_runtime_socket_can_start_and_stop(tmp_path, monkeypatch) -> None:
+    home = tmp_path / ("工作区" * 25)
+    monkeypatch.setenv("JIUWENSWARM_HOME", str(home))
+    monkeypatch.delenv("JIUWENSWARM_RUNTIME_SOCKET", raising=False)
+
+    path = default_socket_path()
+    assert len(os.fsencode(path)) < 100
+    assert path == default_socket_path()
+    assert Path(path).parent.stat().st_mode & 0o777 == 0o700
+
+    server = IpcServer(path)
+    await server.start()
+    try:
+        assert Path(path).is_socket()
     finally:
         await server.close()

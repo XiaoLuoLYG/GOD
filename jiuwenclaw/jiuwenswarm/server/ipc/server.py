@@ -86,7 +86,7 @@ class IpcServer:
 
     async def _start_unix(self) -> None:
         target = Path(self.path)
-        if len(str(target)) >= 100:
+        if len(os.fsencode(target)) >= 100:
             raise OSError(f"unix socket path is too long: {target}")
         target.parent.mkdir(parents=True, exist_ok=True)
         _restrict_runtime_dir(target.parent)
