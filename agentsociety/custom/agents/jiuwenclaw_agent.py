@@ -19,12 +19,15 @@ from pathlib import Path
 from typing import Any, ClassVar
 from urllib.parse import urlsplit
 
+import aiohttp
+
 from agentsociety2.agent.base import AgentBase
 from agentsociety2.agent.skills import SkillRegistry
 from agentsociety2.agent.skills.runtime import AgentSkillRuntime
 
 
 DEFAULT_JIUWENCLAW_WS_URL = "ws://127.0.0.1:18092"
+JEV_API_URL = "https://api.typesafe.ai/v1/systemone"
 DEFAULT_CHANNEL_ID = "agentsociety"
 DEFAULT_MODE = "agent.plan"
 DEFAULT_JIUWENCLAW_REQUEST_CONCURRENCY = 24
@@ -554,6 +557,7 @@ Initialization example:
             broadcast_result=broadcast_result,
         )
         selected_skill_id = str(decision.get("selected_skill_id") or "").strip()
+        comparison = decision.get("jev_shadow")
         if selected_skill_id not in mounted:
             decision = self._fallback_skill_decision(
                 mounted_skill_ids=mounted,
@@ -562,6 +566,11 @@ Initialization example:
                 reason=f"选择的技能无效或不可用：{selected_skill_id}",
             )
             selected_skill_id = str(decision.get("selected_skill_id") or "").strip()
+
+        if isinstance(comparison, dict):
+            if comparison.get("status") == "completed":
+                comparison["matches_selected_skill"] = comparison["choice"] == selected_skill_id
+            decision["jev_shadow"] = comparison
 
         self._last_skill_decision = dict(decision)
         if not selected_skill_id:
@@ -662,29 +671,100 @@ Initialization example:
             pending_interventions=pending_interventions,
             broadcast_result=broadcast_result,
         )
+        comparison = None
         try:
-            raw = await self._send_jiuwenclaw_request(prompt)
+            raw, comparison = await asyncio.gather(
+                self._send_jiuwenclaw_request(prompt),
+                self._request_jev_skill_choice(
+                    state={
+                        "agent_id": self.id, "profile": _json_safe(self.get_profile()),
+                        "time": t.isoformat(), "tick": tick,
+                        "experiment_context": _json_safe(self._experiment_context),
+                        "observation": _json_safe(observation),
+                        "pending_interventions": pending_interventions,
+                        "broadcast_result": broadcast_result,
+                    },
+                    catalog=[item for item in catalog if item.get("name") in mounted_skill_ids],
+                ),
+                return_exceptions=True,
+            )
+            if isinstance(raw, BaseException):
+                raise raw
             self._last_response = raw
             self._append_thread_message("user", prompt, tick=tick, t=t)
             self._append_thread_message("assistant", raw, tick=tick, t=t)
             decision = self._parse_step_decision(raw)
             if isinstance(decision, dict) and decision.get("_parsed"):
                 decision.pop("_parsed", None)
-                return decision
-            return self._fallback_skill_decision(
-                mounted_skill_ids=mounted_skill_ids,
-                observation=observation,
-                pending_interventions=pending_interventions,
-                reason="九问返回的技能决策不是 JSON。",
-            )
+            else:
+                decision = self._fallback_skill_decision(
+                    mounted_skill_ids=mounted_skill_ids,
+                    observation=observation,
+                    pending_interventions=pending_interventions,
+                    reason="九问返回的技能决策不是 JSON。",
+                )
         except Exception as exc:
             self._last_response = f"九问技能选择失败：{exc}"
-            return self._fallback_skill_decision(
+            decision = self._fallback_skill_decision(
                 mounted_skill_ids=mounted_skill_ids,
                 observation=observation,
                 pending_interventions=pending_interventions,
                 reason=str(exc),
             )
+        if isinstance(comparison, dict):
+            if comparison.get("status") == "completed":
+                comparison["matches_selected_skill"] = comparison["choice"] == decision.get("selected_skill_id")
+            decision["jev_shadow"] = comparison
+        return decision
+
+    @staticmethod
+    async def _request_jev_skill_choice(
+        *, state: dict[str, Any], catalog: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        if os.getenv("GOD_JEV_SHADOW") != "1":
+            return None
+        api_key = os.getenv("TYPESAFE_API_KEY", "").strip()
+        if not api_key:
+            return {"status": "skipped", "error": "missing_api_key"}
+        criteria = {str(item["name"]): item.get("description") or str(item["name"]) for item in catalog}
+        if not 1 <= len(criteria) <= 255:
+            return {"status": "skipped", "error": "unsupported_catalog_size"}
+        started = time.perf_counter()
+        try:
+            # ponytail: cap optional comparisons at 5s; tune only after live latency measurements.
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5, ceil_threshold=float("inf"))) as session:
+                async with session.post(
+                    JEV_API_URL,
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json={
+                        "model": os.getenv("GOD_JEV_MODEL", "jev-latest"),
+                        "state": state,
+                        "questions": {"skill": {
+                            "type": "choice",
+                            "instructions": "Choose the one available skill this agent should execute next, considering its persona, observation and pending interventions.",
+                            "criteria": criteria,
+                        }},
+                    },
+                ) as response:
+                    response.raise_for_status()
+                    data = await response.json()
+            answer = data["answers"]["skill"]
+            confidence = answer["confidence"]
+            if (answer["type"] != "choice" or answer["choice"] not in criteria
+                    or type(confidence) not in (int, float) or not 0 <= confidence <= 1):
+                raise ValueError("Invalid Jev skill choice")
+            result = {
+                "status": "completed", "model": data["model"],
+                "choice": answer["choice"], "confidence": confidence,
+                "probabilities": answer.get("probabilities", {}), "usage": data.get("usage", {}),
+            }
+        except Exception as exc:
+            # Do not persist provider response bodies or exception strings containing credentials.
+            result = {"status": "error", "error": type(exc).__name__}
+            if isinstance(exc, aiohttp.ClientResponseError):
+                result["http_status"] = exc.status
+        result["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
+        return result
 
     def _build_skill_selection_prompt(
         self,
