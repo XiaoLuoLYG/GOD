@@ -52,7 +52,7 @@ import {
 import { AgentBuilderPanel } from '../AgentBuilder';
 import {
     displayStoredReplayText,
-    fitZoomOnTileGrid,
+    getMapZoomBounds,
     shouldShowInitialReplayLoader,
     snapAxisToDevicePixels,
     snapZoomToTileGrid,
@@ -73,8 +73,6 @@ const LEGACY_PATH_SEGMENT_TILE_COUNT = 8;
 const PHASER_TEXT_FONT_FAMILY = 'Arial, "PingFang SC", "Microsoft YaHei", sans-serif';
 const AGENT_NAME_LABEL_HEIGHT = 17;
 const SPEECH_BUBBLE_LABEL_GAP = 6;
-const CAMERA_MIN_ZOOM_FLOOR = 0.01;
-const CAMERA_MAX_ZOOM = 1.8;
 const AGENT_OVERLAP_SINGLE_RING_LIMIT = 8;
 const AGENT_OVERLAP_FIRST_RING_CAPACITY = 6;
 const AGENT_OVERLAP_RING_CAPACITY_STEP = 6;
@@ -1412,17 +1410,6 @@ function formatTime(value?: string | null): string {
     return value.replace('T', ' ').replace(/\.\d+$/, '');
 }
 
-function getMapZoomBounds(viewportWidth: number, viewportHeight: number, mapWidth: number, mapHeight: number) {
-    const containZoom = Math.min(viewportWidth / mapWidth, viewportHeight / mapHeight);
-    const coverZoom = Math.max(viewportWidth / mapWidth, viewportHeight / mapHeight);
-    const minZoom = Math.max(CAMERA_MIN_ZOOM_FLOOR, containZoom);
-    return {
-        coverZoom,
-        minZoom,
-        maxZoom: Math.max(CAMERA_MAX_ZOOM, coverZoom, minZoom),
-    };
-}
-
 type TilemapCanvasRenderer = {
     currentContext: CanvasRenderingContext2D | null;
 };
@@ -1505,17 +1492,8 @@ function fitCameraToMap(scene: Phaser.Scene, bridge: PhaserBridge) {
         return;
     }
     const tileSize = bridge.tileSize || TILE_SIZE;
-    const { minZoom, maxZoom } = getMapZoomBounds(camera.width, camera.height, mapWidth, mapHeight);
-    const nextZoom = fitZoomOnTileGrid(
-        camera.width,
-        camera.height,
-        mapWidth,
-        mapHeight,
-        tileSize,
-        minZoom,
-        maxZoom,
-    );
-    camera.setZoom(nextZoom);
+    const { fitZoom } = getMapZoomBounds(camera.width, camera.height, mapWidth, mapHeight, tileSize);
+    camera.setZoom(fitZoom);
     camera.centerOn(mapWidth / 2, mapHeight / 2);
     clampCameraScroll(scene, bridge);
     snapCameraToDevicePixels(camera);
@@ -1540,8 +1518,8 @@ function zoomCameraAtScreenPoint(
         return;
     }
     const before = camera.getWorldPoint(screenX, screenY);
-    const { minZoom, maxZoom } = getMapZoomBounds(camera.width, camera.height, mapWidth, mapHeight);
     const tileSize = bridge.tileSize || TILE_SIZE;
+    const { minZoom, maxZoom } = getMapZoomBounds(camera.width, camera.height, mapWidth, mapHeight, tileSize);
     const nextZoom = snapZoomToTileGrid(camera.zoom + delta, tileSize, minZoom, maxZoom);
     camera.setZoom(nextZoom);
     const after = camera.getWorldPoint(screenX, screenY);
@@ -1640,21 +1618,7 @@ function getFitScreenPosition(agent: PixelAgent, map: WalkableMap, canvasSize: C
     if (mapWidth <= 0 || mapHeight <= 0) {
         return undefined;
     }
-    const { minZoom, maxZoom } = getMapZoomBounds(
-        canvasSize.width,
-        canvasSize.height,
-        mapWidth,
-        mapHeight,
-    );
-    const zoom = fitZoomOnTileGrid(
-        canvasSize.width,
-        canvasSize.height,
-        mapWidth,
-        mapHeight,
-        tileSize,
-        minZoom,
-        maxZoom,
-    );
+    const { fitZoom: zoom } = getMapZoomBounds(canvasSize.width, canvasSize.height, mapWidth, mapHeight, tileSize);
     const originX = canvasSize.width / 2;
     const originY = canvasSize.height / 2;
     const displayWidth = canvasSize.width / zoom;

@@ -43,7 +43,10 @@ export function displayStoredReplayText(value: unknown, language: string): strin
     return STORED_REPLAY_TEXT_EN[text] ?? text;
 }
 
-export function crispCoverZoom(
+const CAMERA_MIN_ZOOM_FLOOR = 0.01;
+const CAMERA_MAX_ZOOM = 1.8;
+
+function crispCoverZoom(
     viewportWidth: number,
     viewportHeight: number,
     mapWidth: number,
@@ -72,19 +75,20 @@ export function snapZoomToTileGrid(
     return steps / safeTile;
 }
 
-// Cover zoom snapped onto whole tile pixels. The upper bound can grow by less than one
-// tile so a later clamp cannot push the default view back onto a fractional scale.
-export function fitZoomOnTileGrid(
+export function getMapZoomBounds(
     viewportWidth: number,
     viewportHeight: number,
     mapWidth: number,
     mapHeight: number,
     tileSize: number,
-    minZoom: number,
-    maxZoom: number,
-): number {
-    const crisp = crispCoverZoom(viewportWidth, viewportHeight, mapWidth, mapHeight, tileSize);
-    return snapZoomToTileGrid(crisp, tileSize, minZoom, Math.max(maxZoom, crisp));
+) {
+    const containZoom = Math.min(viewportWidth / mapWidth, viewportHeight / mapHeight);
+    const coverZoom = crispCoverZoom(viewportWidth, viewportHeight, mapWidth, mapHeight, tileSize);
+    const minZoom = Math.max(CAMERA_MIN_ZOOM_FLOOR, containZoom);
+    // Keep the fitted zoom reachable when a small map needs more than the usual maximum.
+    const maxZoom = Math.max(CAMERA_MAX_ZOOM, coverZoom, minZoom);
+    const fitZoom = snapZoomToTileGrid(coverZoom, tileSize, minZoom, maxZoom);
+    return { fitZoom, minZoom, maxZoom };
 }
 
 export function snapAxisToDevicePixels(scroll: number, zoom: number): number {
