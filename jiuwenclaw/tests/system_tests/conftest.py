@@ -41,12 +41,12 @@ def clean_environment(temp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     Use this fixture when testing initialization to ensure tests are isolated.
     """
     # Import before monkeypatching to get reference
-    import jiuwenclaw.common.utils as utils_module
+    import jiuwenswarm.common.utils as utils_module
 
     # Override HOME to use temporary directory
     monkeypatch.setenv("HOME", str(temp_home))
     # Clear any cached configuration
-    monkeypatch.delenv("JIUWENCLAW_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("JIUWENSWARM_CONFIG_DIR", raising=False)
 
     # Use set_user_home to set custom home directory
     utils_module.set_user_home(temp_home)
@@ -67,7 +67,7 @@ def mock_package_resources(monkeypatch: pytest.MonkeyPatch, temp_home: Path) -> 
     to test file copying during initialization.
     """
     # Create mock package directory
-    package_dir = temp_home / "mock_jiuwenclaw"
+    package_dir = temp_home / "mock_jiuwenswarm"
     package_dir.mkdir(parents=True, exist_ok=True)
 
     resources_dir = package_dir / "resources"
@@ -81,9 +81,6 @@ def mock_package_resources(monkeypatch: pytest.MonkeyPatch, temp_home: Path) -> 
     (agent_dir / "PRINCIPLE_EN.md").write_text("# Principle (EN)", encoding="utf-8")
     (agent_dir / "TONE_ZH.md").write_text("# Tone (ZH)", encoding="utf-8")
     (agent_dir / "TONE_EN.md").write_text("# Tone (EN)", encoding="utf-8")
-    (agent_dir / "HEARTBEAT_ZH.md").write_text("# Heartbeat (ZH)", encoding="utf-8")
-    (agent_dir / "HEARTBEAT_EN.md").write_text("# Heartbeat (EN)", encoding="utf-8")
-
     # Create mock config.yaml
     (resources_dir / "config.yaml").write_text("""
 # Test configuration
@@ -112,7 +109,7 @@ MODEL_PROVIDER="OpenAI"
     def mock_find_package_root():
         return package_dir
 
-    monkeypatch.setattr("jiuwenclaw.common.utils._find_package_root", mock_find_package_root)
+    monkeypatch.setattr("jiuwenswarm.common.utils._find_package_root", mock_find_package_root)
 
 
 @pytest.fixture
@@ -138,7 +135,7 @@ def skip_if_no_resources():
     Use this fixture for tests that require the actual package resources
     to be available (e.g., when testing in development mode).
     """
-    from jiuwenclaw.common.utils import _find_package_root
+    from jiuwenswarm.common.utils import _find_package_root
 
     package_root = _find_package_root()
     resources_dir = package_root / "resources"
@@ -156,7 +153,7 @@ def verify_workspace_structure():
 
     Example:
         def test_something(verify_workspace_structure):
-            workspace = Path("~/.jiuwenclaw").expanduser()
+            workspace = Path("~/.jiuwenswarm").expanduser()
             verify_workspace_structure(workspace, language="zh")
     """
 
@@ -169,6 +166,7 @@ def verify_workspace_structure():
             workspace_dir / "agent" / "memory",
             workspace_dir / "agent" / "sessions",
             workspace_dir / "agent" / "workspace",
+            workspace_dir / "agent" / "workspace" / "projects",
             workspace_dir / "agent" / ".checkpoint",
             workspace_dir / "agent" / ".logs",
         ]
@@ -190,7 +188,7 @@ def verify_workspace_structure():
 
         # Check agent templates
         agent_home = workspace_dir / "agent" / "home"
-        expected_templates = ["PRINCIPLE.md", "TONE.md", "HEARTBEAT.md"]
+        expected_templates = ["PRINCIPLE.md", "TONE.md"]
         for template in expected_templates:
             template_path = agent_home / template
             if not template_path.exists():

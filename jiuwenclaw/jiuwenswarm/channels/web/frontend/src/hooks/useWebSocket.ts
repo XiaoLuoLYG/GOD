@@ -1,0 +1,6052 @@
+/**
+ * WebSocket Hook
+ *
+ * 管理 WebSocket 连接和消息处理
+ */
+
+import { isConversationModelGroupBlocked } from '../multi-session/state/conversationModelSelection';
+import { parseModelSelection } from '../features/settings/modules/models/modelGroupAdapters';
+import { isMultiModelCollaborationEnabled } from '../features/multiModelCollaboration/featureConfig';
+import { readOutputOrder } from '../features/sessionOutput';
+import { handleTaskInputReceipt, sendQueuedTaskInput, handleSessionOutputBoundary, shouldIgnoreSessionOutput } from '../features/sessionInput';
+import {
+  assetKindFromMime,
+  findReferencedAssets,
+  normalizePath,
+  stemFilename,
+  useSessionAssetsStore,
+  type NamedAsset,
+} from '../features/sessionAssets/sessionAssets';
+import { useEffect, useRef, useCallback, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import {
+  ConnectionAckPayload,
+  WebConnectOptions,
+  WebError,
+  WebRequestOptions,
+  WebConnectionState,
+  InterruptResultPayload,
+  InterruptIntent,
+  AskUserQuestionPayload,
+  EvolutionStatusPayload,
+  UserAnswer,
+  MediaItem,
+  type ChatSendOptions,
+  AgentMode,
+  Session,
+  ToolResult,
+  ToolCall,
+  UsageSummary,
+  FileDownloadItem,
+  ContextCompressionRuntime,
+  MoaStatusPayload,
+  ContextCompressionSummary,
+  WsEvent,
+  GoalRecord,
+  GoalAction,
+  Message,
+} from '../types';
+import {
+  ensureSessionRuntimes,
+  useChatStore,
+  useTodoStore,
+  useGoalStore,
+  usePlanStore,
+  useSessionStore,
+  useHarnessStore,
+  useWorkspaceStore,
+  useCronStore,
+} from '../stores';
+import {
+  isPlanWireMode,
+  isTeamAgentMode,
+  resolvePlanWireMode,
+  stripPlanSuffix,
+} from '../features/planMode/wireMode';
+import { PLAN_ENTRY_SOURCE_PLAN_TOGGLE } from '../features/planMode/planEntrySource';
+import { flushPendingGoalObjectiveBubble } from '../features/goalPendingObjectiveBubble';
+import { normalizeTaskEvent } from '../stores/teamTaskNormalize';
+import {
+  captureTeamConnectionPresentation,
+  isRunningTeamTaskStatus,
+  retainRunningTeamConnectionPresentation,
+  type TeamConnectionPresentation,
+} from '../features/teamConnectionPresentation';
+import {
+  bindPendingPermissionCard,
+  pendingQuestionIdentity,
+  shouldClearPermissionQuestionsForLifecycleEvent,
+} from '../stores/pendingQuestionQueue';
+import { requestLogin } from '../stores/authStore';
+import { describeChatError } from '../features/free-models/chatError';
+import { webClient, requestGoalAction, sendGoalStreamCommand } from '../services/webClient';
+import { createStreamDeltaBatcher } from '../services/streamDeltaBatcher';
+import {
+  fetchTtsAudio,
+  playAudioBase64,
+  sanitizeTtsText,
+  stopAllTts,
+  collapseWs,
+  findAssistantSegmentIdForFinal,
+  normalizeFinalContent,
+  resolveStreamFinalContent,
+  unescapeLiteralNewlines,
+  interpretChatFinalAction,
+  shouldCollapseTurnFinal,
+  parseTimestampToMs,
+  timestampMsToIso,
+  extractAutomation,
+  heartbeatUserMessageId,
+  heartbeatAssistantMessageId,
+  heartbeatErrorMessageId,
+  refreshHeartbeatListAtRunStart,
+  extractCrossSessionMessage,
+  crossSessionUserMessageId,
+  crossSessionAssistantMessageId,
+  generateUuidV4,
+  prefixedMessageId,
+  proactiveAssistantMessageId,
+} from '../utils';
+import {
+  findOverlappingFileExecutionEvent,
+  mergeFileDownloadItems,
+} from '../utils/fileDownloadDedup';
+import { buildExtensionSendPayload } from '../utils/enabledExtensions';
+import { makeEventDedupKey } from '../utils/wsEventDedup';
+import {
+  normalizeToolCallPayload,
+  normalizeToolResultPayload,
+  normalizeToolUpdatePayload,
+} from '../features/tool-events/toolEventNormalizer';
+import {
+  findActiveTeamLeaderMessage as findActiveTeamLeaderMessageInTurn,
+} from '../features/teamLeaderMessages';
+import { buildGoalCompletedContent } from '../components/GoalBar/goalCompletedMessage';
+import {
+  stripUploadDocumentBlocks,
+  toUploadDocumentHints,
+  withUploadDocumentBlock,
+} from '../utils/documentMessage';
+import { useSubagentStore } from '../stores/subagentStore';
+import { expertTeamId, organizationOwnerStopTarget, selectedExpertTeamId, sendExpertMessage } from '../features/teamOrganization/conversation';
+import { isTeamOrganizationUiEnabled } from '../features/teamOrganization/featureConfig';
+import { useOrganizationEvents } from '../features/teamOrganization/useOrganizationEvents';
+import { isOrganizationOwnerStopped, setOrganizationOwnerStopped } from '../features/teamOrganization/processing';
+import {
+  normalizeSubagentActivityEvent,
+  normalizeSubagentToolStatusUpdates,
+  normalizeSubagentWaitResults,
+  normalizeSubagentStatusEvent,
+} from '../features/subagent/subagentNormalizer';
+import {
+  buildAgentGroupSelectionPayloadForMode,
+  buildDefinitionSelectionPayloadForMode,
+  isExternalHarnessCatalogItem,
+  resolveSelectedSkillsForRequest,
+} from '../features/agentManagement/port';
+import { useAgentCatalogStore } from '../stores/agentCatalogStore';
+import { readAgentTemplateName } from '../features/agentIdentity';
+import { normalizeTeamLeaderIdentity } from '../features/teamLeaderIdentity';
+import { normalizeTeamGroupIdentity } from '../features/teamGroupIdentity';
+import { NEW_CONVERSATION_ID } from '../multi-session/state/newConversationLifecycle';
+
+const WS_RECONNECT_EVENT = 'jiuwenclaw:ws-reconnect-request';
+const TEAM_CONNECTION_GRACE_MS = 5000;
+
+export function applyToolUpdatePayload(
+  sessionId: string,
+  payload: Record<string, unknown>,
+): void {
+  const update = normalizeToolUpdatePayload(payload);
+  if (!update.toolCallId) return;
+  if (update.beamSearch) {
+    useChatStore.getState().updateToolProgress(sessionId, update.toolCallId, {
+      toolName: update.toolName,
+      beamSearch: update.beamSearch,
+    });
+  }
+  if (update.reviewer) {
+    useChatStore.getState().updateToolReviewer(
+      sessionId,
+      update.toolCallId,
+      update.reviewer,
+    );
+  }
+}
+
+function streamDeltaBatchKey(sessionId: string, streamId: string): string {
+  return `${sessionId}\u0000${streamId}`;
+}
+
+function ensureCrossSessionUserTurn(
+  sessionId: string,
+  crossSession: NonNullable<Message['crossSession']>,
+  prompt: string,
+  timestamp: string
+): void {
+  const chatStore = useChatStore.getState();
+  chatStore.removeQueuedSessionMessage(sessionId, crossSession.messageId);
+  const userMsgId = crossSessionUserMessageId(crossSession.messageId);
+  const existing = chatStore
+    .getRuntime(sessionId)
+    ?.messages.find(
+      (message) =>
+        message.id === userMsgId ||
+        message.crossSession?.messageId === crossSession.messageId
+    );
+  if (existing) {
+    if (prompt && existing.content !== prompt) {
+      chatStore.updateMessage(sessionId, existing.id, { content: prompt });
+    }
+    return;
+  }
+  chatStore.stopStreaming(sessionId);
+  chatStore.addMessage(sessionId, {
+    id: userMsgId,
+    role: 'user',
+    content: prompt,
+    timestamp,
+    crossSession,
+  });
+}
+
+function isCompletedResumeResult(interruptResult: unknown): boolean {
+  if (!interruptResult || typeof interruptResult !== 'object') {
+    return false;
+  }
+  const result = interruptResult as {
+    intent?: unknown;
+    success?: unknown;
+    has_active_task?: unknown;
+  };
+  return result.intent === 'resume' && result.success === true && result.has_active_task === false;
+}
+
+const GOAL_COMPLETED_AUTO_HIDE_MS = 4000;
+const GOAL_COMPLETED_SETTLE_FALLBACK_MS = 8000;
+/** get 失败后的重试间隔（毫秒）：首次失败后再试 2 次，都失败才判定为 unknown（真实环境联调方案）。 */
+const GOAL_GET_RETRY_DELAYS_MS = [3000, 5000];
+/** 目标处于 active/paused/blocked 期间，超过这个时长没收到新的 goal.snapshot/goal.updated 就主动 get 兜底。 */
+const GOAL_STALE_REFRESH_MS = 60000;
+const GOAL_STALE_REFRESH_CHECK_INTERVAL_MS = 15000;
+/**
+ * 已经判定为 unknown（performGoalGet 自己的 3 次重试都失败过）之后，巡检 effect 不再按
+ * GOAL_STALE_REFRESH_MS 的节奏重试——那样等于每 15s 就重新打一轮 3 连击，事实上会无限循环
+ * 高频重试一个已知连不上的后端。改成退避到这个更长的间隔再试一次，只要某次 get 成功
+ * （queryStatus 收敛回 'ok'），下一次巡检就会自动切回正常的 GOAL_STALE_REFRESH_MS 节奏。
+ */
+const GOAL_UNKNOWN_RETRY_INTERVAL_MS = 5 * 60 * 1000;
+/**
+ * set/resume 发出后，等这么久还没等到 goal.snapshot/execution.error/runtime.accepted 把
+ * pendingAction 清掉，才补一次兜底 get——正常路径下 snapshot 应该早就到了，不必让这个兜底跟它
+ * 赛跑（赛跑赢了反而会用 set/resume 落地前的旧数据提前清掉 pendingAction，重新打开"按钮提前
+ * 解禁、能打出冲突指令"的窗口）。这个值只是给"确认事件丢包/被误判为重复丢弃"这类小概率情况
+ * 兜底，不需要很短。
+ *
+ * resume 原来没有这个兜底（假设 goal.snapshot/goal.updated/execution.error 迟早会到），但
+ * bug001 实测：同一 session 在 EVENT_DEDUP_WINDOW_MS 窗口内被 resume 两次时（例如来回快速切换
+ * 2 个会话），第二次 resume 自己的 goal.snapshot 因为跟第一次内容相同会被去重逻辑当成重复事件
+ * 丢弃，pendingAction 从此没有任何信号能清空，只能等 60s 的无更新兜底巡检（GOAL_STALE_REFRESH_MS）
+ * 才会恢复——用户能明显感知到编辑/暂停按钮"卡死"了几十秒。root cause 已经用 request_id 让去重
+ * 更精确（见 makeEventDedupKey），这里再给 resume 补上跟 set 一样的兜底定时器做双保险，即使
+ * 未来又出现新的"确认事件丢失"场景，也能在几秒内自愈，不会再退化到 60s。
+ */
+const GOAL_ACTION_CONVERGENCE_DELAY_MS = 4000;
+
+/**
+ * 目标完成事件（goal.updated）和它所在这一轮回复的正文（chat.delta/chat.final），走的是两条
+ * 独立的推送通道，后端不保证到达顺序——真机复现过 goal.updated 先到、回复气泡还没 flush 进
+ * 消息列表的情况，这时候直接插入"目标完成"提示会出现在它引用的那条回复上方，很怪。用
+ * isProcessing 变 false（chat.processing_status 事件驱动，标志这一轮真正结束）当"可以展示了"
+ * 的信号：当时已经不在 processing 就立即展示；还在 processing 就等它落地。加一个兜底超时，
+ * 防止极端情况下 isProcessing 迟迟不落地导致完成提示永远卡住不出现。
+ */
+function scheduleAfterTurnSettles(sessionId: string, run: () => void): void {
+  const isProcessing = useChatStore.getState().getRuntime(sessionId)?.isProcessing ?? false;
+  if (!isProcessing) {
+    run();
+    return;
+  }
+  let settled = false;
+  let fallbackTimer: number;
+  const finish = () => {
+    if (settled) return;
+    settled = true;
+    unsubscribe();
+    window.clearTimeout(fallbackTimer);
+    run();
+  };
+  const unsubscribe = useChatStore.subscribe(
+    (state) => state.runtimes[sessionId]?.isProcessing ?? false,
+    (isProcessing) => {
+      if (!isProcessing) finish();
+    }
+  );
+  fallbackTimer = window.setTimeout(finish, GOAL_COMPLETED_SETTLE_FALLBACK_MS);
+}
+
+/**
+ * goal.snapshot/goal.updated 事件、command.goal 的 RPC 响应，统一落进 goalStore 的入口
+ * （被 goalAction 和事件订阅共用，定义成模块级函数而不是 hook 内的 useCallback，避免要把它塞进
+ * 那个几乎跑满全文件的大 useEffect 的依赖数组）。处理三件事：
+ *
+ * 1) created_at 兜底（后端永久不下发，backend-requests.md #2）；
+ * 2) completed 展示策略——只有"本地在这次页面存活期间亲眼见过这个 goal_id 处于非 completed
+ *    状态"才当成实时目睹的跳变：冻结计时、插一条完成消息、展示几秒后本地隐藏（不调用后端
+ *    clearGoal，后端记录原样保留）。单纯靠 get/事件第一次拿到就已经是 completed（切会话/
+ *    刷新页面最常见）一律直接不展示、不插消息——用户没看见"跳变过程"，硬展示一条早就完成的
+ *    目标条没有意义，还可能重复插消息。
+ * 3) 其余状态（active/paused/blocked）照常落状态，不做特殊处理，blocked 也不会自动隐藏。
+ * 4) time_used_seconds/active_started_at 兜底——pause 等一元 RPC 的 res.payload.goal 目前不一定
+ *    带这两个字段（真机验证只有 goal.updated 事件稳定带全，见 cjh/goal 对接文档 §8.2 demo 本身
+ *    也没有这两个字段），如果直接落库会让 GoalBar 从"有后端计时"退回旧的 fallback 计时口径，
+ *    暂停后又开始跳字。这里同一个 goal_id 下如果新数据缺这两个字段、旧数据有，就沿用旧值。
+ */
+function applyIncomingGoal(
+  sessionId: string,
+  goal: GoalRecord | null,
+  hideTimerMap: Map<string, number>,
+  lastGoalEventAtMap?: Map<string, number>
+): void {
+  const goalStore = useGoalStore.getState();
+  // 任何一次成功落地（不管是 get 的响应，还是 goal.snapshot/goal.updated 事件）都说明查询链路
+  // 是通的，把"多次 get 失败"攒出来的 unknown 态收敛回 ok——见 goalStore.ts queryStatus 注释。
+  goalStore.setQueryStatus(sessionId, 'ok');
+
+  if (!goal) {
+    const prevGoalId = goalStore.runtimes[sessionId]?.goal?.goal_id;
+    if (prevGoalId) {
+      goalStore.clearLocalCreatedAt(prevGoalId);
+      goalStore.clearGoalCompletionPhase(prevGoalId);
+      goalStore.clearBannerHidden(prevGoalId);
+      goalStore.clearCompletedGoalMessage(prevGoalId);
+      const timer = hideTimerMap.get(prevGoalId);
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+        hideTimerMap.delete(prevGoalId);
+      }
+    }
+    lastGoalEventAtMap?.delete(sessionId);
+    goalStore.setGoal(sessionId, null);
+    goalStore.setPendingAction(sessionId, null);
+    return;
+  }
+
+  // 见函数注释 4)：同一个 goal_id，新数据缺 time_used_seconds 但旧数据有时，沿用旧值，
+  // 避免一元 RPC 的不完整快照把 GoalBar 计时打回旧口径。active_started_at 跟着 status 走——
+  // 非 active 直接钉死 null（不管新数据有没有带），active 且新数据没带时才沿用旧值。
+  const prevGoalForTiming = goalStore.runtimes[sessionId]?.goal;
+  if (
+    goal.time_used_seconds === undefined &&
+    prevGoalForTiming?.goal_id === goal.goal_id &&
+    prevGoalForTiming.time_used_seconds !== undefined
+  ) {
+    goal = {
+      ...goal,
+      time_used_seconds: prevGoalForTiming.time_used_seconds,
+      active_started_at:
+        goal.status === 'active' ? (goal.active_started_at ?? prevGoalForTiming.active_started_at ?? null) : null,
+    };
+  }
+
+  // 未完成目标才需要参与"1 分钟无更新兜底 get"的巡检（见 useWebSocket 里的巡检 effect），
+  // completed 记一次时间戳没有意义，巡检本身也会按 status 过滤掉，这里顺手不记，语义更清楚。
+  if (goal.status !== 'completed') {
+    lastGoalEventAtMap?.set(sessionId, Date.now());
+  } else {
+    lastGoalEventAtMap?.delete(sessionId);
+  }
+
+  goalStore.setLocalCreatedAt(goal.goal_id, new Date().toISOString());
+
+  if (goal.status !== 'completed') {
+    goalStore.markGoalSeenActive(goal.goal_id);
+    // 目标曾经 completed 过（编辑复活/其它途径重新进入非 completed 状态）——清掉旧的隐藏标记，
+    // 不然它下次再完成时 GoalBar 会因为这个陈旧的 true 直接判定"该隐藏"，一秒都不展示就消失。
+    goalStore.clearBannerHidden(goal.goal_id);
+    goalStore.setGoal(sessionId, goal);
+    goalStore.setPendingAction(sessionId, null);
+    return;
+  }
+
+  const phase = goalStore.getGoalCompletionPhase(goal.goal_id);
+  goalStore.setPendingAction(sessionId, null);
+  // goal 数据本身（含 objective）永远落进 store，不管是不是要展示 GoalBar——MessageItem 的
+  // "设为目标"徽章靠字符串匹配 goal.objective，之前完成态曾经把 goal 整个置 null 来隐藏
+  // GoalBar，副作用是刷新页面后连徽章也一起丢了。GoalBar 是否展示改用下面的 hideGoalBanner
+  // 单独控制，不再靠 goal 是否存在来判断。
+  goalStore.setGoal(sessionId, goal);
+  if (phase === 'completed-announced') {
+    // 已经宣布/判定过一次了（无论是走过完整跳变流程，还是当初就判定为"发现即完成"），不重复处理
+    return;
+  }
+
+  const isLiveTransition = phase === 'seen-active';
+  goalStore.markGoalCompletedAnnounced(goal.goal_id);
+
+  if (!isLiveTransition) {
+    // get/事件第一次拿到就已经是 completed——GoalBar 不展示（用户没看见跳变过程），但 goal
+    // 数据保留，徽章匹配等消费方不受影响
+    goalStore.hideGoalBanner(goal.goal_id);
+    return;
+  }
+
+  // 实时目睹的跳变：等这一轮回复正文落地后，再一起展示冻结态 + 完成消息，避免完成提示抢跑到
+  // 它引用的那条回复上方。内容用 goal.completed: 前缀 + JSON 编码，MessageItem 检测到后渲染
+  // GoalCompletedCard（卡片+头部标签样式），跟普通回复气泡明显区分开。
+  scheduleAfterTurnSettles(sessionId, () => {
+    const messageId = `goal-completed-${goal.goal_id}`;
+    // "现在"必然晚于它引用的那条回复——回复的时间戳是收到第一个 chat.delta 时盖的章，不会再被
+    // chat.final 收尾时改动（见 chat.final 处理里去掉时间戳覆盖的注释），早于整轮跑完+判定目标
+    // 完成的这一刻，不需要额外兜底。
+    const timestamp = new Date().toISOString();
+    const content = buildGoalCompletedContent({ evidence: goal.last_assessment?.evidence?.trim() });
+    useChatStore.getState().addMessage(sessionId, {
+      id: messageId,
+      role: 'assistant',
+      content,
+      timestamp,
+    });
+    // 这条消息纯前端合成，从未写进后端 session 历史——刷新页面后 history.get 拉回来的历史里
+    // 没有它，会随 replaceHistoryMessages 整体覆盖消失。存一份到 localStorage，历史加载完成后
+    // （App.tsx）按时间戳把它插回去，见 mergePersistedGoalCompletionMessages。
+    goalStore.recordCompletedGoalMessage({ sessionId, id: messageId, content, timestamp });
+
+    const existingTimer = hideTimerMap.get(goal.goal_id);
+    if (existingTimer !== undefined) {
+      window.clearTimeout(existingTimer);
+    }
+    const timer = window.setTimeout(() => {
+      hideTimerMap.delete(goal.goal_id);
+      const current = useGoalStore.getState().runtimes[sessionId]?.goal;
+      // 展示期间用户没有手动清除/编辑目标才自动隐藏，避免和用户的显式操作打架
+      if (current?.goal_id === goal.goal_id) {
+        useGoalStore.getState().hideGoalBanner(goal.goal_id);
+      }
+    }, GOAL_COMPLETED_AUTO_HIDE_MS);
+    hideTimerMap.set(goal.goal_id, timer);
+  });
+}
+
+/**
+ * 目标查询（command.goal get）的统一入口，带重试 + unknown 兜底（真实环境联调方案 C.e）：
+ * 失败先按 GOAL_GET_RETRY_DELAYS_MS 重试，全部重试完还失败就把 queryStatus 置 'unknown'
+ * （GoalBar 据此展示"状态未知"、全部操作按钮置灰），不再抛错、不插聊天错误消息——这是背景
+ * 巡检性质的调用（会话切换、断线重连、1 分钟无更新兜底都会触发），不是用户主动点击的操作，
+ * 不需要用系统消息打扰聊天记录。
+ *
+ * 也被 goalAction 的 pause/resume/clear 失败兜底复用：一元 RPC 失败时 webClient 目前不会把
+ * payload.goal 透传进 WebError（见 webClient.ts resolvePending 只读顶层 error/code），拿不到
+ * 失败当时的目标快照，索性直接用这个函数重新问一次权威状态。
+ *
+ * lastAttemptAtMap 记录的是"每次调用本函数的时刻"（不管这轮 3 连击最终成没成功），只给巡检
+ * effect 在 unknown 态下判断退避窗口用；跟 lastGoalEventAtMap（只在成功时更新，判断数据新鲜度）
+ * 是两回事，不要混用。
+ */
+async function performGoalGet(
+  sessionId: string,
+  mode: string,
+  hideTimerMap: Map<string, number>,
+  lastGoalEventAtMap?: Map<string, number>,
+  lastAttemptAtMap?: Map<string, number>
+): Promise<void> {
+  lastAttemptAtMap?.set(sessionId, Date.now());
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const goal = await requestGoalAction({ sessionId, action: 'get', mode });
+      applyIncomingGoal(sessionId, goal, hideTimerMap, lastGoalEventAtMap);
+      return;
+    } catch {
+      if (attempt >= GOAL_GET_RETRY_DELAYS_MS.length) {
+        useGoalStore.getState().setQueryStatus(sessionId, 'unknown');
+        useGoalStore.getState().setPendingAction(sessionId, null);
+        return;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, GOAL_GET_RETRY_DELAYS_MS[attempt]));
+    }
+  }
+}
+
+/**
+ * 会话历史加载完成后调用：把 localStorage 里持久化的"目标完成"消息（见 applyIncomingGoal 的
+ * 实时跳变分支）按时间戳合并回刚加载的历史消息数组里——这些消息从未写进后端 session 历史，
+ * 单靠 history.get 的结果永远不会包含它们。已经在 messages 里的（极端情况下未来后端也开始
+ * 持久化同 id 的消息）不重复插入。
+ */
+export function mergePersistedGoalCompletionMessages(sessionId: string, messages: Message[]): Message[] {
+  const persisted = useGoalStore.getState().getCompletedGoalMessagesForSession(sessionId);
+  if (persisted.length === 0) return messages;
+  const existingIds = new Set(messages.map((m) => m.id));
+  const missing = persisted.filter((record) => !existingIds.has(record.id));
+  if (missing.length === 0) return messages;
+  const merged: Message[] = [
+    ...messages,
+    ...missing.map((record) => ({
+      id: record.id,
+      role: 'assistant' as const,
+      content: record.content,
+      timestamp: record.timestamp,
+    })),
+  ];
+  merged.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  return merged;
+}
+
+/**
+ * 会话历史加载完成后调用：给命中 goalStore 持久化 objective 文本列表的 user 消息回填
+ * `isGoalObjectiveMessage`（见 goalStore.ts objectiveMessageTexts 的注释）。优先尊重后端
+ * history 已下发的 `is_goal_objective_message`（historyRestore 已映射到该字段）；没有后端
+ * 标记时再按 content 与本地 objective 文本列表核对——兼容旧会话 / 清过缓存前的数据。
+ */
+export function stampGoalObjectiveMessages(sessionId: string, messages: Message[]): Message[] {
+  const objectiveTexts = useGoalStore.getState().getGoalObjectiveTextsForSession(sessionId);
+  if (objectiveTexts.length === 0) return messages;
+  const objectiveTextSet = new Set(objectiveTexts);
+  let changed = false;
+  const stamped = messages.map((message) => {
+    if (message.role !== 'user' || message.isGoalObjectiveMessage) return message;
+    if (!objectiveTextSet.has(message.content)) return message;
+    changed = true;
+    return { ...message, isGoalObjectiveMessage: true };
+  });
+  return changed ? stamped : messages;
+}
+
+function getConnectSignature(options: WebConnectOptions): string {
+  return JSON.stringify({
+    provider: options.provider || '',
+    apiKey: options.apiKey || '',
+    apiBase: options.apiBase || '',
+    model: options.model || '',
+    projectDir: options.projectDir || '',
+  });
+}
+
+function pickString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function resolveInterruptResumeMode(sessionId: string): AgentMode {
+  const sessionStore = useSessionStore.getState();
+  const session =
+    sessionStore.currentSession?.session_id === sessionId
+      ? sessionStore.currentSession
+      : sessionStore.sessions.find((item) => item.session_id === sessionId);
+  if (session?.team_name?.trim()) return 'team';
+  return normalizeAgentMode(sessionStore.runtimes[sessionId]?.mode);
+}
+
+/**
+ * 取该会话的 work_mode（`work` / `code`）。
+ *
+ * 与 `getSessionWorkContext` 同一套取值顺序：session → selectedProject →
+ * workspaceStore。这里单独抽出，是因为 team + plan 时 `resolvePlanWireMode`
+ * 要据此区分 `team.work.plan` / `team.code.plan`，而那个函数不读 store。
+ */
+function getSessionWorkMode(sessionId: string): string | undefined {
+  const sessionStore = useSessionStore.getState();
+  const workspaceStore = useWorkspaceStore.getState();
+  const session =
+    sessionStore.currentSession?.session_id === sessionId
+      ? sessionStore.currentSession
+      : sessionStore.sessions.find((item) => item.session_id === sessionId);
+  const selectedProject = workspaceStore.selectedProject;
+  // 用 .trim() 过滤空白而非纯 falsy 短路：session.work_mode 存在但为空串时，
+  // 旧逻辑会 fallback 到全局 workspaceStore.workMode，把 code profile 的会话
+  // 路由成 work（profile 由 resolveOutgoingMode 拼进 mode 字段，错位会被后端
+  // 按 work 解析）。trim 后空串/纯空白视为未设置，才继续往 project / 全局找。
+  return (
+    session?.work_mode?.trim() ||
+    selectedProject?.work_mode?.trim() ||
+    workspaceStore.workMode
+  );
+}
+
+/**
+ * 组合出本次请求要发送的 mode。
+ *
+ * UI 的 `AgentMode` 只有 agent / team / auto_harness；Plan 是独立开关。所有出站
+ * 请求（普通消息、队列重发、interrupt resume）都必须走这里，否则 Plan 状态会被
+ * `normalizeAgentMode` 抹平，后端就收不到 `agent.{work|code}.plan`。team + plan
+ * 时还要带上 work_mode，以便 `resolvePlanWireMode` 路由到 `team.work.plan` /
+ * `team.code.plan`。
+ */
+function resolveOutgoingMode(sessionId: string, baseMode: AgentMode | string | undefined): string {
+  // profile（work/code）取自 per-session 的 Session.work_mode（getSessionWorkMode
+  // 优先 session，再 project、最后全局 workMode），否则 session 切换时全局 workMode
+  // 不同步，跨 profile 看历史会话 / interrupt resume / 队列重发会产出
+  // `agent.work.plan` 而 session 实际是 code profile，后端按 work 解析错位。
+  return resolvePlanWireMode(
+    baseMode,
+    usePlanStore.getState().isActive(sessionId),
+    getSessionWorkMode(sessionId)
+  );
+}
+
+/**
+ * 用户手动打开 Plan 开关后的第一条 Plan 消息要额外带 `plan_entry_source`。
+ *
+ * 后端用它区分"用户明确要求进入 Plan"和"开关没复位导致的残留请求"：没有这个
+ * 标记时，一个刚执行完计划的会话会被防重入闸门拦下并通知前端复位开关。
+ */
+function resolvePlanEntryPayload(
+  sessionId: string,
+  outgoingMode: string
+): Record<string, string> {
+  if (!isPlanWireMode(outgoingMode)) return {};
+  if (!usePlanStore.getState().hasPendingExplicitEntry(sessionId)) return {};
+  return {
+    plan_entry_source:
+      usePlanStore.getState().getPendingEntrySource(sessionId) ?? PLAN_ENTRY_SOURCE_PLAN_TOGGLE,
+  };
+}
+
+/** 请求成功发出后才消费标记，失败时保留以便重试。 */
+function consumePlanEntryMark(sessionId: string, outgoingMode: string): void {
+  if (!isPlanWireMode(outgoingMode)) return;
+  usePlanStore.getState().consumeExplicitEntry(sessionId);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function getPayloadSessionId(payload: Record<string, unknown>): string | undefined {
+  const direct = pickString(payload.session_id);
+  if (direct) {
+    return direct;
+  }
+  const nestedPayload = payload.payload;
+  if (isRecord(nestedPayload)) {
+    const nested = pickString(nestedPayload.session_id);
+    if (nested) {
+      return nested;
+    }
+    const nestedEvent = nestedPayload.event;
+    if (isRecord(nestedEvent)) {
+      return pickString(nestedEvent.session_id);
+    }
+  }
+  const event = payload.event;
+  if (isRecord(event)) {
+    return pickString(event.session_id);
+  }
+  return undefined;
+}
+
+function getPayloadRequestId(payload: Record<string, unknown>): string | undefined {
+  const direct = pickString(payload.request_id, payload.rid);
+  if (direct) {
+    return direct;
+  }
+  const nestedPayload = payload.payload;
+  if (isRecord(nestedPayload)) {
+    const nested = pickString(nestedPayload.request_id, nestedPayload.rid);
+    if (nested) {
+      return nested;
+    }
+  }
+  return undefined;
+}
+
+function parseShutdownMemberName(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const match = value.match(/Member shutdown:\s*member_name=([^\s,]+)/);
+  return match?.[1]?.trim() || undefined;
+}
+
+function getShutdownMemberFromToolCall(toolCall: ToolCall): string | undefined {
+  if (toolCall.name !== 'shutdown_member') {
+    return undefined;
+  }
+  return pickString(
+    toolCall.arguments.member_name,
+    toolCall.arguments.member_id,
+    toolCall.arguments.name
+  );
+}
+
+function getShutdownMemberFromToolResult(toolResult: ToolResult): string | undefined {
+  if (toolResult.toolName !== 'shutdown_member') {
+    return parseShutdownMemberName(toolResult.result);
+  }
+  return parseShutdownMemberName(toolResult.result) || parseShutdownMemberName(toolResult.summary);
+}
+
+/** 交接文档 §2.4：这些 Heartbeat 管理 Tool 成功执行后要刷新已打开面板的任务列表；
+ * heartbeat_list_jobs/heartbeat_get_job/heartbeat_preview_job 是只读 Tool，不在其列。 */
+const HEARTBEAT_MUTATION_TOOL_NAMES = new Set([
+  'heartbeat_create_job',
+  'heartbeat_update_job',
+  'heartbeat_delete_job',
+  'heartbeat_toggle_job',
+  'heartbeat_run_now',
+  'heartbeat_cancel_run',
+]);
+
+// The task card's title/content are now sourced solely from the backend
+// `team.task` events (which carry the DB task_id + body) and the `team.snapshot`
+// fallback — never from tool_call arguments. Building an optimistic card from
+// the tool_call `id` produced a duplicate card because the LLM's `id` differs
+// from the DB task_id AgentCore falls back to (see OpenSpec change
+// `fix-team-task-card-duplicate`, D5). So `create_task` / `update_task` no
+// longer pre-create cards; `claim_task` was already a no-op. This handler is
+// kept as an explicit early return so the call site stays intentional.
+function applyTeamTaskToolCall(_sessionId: string, _toolCall: ToolCall) {
+  return;
+}
+
+interface UseWebSocketOptions {
+  activeSessionId?: string;
+  provider?: string;
+  apiKey?: string;
+  apiBase?: string;
+  model?: string;
+  projectDir?: string;
+  onConnect?: (payload: ConnectionAckPayload) => void;
+  onDisconnect?: () => void;
+  onError?: (error: string) => void;
+  onConfigChanged?: (updatedKeys?: string[]) => void;
+  /** 后端模型目录更新后触发，前端同步刷新模型列表。 */
+  onModelsUpdated?: () => void;
+  /** cron 最终结果（非占位）广播到达后触发，用于自动跳转到执行会话并加载完整历史 */
+  onCronResultArrived?: (sessionId: string, jobId: string) => void;
+}
+
+interface UseWebSocketReturn {
+  isConnected: boolean;
+  connectionState: WebConnectionState;
+  request: <T = unknown>(
+    method: string,
+    params?: Record<string, unknown>,
+    options?: WebRequestOptions
+  ) => Promise<T>;
+  persistMedia: (content: string, sessionId: string, mediaItems: MediaItem[]) => Promise<PersistMediaResponse>;
+  persistDocuments: (content: string, sessionId: string, mediaItems: MediaItem[]) => Promise<PersistMediaResponse>;
+  discardMedia: (sessionId: string, path: string) => Promise<{ deleted?: boolean }>;
+  sendMessage: (content: string, sessionId: string, mediaItems?: MediaItem[], options?: ChatSendOptions) => Promise<boolean>;
+  sendStructuredChatContent: (content: unknown, sessionId: string) => Promise<void>;
+  interrupt: (
+    sessionId: string,
+    intent: InterruptIntent,
+    options?: { newInput?: string }
+  ) => Promise<boolean>;
+  pause: (sessionId: string) => Promise<void>;
+  cancel: (sessionId: string) => Promise<void>;
+  supplement: (sessionId: string, newInput: string) => Promise<void>;
+  resume: (sessionId: string) => Promise<void>;
+  switchMode: (sessionId: string, mode: AgentMode) => Promise<void>;
+  disconnect: () => void;
+  sendUserAnswer: (
+    sessionId: string,
+    requestId: string,
+    answers: UserAnswer[],
+    source?: string
+  ) => Promise<boolean>;
+  respondActivate: (
+    sessionId: string,
+    interactionId: string,
+    action: 'accept' | 'reject',
+    feedback?: string
+  ) => Promise<void>;
+  setGoalObjective: (sessionId: string, objective: string) => Promise<void>;
+  pauseGoal: (sessionId: string) => Promise<void>;
+  resumeGoal: (sessionId: string) => Promise<void>;
+  clearGoal: (sessionId: string) => Promise<void>;
+  refreshGoal: (sessionId: string) => Promise<void>;
+  drainTaskQueueIfIdle: (sessionId: string) => void;
+}
+
+interface PersistMediaResponse {
+  content?: string;
+  query?: string;
+  media_items?: Record<string, unknown>[];
+  files?: Record<string, unknown>;
+}
+
+function isPersistedMediaItem(item: MediaItem): boolean {
+  return typeof item.path === 'string' && item.path.trim().length > 0;
+}
+
+function getMediaMimeType(item: MediaItem): string {
+  return item.mime_type || item.mimeType;
+}
+
+function toPersistedMediaRecord(item: MediaItem): Record<string, unknown> {
+  return {
+    type: item.type,
+    filename: item.filename,
+    mime_type: getMediaMimeType(item),
+    path: item.path,
+    size_bytes: item.size_bytes ?? item.sizeBytes,
+  };
+}
+
+function slimPersistedMediaRecords(items: Record<string, unknown>[]): Record<string, unknown>[] {
+  return items.map((item) => ({
+    type: item.type,
+    filename: item.filename,
+    mime_type: item.mime_type ?? item.mimeType,
+    path: item.path,
+    size_bytes: item.size_bytes ?? item.sizeBytes,
+  }));
+}
+
+function buildPersistedMediaFiles(mediaItems: Record<string, unknown>[]): Record<string, unknown> {
+  const files: Record<string, unknown> = {};
+  const images = mediaItems.filter((item) => item.type === 'image');
+  const documents = mediaItems.filter((item) => item.type === 'document');
+  if (images.length) {
+    files.uploaded_images = images.map((item) => ({
+      filename: item.filename,
+      path: item.path,
+      mime_type: item.mime_type ?? item.mimeType,
+      size_bytes: item.size_bytes ?? item.sizeBytes,
+    }));
+  }
+  if (documents.length) {
+    files.uploaded_documents = documents.map((item) => ({
+      filename: item.filename,
+      path: item.path,
+      mime_type: item.mime_type ?? item.mimeType,
+      size_bytes: item.size_bytes ?? item.sizeBytes,
+    }));
+  }
+  return files;
+}
+
+function getSessionWorkContext(sessionId: string): Record<string, unknown> {
+  const sessionStore = useSessionStore.getState();
+  const workspaceStore = useWorkspaceStore.getState();
+  const session =
+    sessionStore.currentSession?.session_id === sessionId
+      ? sessionStore.currentSession
+      : sessionStore.sessions.find((item) => item.session_id === sessionId);
+  const selectedProject = workspaceStore.selectedProject;
+  const projectId = session?.project_id || selectedProject?.project_id || '';
+  const projectDir = session?.project_dir || selectedProject?.project_dir || '';
+  // 注意：work_mode 不再 spread 到 chat.send 的 params 里——mode 解析已改认
+  // 三段命名串 `agent.{work|code}.plan`（profile 由 resolveOutgoingMode 直接
+  // 拼进 mode 字段），后端 resolve_request_mode 不依赖 params.work_mode。
+  // work_mode 仅在创建会话时（App.tsx handleSendMessage）作为项目分桶键传给
+  // 后端 session 元数据，写入 session/project 绑定，详见 createConversationSession。
+  return {
+    ...(projectId ? { project_id: projectId } : {}),
+    ...(projectDir ? { project_dir: projectDir } : {}),
+  };
+}
+
+interface ContextCompressionStatePayload extends Record<string, unknown> {
+  status?: string;
+  summary?: string;
+  operation_id?: string;
+  phase?: string;
+  processor?: string;
+  error?: string;
+}
+
+interface PendingContextCompressionStart {
+  timer: number;
+  runtimeState: Omit<ContextCompressionRuntime, 'status'>;
+  shown: boolean;
+}
+
+function normalizeAgentMode(rawMode: unknown): AgentMode {
+  if (typeof rawMode !== 'string') return 'agent';
+  if (isTeamAgentMode(rawMode)) return 'team';
+  // 后端 session.mode 可能是新命名 `agent.{work|code}.plan`，先剥掉 plan 后缀
+  // 再归一化（旧 `team.plan.*` / `team.code.*` 已被上面的 isTeamAgentMode 拦截）。
+  const normalized = stripPlanSuffix(rawMode.trim().toLowerCase());
+  if (normalized === 'auto_harness') return 'auto_harness';
+  return 'agent';
+}
+
+function unsupportedEvolutionModeMessage(content: string, mode: AgentMode): string | null {
+  const trimmed = content.trim();
+  const isEvolutionCommand =
+    trimmed === '/evolve' ||
+    trimmed.startsWith('/evolve ') ||
+    trimmed === '/evolve_simplify' ||
+    trimmed.startsWith('/evolve_simplify ');
+  if (!isEvolutionCommand || mode === 'agent' || mode === 'team') {
+    return null;
+  }
+  return `${mode} 模式下演进功能不可用。`;
+}
+
+const EVENT_DEDUP_WINDOW_MS = 1500;
+const CONTEXT_COMPRESSION_START_DELAY_MS = 300;
+
+function normalizeEventTimestampIso(value: unknown): string {
+  const ms = parseTimestampToMs(value);
+  if (Number.isFinite(ms)) {
+    const iso = timestampMsToIso(ms);
+    if (iso) {
+      return iso;
+    }
+  }
+  return new Date().toISOString();
+}
+
+function isTeamTeammateMessagePayload(payload: Record<string, unknown>): boolean {
+  return typeof payload.role === 'string' && payload.role.trim().toLowerCase() === 'teammate';
+}
+
+/** 仅当 final 覆盖本轮已展示全文时才允许折叠，避免步进 final 抹掉前文（如 A/B/C）。 */
+function isHiddenTeamTeammateMessagePayload(mode: AgentMode, payload: Record<string, unknown>): boolean {
+  return mode === 'team' && isTeamTeammateMessagePayload(payload);
+}
+
+function getTeamPayloadMemberName(payload: Record<string, unknown>): string | undefined {
+  return pickString(payload.member_name, payload.member_id, payload.source_member);
+}
+
+function eventTimestampMs(payload: Record<string, unknown>): number {
+  const parsed = parseTimestampToMs(payload.timestamp);
+  return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
+function stableEventId(...parts: unknown[]): string {
+  return parts
+    .map((part) => String(part ?? '').trim())
+    .filter(Boolean)
+    .join(':')
+    .replace(/[^a-zA-Z0-9:_-]+/g, '-')
+    .slice(0, 180);
+}
+
+function getAgentRefId(payload: Record<string, unknown>): string | undefined {
+  const direct = payload.agent_ref;
+  if (isRecord(direct)) {
+    const id = pickString(direct.id);
+    if (id) {
+      return id;
+    }
+  }
+  const nestedPayload = payload.payload;
+  if (isRecord(nestedPayload)) {
+    const nested = nestedPayload.agent_ref;
+    if (isRecord(nested)) {
+      return pickString(nested.id);
+    }
+  }
+  return undefined;
+}
+
+function upsertHumanShareCommandFromEvent(
+  payload: Record<string, unknown>,
+  event: { member_id?: string; name?: string; mode?: string; timestamp?: number }
+): void {
+  if (event.mode !== 'human' || !event.member_id) {
+    return;
+  }
+  const sessionId = getPayloadSessionId(payload);
+  if (!sessionId) {
+    return;
+  }
+  const teamName = getAgentRefId(payload) || 'unknown';
+  const sessionRef = `team_${teamName}_session_${sessionId}`;
+  useSessionStore.getState().upsertTeamHumanShareCommand(
+    sessionId,
+    {
+      memberName: event.member_id,
+      displayName: event.name,
+      sessionId,
+      teamName,
+      sessionRef,
+      joinCommand: `/join ${sessionRef} as ${event.member_id}`,
+      exitCommand: `/exit ${sessionRef}`,
+      status: 'pending',
+      updatedAt: event.timestamp || Date.now(),
+    },
+  );
+}
+
+function stringifyCompact(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value ?? '');
+  }
+}
+
+/** 归档相关事件的负载；事件仅用于同步刷新，按资源 ID 幂等处理，不替代请求结果。 */
+type ArchiveResourceEventPayload = {
+  session_id?: string;
+  project_id?: string;
+  work_mode?: string;
+};
+
+const ARCHIVE_EVENT_REFRESH_DEBOUNCE_MS = 300;
+
+export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
+  useOrganizationEvents();
+  const { t } = useTranslation();
+  const {
+    activeSessionId,
+    provider,
+    apiKey,
+    apiBase,
+    model,
+    projectDir,
+    onConnect,
+    onDisconnect,
+    onError,
+    onConfigChanged,
+    onModelsUpdated,
+    onCronResultArrived,
+  } = options;
+  const activeSessionMode = useSessionStore(
+    (state) => state.runtimes[activeSessionId ?? '']?.mode,
+  );
+  const activeTeamMembers = useSessionStore(
+    (state) => state.runtimes[activeSessionId ?? '']?.teamMembers,
+  );
+
+  // 同步更新 ref，避免竞态条件
+  // 必须在渲染阶段同步更新，否则 effect 执行之前收到的事件会被错误过滤
+  const userInputVersionRef = useRef(0);
+  const activeRequestIdRef = useRef<string | undefined>(undefined);
+  // 立即同步更新，不等待 effect
+
+  const [isConnected, setIsConnected] = useState(false);
+  const [connectionState, setConnectionState] =
+    useState<WebConnectionState>('idle');
+  const lastConnectSignatureRef = useRef<string>('');
+  const onConnectRef = useRef(onConnect);
+  const onDisconnectRef = useRef(onDisconnect);
+  const onErrorRef = useRef(onError);
+  const onConfigChangedRef = useRef(onConfigChanged);
+  const onModelsUpdatedRef = useRef(onModelsUpdated);
+  const onCronResultArrivedRef = useRef(onCronResultArrived);
+  const sendMessageRef = useRef<typeof sendMessage>();
+  // 标记本地 sendMessage 刚发起但后端尚未确认 processing_status=true 的 session。
+  // 用于区分"旧任务被打断的 false"和"任务正常结束的 false"——前者应跳过自动排空，
+  // 因为新任务即将由后端启动（会紧跟一条 processing_status=true）。
+  const localSendPendingRef = useRef<Set<string>>(new Set());
+  // sendMessage 登记的乐观 user 气泡（request_id -> 气泡）。乐观气泡只能盖浏览器钟，
+  // 与执行机钟有偏差时，本轮首个输出事件会按时间戳排到用户消息之前（「任务用时」行
+  // 插到时间线顶部）。runtime.accepted 由执行机在产出任何输出事件之前盖章，到达时
+  // 按单号用服务端权威时间回填气泡。steer/跨会话/心跳气泡自带服务端时间，不进本表。
+  const optimisticUserBubblesRef = useRef<Map<string, { sessionId: string; messageId: string }>>(new Map());
+  const pendingAgentGroupBindingRef = useRef<Map<string, { id: string; timer: number }>>(new Map());
+  const groupBindingReconcileRef = useRef<Map<string, Promise<void>>>(new Map());
+  const reconcileAgentGroupBindingRef = useRef<((sessionId: string) => Promise<void>) | null>(null);
+  // 已经为哪些计划审批落过正文气泡。同一个 request_id 可能被重复推送
+  // （重连补发 / 历史恢复），去重后才不会出现两条一样的计划。
+  const planBubbleRequestIdsRef = useRef<Set<string>>(new Set());
+  // 点了「执行」、等待补发执行消息的会话。批准那一轮只负责退出计划模式，必须等它
+  // 真正跑完（processing_status=false）才能发下一条，否则两条消息会同时打到后端。
+  const pendingPlanExecuteRef = useRef<Set<string>>(new Set());
+  const recentEventRef = useRef<Map<string, number>>(new Map());
+  const teamToolCallMemberRef = useRef<Map<string, string>>(new Map());
+  const shutdownMemberToolCallRef = useRef<Map<string, string>>(new Map());
+  const pendingSubagentQueryRef = useRef<Map<string, { sessionId: string; subagentId: string; query: string }>>(new Map());
+  const pendingSubagentSpawnQueriesRef = useRef<Array<{ sessionId: string; displayName: string; query: string }>>([]);
+  const pendingSubagentAssignmentRef = useRef<Map<string, { sessionId: string; query: string; taskId?: string }>>(new Map());
+  // These entries only bridge adjacent WebSocket events; a session or connection boundary invalidates them.
+  const clearPendingSubagentCorrelations = useCallback((sessionId?: string) => {
+    if (!sessionId) {
+      pendingSubagentQueryRef.current.clear();
+      pendingSubagentSpawnQueriesRef.current = [];
+      pendingSubagentAssignmentRef.current.clear();
+      return;
+    }
+    for (const [toolCallId, pending] of pendingSubagentQueryRef.current) {
+      if (pending.sessionId === sessionId) pendingSubagentQueryRef.current.delete(toolCallId);
+    }
+    pendingSubagentSpawnQueriesRef.current = pendingSubagentSpawnQueriesRef.current.filter(
+      pending => pending.sessionId !== sessionId,
+    );
+    for (const [subagentId, pending] of pendingSubagentAssignmentRef.current) {
+      if (pending.sessionId === sessionId) pendingSubagentAssignmentRef.current.delete(subagentId);
+    }
+  }, []);
+  const previousActiveSessionIdRef = useRef(activeSessionId);
+  const activeSessionIdRef = useRef(activeSessionId);
+  activeSessionIdRef.current = activeSessionId;
+  const lastTeamConnectionSessionRef = useRef(activeSessionId);
+  const lastTeamConnectionModeRef = useRef(activeSessionMode);
+  const teamMemberSnapshotRequestRef = useRef(
+    new Map<string, { revision: number; changedMemberIds: Set<string> }>()
+  );
+  const teamConnectionGraceTimerRef = useRef<{
+    timerId: number | null;
+    capturedBySession: Map<string, TeamConnectionPresentation>;
+    affectedSessionIds: Set<string>;
+    graceElapsed: boolean;
+  } | null>(null);
+  const captureTeamConnectionForSession = useCallback((sessionId: string) => {
+    const pending = teamConnectionGraceTimerRef.current;
+    if (!pending) return;
+    const runtime = useSessionStore.getState().getRuntime(sessionId);
+    if (runtime?.mode !== 'team') {
+      pending.capturedBySession.delete(sessionId);
+      pending.affectedSessionIds.delete(sessionId);
+      return;
+    }
+    const captured = captureTeamConnectionPresentation(runtime?.mode, runtime?.teamMembers ?? []);
+    if (!captured) {
+      pending.capturedBySession.delete(sessionId);
+      return;
+    }
+    pending.affectedSessionIds.add(sessionId);
+    pending.capturedBySession.set(sessionId, captured);
+    if (!pending.graceElapsed || runtime?.mode !== 'team') return;
+    const presentation = retainRunningTeamConnectionPresentation(captured, runtime.teamMembers);
+    if (presentation) {
+      useSessionStore.getState().setTeamConnectionPresentation(sessionId, presentation);
+    }
+  }, []);
+  const clearPendingTeamConnectionMember = useCallback((sessionId: string, memberId: string) => {
+    const pending = teamConnectionGraceTimerRef.current;
+    const captured = pending?.capturedBySession.get(sessionId);
+    if (!pending || !captured) return;
+    const memberIds = captured.memberIds.filter((id) => id !== memberId);
+    pending.capturedBySession.set(sessionId, { memberIds });
+  }, []);
+  const markTeamConnectionStateChanged = useCallback((sessionId: string, memberId?: string) => {
+    const request = teamMemberSnapshotRequestRef.current.get(sessionId);
+    if (!request) return;
+    if (memberId) {
+      request.changedMemberIds.add(memberId);
+    } else {
+      request.revision += 1;
+    }
+  }, []);
+  const clearConnectionPresentationForUserAction = useCallback((sessionId: string) => {
+    const pending = teamConnectionGraceTimerRef.current;
+    pending?.capturedBySession.delete(sessionId);
+    markTeamConnectionStateChanged(sessionId);
+    useSessionStore.getState().clearTeamConnectionPresentation(sessionId);
+  }, [markTeamConnectionStateChanged]);
+  const teamMemberOutputEventRef = useRef<Map<string, string>>(new Map());
+  const eventDedupDroppedRef = useRef<Record<string, number>>({});
+  const symphonyStatusTargetRef = useRef<Map<string, { messageId: string; baseContent: string }>>(
+    new Map()
+  );
+  // goal_id -> 本地"完成后自动隐藏"定时器句柄，见 applyIncomingGoal
+  const goalCompletedHideTimerRef = useRef<Map<string, number>>(new Map());
+  /** session_id -> 最近一次成功落地 goal.snapshot/goal.updated 的时间戳，供 1 分钟无更新兜底巡检用 */
+  const lastGoalEventAtRef = useRef<Map<string, number>>(new Map());
+  /** session_id -> 最近一次调用 performGoalGet 的时间戳（不管成败），供 unknown 态退避巡检用 */
+  const lastGoalGetAttemptAtRef = useRef<Map<string, number>>(new Map());
+  const wasConnectedRef = useRef(false);
+  const contextCompressionSummaryRef = useRef<Map<string, ContextCompressionSummary>>(new Map());
+  const pendingContextCompressionStartRef =
+    useRef<Map<string, PendingContextCompressionStart>>(new Map());
+  const pendingTeamMemberContextCompressionStartRef =
+    useRef<Map<string, PendingContextCompressionStart>>(new Map());
+  const streamDeltaBatcherRef = useRef<ReturnType<typeof createStreamDeltaBatcher> | null>(null);
+  if (streamDeltaBatcherRef.current === null) {
+    streamDeltaBatcherRef.current = createStreamDeltaBatcher();
+  }
+
+  // Stores: 仅保留全局 action（A 类，不需要 sessionId）
+  const {
+    setConnected,
+    setAvailableTools,
+    updateSession,
+    receiveContextUsage,
+    setTeamMemberContextCompressionStatus,
+    clearTeamMemberContextCompressionStatus,
+  } = useSessionStore.getState();
+
+  const resolveEventSessionId = useCallback(
+    (payload: Record<string, unknown>, eventType?: string): string | null => {
+      const payloadSessionId = getPayloadSessionId(payload);
+      if (!payloadSessionId) return null;
+      const stoppedOwnerOutput = isOrganizationOwnerStopped(payloadSessionId);
+      const incrementalOutput = ['chat.delta', 'chat.reasoning', 'chat.tool_call', 'chat.tool_result']
+        .includes(eventType ?? '');
+      if (stoppedOwnerOutput && incrementalOutput) return null;
+      if (expertTeamId(payload, payloadSessionId)) return null;
+      ensureSessionRuntimes(payloadSessionId);
+      if (typeof payload.execution_id === 'string' && payload.execution_id) {
+        useChatStore.getState().setActiveExecutionId(payloadSessionId, payload.execution_id);
+      }
+      return payloadSessionId;
+    },
+    []
+  );
+
+  useEffect(() => {
+    const previousSessionId = previousActiveSessionIdRef.current;
+    if (previousSessionId && previousSessionId !== activeSessionId) {
+      clearPendingSubagentCorrelations(previousSessionId);
+    }
+    previousActiveSessionIdRef.current = activeSessionId;
+  }, [activeSessionId, clearPendingSubagentCorrelations]);
+
+  useEffect(() => {
+    const sessionChanged = lastTeamConnectionSessionRef.current !== activeSessionId;
+    const modeChanged = lastTeamConnectionModeRef.current !== activeSessionMode;
+    lastTeamConnectionSessionRef.current = activeSessionId;
+    lastTeamConnectionModeRef.current = activeSessionMode;
+
+    const pending = teamConnectionGraceTimerRef.current;
+    if (!pending || !activeSessionId) return;
+    const connectionState = webClient.getState();
+    if (connectionState !== 'reconnecting' && connectionState !== 'connecting') return;
+    if (activeSessionMode !== 'team') {
+      pending.capturedBySession.delete(activeSessionId);
+      pending.affectedSessionIds.delete(activeSessionId);
+      return;
+    }
+    if (!sessionChanged && !modeChanged && pending.capturedBySession.has(activeSessionId)) return;
+    captureTeamConnectionForSession(activeSessionId);
+  }, [
+    activeSessionId,
+    activeSessionMode,
+    activeTeamMembers,
+    captureTeamConnectionForSession,
+  ]);
+
+  const flushPendingStreamDelta = useCallback((sessionId: string) => {
+    const streamId = useChatStore.getState().getRuntime(sessionId)?.currentStreamId;
+    if (!streamId) return;
+    streamDeltaBatcherRef.current?.flush(streamDeltaBatchKey(sessionId, streamId));
+  }, []);
+
+  // Confirm the optimistic user bubble against the server's input boundary for stable ordering.
+  // runtime.accepted.timestamp and chat.output_phase.input_timestamp confirm the server input boundary.
+  // Older events only carry timestamp, which retains its original meaning.
+  // 按发送时登记的单号回填；旧后端的 output_phase 则退回使用事件时间。
+  // 仅匹配 sendMessage 登记的乐观气泡——steer/跨会话/心跳气泡自带服务端时间，不进
+  // 登记表；帧无时间戳（旧后端）时保持现状不回填。
+  const backfillOptimisticBubbleTimestamp = useCallback((sessionId: string, payload: Record<string, unknown>) => {
+    const directRequestId = typeof payload.request_id === 'string' && payload.request_id ? payload.request_id : '';
+    const requestId = directRequestId || readOutputOrder(payload)?.requestId || '';
+    if (!requestId) return;
+    const optimisticBubble = optimisticUserBubblesRef.current.get(requestId);
+    if (!optimisticBubble || optimisticBubble.sessionId !== sessionId) return;
+    const acceptedIso =
+      timestampMsToIso(parseTimestampToMs(payload.input_timestamp)) ||
+      timestampMsToIso(parseTimestampToMs(payload.timestamp));
+    if (!acceptedIso) return;
+    const chatStore = useChatStore.getState();
+    chatStore.updateMessage(optimisticBubble.sessionId, optimisticBubble.messageId, {
+      timestamp: acceptedIso,
+      isTimestampPending: false,
+    });
+    // 图片提示可先于 ACK/phase 到达；旧后端不带时间戳，提示会盖浏览器钟。
+    // 将早于用户边界的同单提示移到边界上，避免落入上一轮；同刻按消息插入顺序排序。
+    const noticeId = `notice-image_tool_fallback-${requestId}`;
+    const notice = chatStore.getRuntime(sessionId)?.messages.find((message) => message.id === noticeId);
+    if (notice && !(parseTimestampToMs(notice.timestamp) >= Date.parse(acceptedIso))) {
+      chatStore.updateMessage(sessionId, noticeId, { timestamp: acceptedIso });
+    }
+    optimisticUserBubblesRef.current.delete(requestId);
+  }, []);
+
+  const handleTtsPlayback = useCallback(
+    (sessionId: string, messageId: string, content: string) => {
+      const sanitized = sanitizeTtsText(content);
+      if (!sanitized || sanitized.startsWith('[任务已中断]')) {
+        return;
+      }
+
+      const existing = useChatStore.getState().getRuntime(sessionId)?.messages.find((msg) => msg.id === messageId);
+      if (existing?.audioBase64) {
+        return;
+      }
+
+      void (async () => {
+        const versionAtStart = userInputVersionRef.current;
+        const ttsSessionId = sessionId;
+        const response = await fetchTtsAudio(
+          sanitized,
+          ttsSessionId && ttsSessionId !== 'new' ? ttsSessionId : undefined
+        );
+        if (!response?.success || !response.audio_base64) {
+          return;
+        }
+
+        useChatStore.getState().updateMessage(sessionId, messageId, {
+          audioBase64: response.audio_base64,
+          audioMime: response.audio_mime,
+        });
+
+        if (versionAtStart !== userInputVersionRef.current) {
+          return;
+        }
+
+        await playAudioBase64(
+          response.audio_base64,
+          response.audio_mime || 'audio/mpeg'
+        );
+      })();
+    },
+    []
+  );
+
+  const handleConnectionAck = useCallback(
+    (payload: Record<string, unknown>) => {
+      const ackPayload = payload as unknown as ConnectionAckPayload;
+      setConnected(true);
+      if (Array.isArray(ackPayload.tools)) {
+        setAvailableTools(ackPayload.tools);
+      }
+      useChatStore.getState().setGlobalTaskRunning(Boolean(ackPayload.task_running));
+      onConnectRef.current?.(ackPayload);
+    },
+    [setAvailableTools, setConnected]
+  );
+
+  // 断开连接
+  const disconnect = useCallback(() => {
+    webClient.disconnect();
+  }, []);
+
+  const request = useCallback(
+    async <T = unknown>(
+      method: string,
+      params?: Record<string, unknown>,
+      requestOptions?: WebRequestOptions
+    ): Promise<T> => {
+      return webClient.request<T>(method, params, requestOptions);
+    },
+    []
+  );
+
+  const reconcileTeamMembersFromSnapshot = useCallback(async (sessionId: string) => {
+    if (webClient.getState() !== 'ready') return;
+    if (teamMemberSnapshotRequestRef.current.has(sessionId)) return;
+    const requestState = { revision: 0, changedMemberIds: new Set<string>() };
+    teamMemberSnapshotRequestRef.current.set(sessionId, requestState);
+    try {
+      const response = await request<{ members?: unknown; members_source?: string }>(
+        'team.snapshot',
+        { session_id: sessionId },
+        { timeoutMs: 5000 },
+      );
+      if (
+        teamMemberSnapshotRequestRef.current.get(sessionId) !== requestState ||
+        requestState.revision !== 0
+      ) return;
+      if (response?.members_source !== 'live') return;
+      if (!Array.isArray(response?.members) || response.members.length === 0) return;
+      const runtime = useSessionStore.getState().getRuntime(sessionId);
+      if (runtime?.mode !== 'team') return;
+
+      const timestamp = Date.now();
+      const snapshotMembers = response.members.flatMap((item) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+        const snapshotMember = item as Record<string, unknown>;
+        const memberId = typeof snapshotMember.member_id === 'string'
+          ? snapshotMember.member_id.trim()
+          : '';
+        const status = typeof snapshotMember.status === 'string' ? snapshotMember.status : '';
+        if (!memberId || !status) return [];
+        const existing = runtime.teamMembers.find((member) => member.member_id === memberId);
+        return [{
+          id: existing?.id ?? `team-snapshot-${memberId}`,
+          member_id: memberId,
+          status,
+          timestamp,
+          name: typeof snapshotMember.name === 'string' ? snapshotMember.name : existing?.name,
+          execution_status:
+            snapshotMember.execution_status === null || typeof snapshotMember.execution_status === 'string'
+              ? snapshotMember.execution_status
+              : existing?.execution_status,
+          mode: typeof snapshotMember.mode === 'string' ? snapshotMember.mode : existing?.mode,
+          role: typeof snapshotMember.role === 'string' ? snapshotMember.role : existing?.role,
+          cli_agent:
+            snapshotMember.cli_agent === null || typeof snapshotMember.cli_agent === 'string'
+              ? snapshotMember.cli_agent
+              : existing?.cli_agent,
+          workflow_run_id:
+            typeof snapshotMember.workflow_run_id === 'string'
+              ? snapshotMember.workflow_run_id
+              : existing?.workflow_run_id,
+          agent_template:
+            typeof snapshotMember.agent_template === 'string'
+              ? snapshotMember.agent_template
+              : existing?.agent_template,
+          display_name:
+            typeof snapshotMember.display_name === 'string'
+              ? snapshotMember.display_name
+              : existing?.display_name,
+        }];
+      });
+      if (snapshotMembers.length !== response.members.length || snapshotMembers.length === 0) return;
+
+      const changedMemberIds = requestState.changedMemberIds;
+      const reconciledMemberIds = snapshotMembers
+        .filter((member) => !changedMemberIds.has(member.member_id))
+        .map((member) => member.member_id);
+      if (reconciledMemberIds.length === 0) return;
+
+      const snapshotMemberIds = new Set(snapshotMembers.map((member) => member.member_id));
+      const members = snapshotMembers.flatMap((member) => {
+        if (!changedMemberIds.has(member.member_id)) return [member];
+        const currentMember = runtime.teamMembers.find(
+          (candidate) => candidate.member_id === member.member_id
+        );
+        return currentMember ? [currentMember] : [];
+      });
+      for (const member of runtime.teamMembers) {
+        if (changedMemberIds.has(member.member_id) && !snapshotMemberIds.has(member.member_id)) {
+          members.push(member);
+        }
+      }
+
+      const currentRuntime = useSessionStore.getState().getRuntime(sessionId);
+      if (currentRuntime?.mode !== 'team') return;
+      useSessionStore.getState().setTeamMembers(sessionId, members);
+      if (changedMemberIds.size === 0) {
+        useSessionStore.getState().clearTeamConnectionPresentation(sessionId);
+      } else {
+        for (const memberId of reconciledMemberIds) {
+          useSessionStore.getState().clearTeamConnectionPresentation(sessionId, memberId);
+        }
+      }
+    } catch {
+      // Keep the stale-connection presentation until a member event can reconcile it.
+    } finally {
+      if (teamMemberSnapshotRequestRef.current.get(sessionId) === requestState) {
+        teamMemberSnapshotRequestRef.current.delete(sessionId);
+      }
+    }
+  }, [request]);
+
+  useEffect(() => {
+    if (connectionState !== 'ready' || !activeSessionId || activeSessionMode !== 'team') return;
+    const runtime = useSessionStore.getState().getRuntime(activeSessionId);
+    if (!runtime?.teamConnectionPresentation) return;
+    void reconcileTeamMembersFromSnapshot(activeSessionId);
+  }, [activeSessionId, activeSessionMode, connectionState, reconcileTeamMembersFromSnapshot]);
+
+  const clearPendingAgentGroupBinding = useCallback((sessionId: string) => {
+    const pending = pendingAgentGroupBindingRef.current.get(sessionId);
+    if (!pending) return;
+    window.clearTimeout(pending.timer);
+    pendingAgentGroupBindingRef.current.delete(sessionId);
+  }, []);
+
+  const markPendingAgentGroupBinding = useCallback(function markPendingAgentGroupBinding(sessionId: string, groupId: string) {
+    clearPendingAgentGroupBinding(sessionId);
+    useSessionStore.getState().setAgentGroupBindingPending(sessionId, groupId);
+    const timer = window.setTimeout(() => {
+      const pending = pendingAgentGroupBindingRef.current.get(sessionId);
+      if (pending?.id !== groupId) return;
+      if (webClient.getState() !== 'ready') return;
+      pendingAgentGroupBindingRef.current.delete(sessionId);
+      const reconcile = reconcileAgentGroupBindingRef.current?.(sessionId);
+      if (!reconcile) {
+        useSessionStore.getState().setAgentGroupBindingPending(sessionId, null);
+        return;
+      }
+      void reconcile.finally(() => {
+        const runtime = useSessionStore.getState().getRuntime(sessionId);
+        if (runtime?.agentGroupBinding !== groupId && runtime?.agentGroupBindingPending === groupId) {
+          // 首次 Team 绑定要先生成名称，可能超过 30 秒；执行尚未结束时继续读回绑定，不能仅因
+          // 一次 metadata 为空就让输入区的专家团标签和乐观锁消失。
+          if (useChatStore.getState().getRuntime(sessionId)?.isProcessing) {
+            markPendingAgentGroupBinding(sessionId, groupId);
+          } else {
+            useSessionStore.getState().setAgentGroupBindingPending(sessionId, null);
+          }
+        }
+      });
+    }, 30_000);
+    pendingAgentGroupBindingRef.current.set(sessionId, { id: groupId, timer });
+  }, [clearPendingAgentGroupBinding]);
+
+  const reconcileAgentGroupBinding = useCallback((sessionId: string): Promise<void> => {
+    const existing = groupBindingReconcileRef.current.get(sessionId);
+    if (existing) return existing;
+    const promise = request<Session>('session.get_metadata', { session_id: sessionId }, { timeoutMs: 10_000 })
+      .then((session) => {
+        const groupId = typeof session?.agent_group_name === 'string' ? session.agent_group_name.trim() : '';
+        if (!groupId) {
+          // 首次绑定的 metadata 可能在 chat.send 已受理、但后端尚未完成落盘时
+          // 短暂返回空值。保留乐观锁，等下一次 read-back 或 30 秒超时再收敛。
+          return;
+        }
+        useSessionStore.getState().setTeamLeaderIdentity(
+          sessionId,
+          Object.prototype.hasOwnProperty.call(session, 'team_leader_identity')
+            ? normalizeTeamLeaderIdentity(session.team_leader_identity)
+            : null,
+        );
+        useSessionStore.getState().setTeamGroupIdentity(
+          sessionId,
+          Object.prototype.hasOwnProperty.call(session, 'team_group_identity')
+            ? normalizeTeamGroupIdentity(session.team_group_identity)
+            : null,
+        );
+        useSessionStore.getState().setAgentGroupBinding(sessionId, groupId);
+        clearPendingAgentGroupBinding(sessionId);
+      })
+      .catch((error) => {
+        console.debug('[agent-group] binding readback skipped:', error);
+      })
+      .finally(() => {
+        if (groupBindingReconcileRef.current.get(sessionId) === promise) {
+          groupBindingReconcileRef.current.delete(sessionId);
+        }
+      });
+    groupBindingReconcileRef.current.set(sessionId, promise);
+    return promise;
+  }, [clearPendingAgentGroupBinding, request]);
+  reconcileAgentGroupBindingRef.current = reconcileAgentGroupBinding;
+
+  const clearFailedAgentGroupBinding = useCallback(
+    (sessionId: string, groupId?: string) => {
+      if (!groupId) return;
+      clearPendingAgentGroupBinding(sessionId);
+      useSessionStore.getState().setAgentGroupBindingPending(sessionId, null);
+      void reconcileAgentGroupBinding(sessionId);
+    },
+    [clearPendingAgentGroupBinding, reconcileAgentGroupBinding],
+  );
+
+  const findActiveTeamLeaderMessage = useCallback((sessionId: string, requestId?: string) => {
+    const messages = useChatStore.getState().getRuntime(sessionId)?.messages ?? [];
+    return findActiveTeamLeaderMessageInTurn(messages, requestId);
+  }, []);
+
+  const closeActiveTeamLeaderMessages = useCallback((sessionId: string) => {
+    const messages = useChatStore.getState().getRuntime(sessionId)?.messages ?? [];
+    for (const msg of messages) {
+      if (msg.id.startsWith('team-leader-') && msg.isStreaming) {
+        useChatStore.getState().updateMessage(sessionId, msg.id, { isStreaming: false });
+      }
+    }
+  }, []);
+
+  const clearPendingContextCompressionStart = useCallback((sessionId: string) => {
+    const pending = pendingContextCompressionStartRef.current.get(sessionId);
+    if (pending) {
+      window.clearTimeout(pending.timer);
+      pendingContextCompressionStartRef.current.delete(sessionId);
+    }
+  }, []);
+
+  const getTeamMemberContextCompressionKey = useCallback(
+    (sessionId: string, memberId: string) => `${sessionId}\u0000${memberId}`,
+    []
+  );
+
+  const clearPendingTeamMemberContextCompressionStart = useCallback((sessionId: string, memberId: string) => {
+    const key = getTeamMemberContextCompressionKey(sessionId, memberId);
+    const pending = pendingTeamMemberContextCompressionStartRef.current.get(key);
+    if (!pending) return;
+    window.clearTimeout(pending.timer);
+    pendingTeamMemberContextCompressionStartRef.current.delete(key);
+  }, [getTeamMemberContextCompressionKey]);
+
+  const clearAllPendingTeamMemberContextCompressionStarts = useCallback(() => {
+    for (const pending of pendingTeamMemberContextCompressionStartRef.current.values()) {
+      window.clearTimeout(pending.timer);
+    }
+    pendingTeamMemberContextCompressionStartRef.current.clear();
+  }, []);
+
+  const resetContextCompressionTurn = useCallback((sessionId: string) => {
+    clearPendingContextCompressionStart(sessionId);
+    contextCompressionSummaryRef.current.delete(sessionId);
+    useChatStore.getState().setContextCompressionStatus(sessionId, undefined);
+  }, [clearPendingContextCompressionStart]);
+
+  const finishContextCompressionTurn = useCallback((sessionId: string) => {
+    clearPendingContextCompressionStart(sessionId);
+    const summary = contextCompressionSummaryRef.current.get(sessionId);
+    useChatStore.getState().setContextCompressionStatus(sessionId, undefined, summary && summary.count > 0 ? summary : undefined);
+  }, [clearPendingContextCompressionStart]);
+
+  const buildContextCompressionRuntimeState = useCallback(
+    (payload: ContextCompressionStatePayload): Omit<ContextCompressionRuntime, 'status'> | null => {
+      const summary =
+        payload.summary?.trim() ||
+        payload.error?.trim() ||
+        (payload.status?.trim() ? `Context compression ${payload.status.trim()}` : '');
+      if (!summary) return null;
+      return {
+        summary,
+        operationId: payload.operation_id?.trim() || '',
+        phase: payload.phase?.trim() || undefined,
+        processor: payload.processor?.trim() || undefined,
+      };
+    },
+    []
+  );
+
+  const handleContextCompressionState = useCallback(
+    (sessionId: string, payload: ContextCompressionStatePayload) => {
+      const status = payload.status?.trim().toLowerCase() || '';
+      const runtimeState = buildContextCompressionRuntimeState(payload);
+      if (!status || !runtimeState) return;
+
+      if (status === 'completed') {
+        clearPendingContextCompressionStart(sessionId);
+        const current = contextCompressionSummaryRef.current.get(sessionId) ?? { count: 0, summaries: [] };
+        const nextSummary = {
+          count: current.count + 1,
+          summaries: [...current.summaries, runtimeState.summary],
+        };
+        contextCompressionSummaryRef.current.set(sessionId, nextSummary);
+        useChatStore.getState().setContextCompressionStatus(sessionId, {
+          ...runtimeState,
+          status: 'completed',
+        });
+        return;
+      }
+
+      if (status === 'started' || status === 'running') {
+        clearPendingContextCompressionStart(sessionId);
+        const pending: PendingContextCompressionStart = {
+          runtimeState,
+          shown: false,
+          timer: window.setTimeout(() => {
+            const current = pendingContextCompressionStartRef.current.get(sessionId);
+            if (current !== pending) return;
+            pending.shown = true;
+            useChatStore.getState().setContextCompressionStatus(sessionId, {
+              ...pending.runtimeState,
+              status: 'running',
+            });
+          }, CONTEXT_COMPRESSION_START_DELAY_MS),
+        };
+        pendingContextCompressionStartRef.current.set(sessionId, pending);
+        return;
+      }
+
+      if (status === 'noop' || status === 'skipped') {
+        const pending = pendingContextCompressionStartRef.current.get(sessionId);
+        if (pending && !pending.shown) {
+          clearPendingContextCompressionStart(sessionId);
+          return;
+        }
+        if (pending) {
+          clearPendingContextCompressionStart(sessionId);
+        }
+        useChatStore.getState().setContextCompressionStatus(sessionId, {
+          ...runtimeState,
+          status: 'unchanged',
+        });
+        return;
+      }
+
+      if (status === 'failed' || status === 'error') {
+        clearPendingContextCompressionStart(sessionId);
+        useChatStore.getState().setContextCompressionStatus(sessionId, {
+          ...runtimeState,
+          status: 'failed',
+        });
+      }
+    },
+    [buildContextCompressionRuntimeState, clearPendingContextCompressionStart]
+  );
+
+  const findExistingTeamMemberId = useCallback((sessionId: string, memberName: unknown): string | null => {
+    if (typeof memberName !== 'string' || !memberName.trim()) {
+      return null;
+    }
+    const candidate = memberName.trim();
+    const existingMember = useSessionStore
+      .getState()
+      .getRuntime(sessionId)
+      ?.teamMembers.find((member) => member.member_id === candidate);
+    return existingMember?.member_id || null;
+  }, []);
+
+  const handleTeamMemberContextCompressionState = useCallback(
+    (sessionId: string, payload: ContextCompressionStatePayload, memberId: string) => {
+      const status = payload.status?.trim().toLowerCase() || '';
+      const runtimeState = buildContextCompressionRuntimeState(payload);
+      if (!status || !runtimeState) return;
+
+      if (status === 'completed') {
+        clearPendingTeamMemberContextCompressionStart(sessionId, memberId);
+        const current =
+          useSessionStore.getState().getRuntime(sessionId)?.teamMemberContextCompression[memberId]?.summary;
+        const nextSummary = {
+          count: (current?.count || 0) + 1,
+          summaries: [...(current?.summaries || []), runtimeState.summary],
+        };
+        setTeamMemberContextCompressionStatus(sessionId, memberId, {
+          ...runtimeState,
+          status: 'completed',
+        }, nextSummary);
+        return;
+      }
+
+      if (status === 'started' || status === 'running') {
+        clearPendingTeamMemberContextCompressionStart(sessionId, memberId);
+        const key = getTeamMemberContextCompressionKey(sessionId, memberId);
+        const pending: PendingContextCompressionStart = {
+          runtimeState,
+          shown: false,
+          timer: window.setTimeout(() => {
+            if (pendingTeamMemberContextCompressionStartRef.current.get(key) !== pending) return;
+            pending.shown = true;
+            setTeamMemberContextCompressionStatus(sessionId, memberId, {
+              ...pending.runtimeState,
+              status: 'running',
+            });
+          }, CONTEXT_COMPRESSION_START_DELAY_MS),
+        };
+        pendingTeamMemberContextCompressionStartRef.current.set(key, pending);
+        return;
+      }
+
+      if (status === 'noop' || status === 'skipped') {
+        const key = getTeamMemberContextCompressionKey(sessionId, memberId);
+        const pending = pendingTeamMemberContextCompressionStartRef.current.get(key);
+        if (pending && !pending.shown) {
+          clearPendingTeamMemberContextCompressionStart(sessionId, memberId);
+          return;
+        }
+        if (pending) {
+          clearPendingTeamMemberContextCompressionStart(sessionId, memberId);
+        }
+        setTeamMemberContextCompressionStatus(sessionId, memberId, {
+          ...runtimeState,
+          status: 'unchanged',
+        });
+        return;
+      }
+
+      if (status === 'failed' || status === 'error') {
+        clearPendingTeamMemberContextCompressionStart(sessionId, memberId);
+        setTeamMemberContextCompressionStatus(sessionId, memberId, {
+          ...runtimeState,
+          status: 'failed',
+        });
+      }
+    },
+    [
+      buildContextCompressionRuntimeState,
+      clearPendingTeamMemberContextCompressionStart,
+      getTeamMemberContextCompressionKey,
+      setTeamMemberContextCompressionStatus,
+    ]
+  );
+
+  useEffect(() => {
+    return () => {
+      pendingContextCompressionStartRef.current.forEach((pending) => {
+        window.clearTimeout(pending.timer);
+      });
+      pendingContextCompressionStartRef.current.clear();
+      clearAllPendingTeamMemberContextCompressionStarts();
+    };
+  }, [clearAllPendingTeamMemberContextCompressionStarts]);
+
+  const persistMedia = useCallback(
+    async (content: string, sessionId: string, mediaItems: MediaItem[]) => {
+      return request<PersistMediaResponse>(
+        'media.persist',
+        {
+          session_id: sessionId,
+          content,
+          media_items: mediaItems as unknown as Record<string, unknown>[],
+        },
+        // Multiple base64 images can exceed the 15s default timeout
+        { timeoutMs: 60_000 },
+      );
+    },
+    [request],
+  );
+
+  const discardMedia = useCallback(
+    async (sessionId: string, path: string) => {
+      return request<{ deleted?: boolean }>('media.discard', {
+        session_id: sessionId,
+        path,
+      });
+    },
+    [request],
+  );
+
+  const persistDocuments = useCallback(
+    async (content: string, sessionId: string, mediaItems: MediaItem[]) => {
+      return request<PersistMediaResponse>(
+        'document.persist',
+        {
+          session_id: sessionId,
+          content,
+          documents: mediaItems.map((item) => ({
+            filename: item.filename,
+            mime_type: getMediaMimeType(item),
+            // 桌面端传本机路径；浏览器端（Docker/远程）传 base64 内容由服务器落盘。
+            ...(item.path ? { path: item.path, original_path: item.path } : {}),
+            ...(item.base64Data || item.base64_data
+              ? { base64_data: item.base64Data || item.base64_data }
+              : {}),
+            size_bytes: item.size_bytes ?? item.sizeBytes,
+          })),
+        },
+        // Base64 内容上传可能超过默认超时
+        { timeoutMs: 60_000 },
+      );
+    },
+    [request],
+  );
+
+  // Goal（持续目标）控制：get/set/pause/resume/clear 共用一套 loading + 错误处理。
+  // get/pause/clear 走非流式一次性响应，真的会有 res，用 requestGoalAction() 正常等待；
+  // set/resume 走流式、正常路径上永远不会有 res（见 backend-requests.md #4），改用
+  // sendGoalStreamCommand() 发出去就不等，真实状态全靠 goal.snapshot/goal.updated 事件驱动。
+  const goalAction = useCallback(
+    async (sessionId: string, action: GoalAction | 'get', objective?: string) => {
+      ensureSessionRuntimes(sessionId);
+      useGoalStore.getState().setPendingAction(sessionId, action === 'get' ? null : action);
+      const mode = useSessionStore.getState().getRuntime(sessionId)?.mode ?? 'agent';
+
+      const reportFailure = (error: unknown) => {
+        const webError = error as WebError;
+        const errorMsg = webError.message || t('network.sendMessageFailed');
+        useChatStore.getState().addMessage(sessionId, {
+          id: prefixedMessageId('error-'),
+          role: 'system',
+          content: t('network.errorPrefix', { message: errorMsg }),
+          timestamp: new Date().toISOString(),
+        });
+      };
+
+      if (action === 'get') {
+        // 查询本身的失败/重试/unknown 兜底统一交给 performGoalGet，这里不需要额外 try/catch。
+        await performGoalGet(sessionId, mode, goalCompletedHideTimerRef.current, lastGoalEventAtRef.current, lastGoalGetAttemptAtRef.current);
+        return;
+      }
+
+      if (action === 'set' || action === 'resume') {
+        if (action === 'set' && objective) {
+          // "设为目标"徽章要靠这份历史记录复原（见 goalStore.ts objectiveMessageTexts 的
+          // 注释），发送这一刻就是唯一能拿到 objective 原文的地方，不能等回包再记。
+          useGoalStore.getState().recordGoalObjectiveText(sessionId, objective);
+        }
+        try {
+          await sendGoalStreamCommand({
+            sessionId,
+            action,
+            objective,
+            mode,
+            modelParams: useSessionStore.getState().getOutgoingModelParams(sessionId),
+          });
+        } catch (error) {
+          // WS 层直接发送失败（未连接等）：这是能明确识别的失败，弹提示；set 不做进一步兜底
+          // （"没有创建"本来就成立，不需要额外收敛），resume 按 b/c 步骤的约定补一次 get 兜底。
+          useGoalStore.getState().setPendingAction(sessionId, null);
+          reportFailure(error);
+          if (action === 'resume') {
+            await performGoalGet(sessionId, mode, goalCompletedHideTimerRef.current, lastGoalEventAtRef.current, lastGoalGetAttemptAtRef.current);
+          }
+          return;
+        }
+        // 没有数据可落——pendingAction 正常应该在 goal.snapshot/goal.updated/execution.error/
+        // runtime.accepted 事件到达时被清掉（applyGoalSnapshot -> applyIncomingGoal，或
+        // runtime.accepted 的专属处理）。但两类事件都可能因为各种原因没能把这次操作的
+        // pendingAction 清空——比如 bug001：同一 session 在 EVENT_DEDUP_WINDOW_MS 窗口内被
+        // resume 两次，第二次自己的确认事件因为内容跟第一次相同，被事件去重逻辑当成"重复事件"
+        // 丢弃（已经用 request_id 让去重更精确，但作为双保险，这里 set/resume 都统一补一次
+        // 收敛兜底 get，避免未来再出现类似的"确认事件丢失"场景时按钮又卡死到 60s 那么久）。
+        // 不在发送后立刻补，是因为立刻发会跟真正的 snapshot 赛跑，赢了反而用 set/resume 落地前
+        // 的旧数据提前清掉 pendingAction，重新打开"按钮提前解禁、能打出冲突指令"的窗口，等于
+        // 没解决问题。
+        window.setTimeout(() => {
+          // 到点一看 pendingAction 已经不是这次发起的 action 了，说明真正的事件已经收敛过一次，
+          // 不需要再补——不管是被这次操作自己的事件清的，还是用户切走后又发起了别的操作。
+          if (useGoalStore.getState().runtimes[sessionId]?.pendingAction !== action) return;
+          void requestGoalAction({ sessionId, action: 'get', mode })
+            .then((goal) => applyIncomingGoal(sessionId, goal, goalCompletedHideTimerRef.current, lastGoalEventAtRef.current))
+            .catch(() => {
+              // 静默失败：这只是收敛用的兜底 get，真正的状态最终仍由 goal.updated 事件驱动。
+            });
+        }, GOAL_ACTION_CONVERGENCE_DELAY_MS);
+        return;
+      }
+
+      if (action === 'clear') {
+        try {
+          const goal = await requestGoalAction({ sessionId, action, mode });
+          applyIncomingGoal(sessionId, goal, goalCompletedHideTimerRef.current, lastGoalEventAtRef.current);
+          // active 目标被删除时的会话结束由 App.tsx handleClearGoal 显式补发 cancel/pause 负责
+          // （真机联调确认只重置前端本地态不够，得发真信号），这里不用再管会话态。
+        } catch (error) {
+          // 一元 clear 失败时 webClient 目前不会把 payload.goal 透传进 WebError（见 webClient.ts
+          // resolvePending），拿不到失败当时的目标快照，主动补一次 get 收敛。
+          reportFailure(error);
+          await performGoalGet(sessionId, mode, goalCompletedHideTimerRef.current, lastGoalEventAtRef.current, lastGoalGetAttemptAtRef.current);
+        }
+        return;
+      }
+
+      // action === 'pause'：同样是一元 RPC，失败兜底同 clear。
+      try {
+        const goal = await requestGoalAction({ sessionId, action, mode });
+        applyIncomingGoal(sessionId, goal, goalCompletedHideTimerRef.current, lastGoalEventAtRef.current);
+      } catch (error) {
+        const webError = error as WebError;
+        // code: invalid_state 说明目标这会儿已经不是 active 了（常见于跟 handleCancel 触发的
+        // 后端"中断顺带暂停"竞态：两边几乎同时发，谁先到不确定，晚到的这次 pause 打过去时
+        // 目标已经被另一条路径转过去了）——这只是提示"已经不需要再暂停"，不是真错误，不弹
+        // 系统消息；其余失败（如 no_goal、网络异常）照常提示。
+        if (webError.code !== 'invalid_state') {
+          reportFailure(error);
+        }
+        await performGoalGet(sessionId, mode, goalCompletedHideTimerRef.current, lastGoalEventAtRef.current, lastGoalGetAttemptAtRef.current);
+      }
+    },
+    [t]
+  );
+
+  const setGoalObjective = useCallback(
+    (sessionId: string, objective: string) => goalAction(sessionId, 'set', objective),
+    [goalAction]
+  );
+  const pauseGoal = useCallback((sessionId: string) => goalAction(sessionId, 'pause'), [goalAction]);
+  const resumeGoal = useCallback((sessionId: string) => goalAction(sessionId, 'resume'), [goalAction]);
+  const clearGoal = useCallback((sessionId: string) => goalAction(sessionId, 'clear'), [goalAction]);
+  /**
+   * 会话加载/切换时主动查一次当前 Goal 状态（协议文档 v2 §11 推荐流程第 3 步）——不这样做的话，
+   * 刷新页面后 GoalBar 要等下一次 goal.updated 推送才会"自愈"重新出现，目标空闲/paused 时甚至
+   * 会一直缺失（2026-07-21 真机联调发现，见 backend-requests.md #1 末尾）。
+   */
+  const refreshGoal = useCallback((sessionId: string) => goalAction(sessionId, 'get'), [goalAction]);
+
+  /**
+   * 队列非空时主动尝试排空一次，供"入队那一刻本来就没有任务在处理"的场景兜底
+   * （典型是目标 active 但当前无聊天在跑时用户发消息——这条消息按设计要走排队，见
+   * InputArea.tsx 里 isGoalActive 相关注释，但常规的两处自动排空触发点——
+   * chat.processing_status 从 true→false、interrupt_result 完成——都要求"之前在
+   * processing"，这种场景两个都不会触发，消息会永久卡在队列里，只能靠用户手动点
+   * "恢复队列"）。isProcessing 为真时直接跳过，交给已有的 processing_status 处理器
+   * 在真正空闲下来时接管，不会重复发送。
+   */
+  const drainTaskQueueIfIdle = useCallback((sessionId: string) => {
+    const currentMode = useSessionStore.getState().getRuntime(sessionId)?.mode;
+    if (currentMode !== 'agent') return;
+    const runtime = useChatStore.getState().getRuntime(sessionId);
+    if (runtime?.isProcessing || runtime?.queuePaused) return;
+    if (!sendMessageRef.current) return;
+    const sessionState = useSessionStore.getState();
+    const sessionMetadata = sessionState.currentSession?.session_id === sessionId
+      ? sessionState.currentSession
+      : sessionState.sessions.find((session) => session.session_id === sessionId);
+    if (isConversationModelGroupBlocked({
+      mode: currentMode,
+      cronId: sessionMetadata?.cron_id,
+      selectedModelSelection: sessionState.getRuntime(sessionId)?.selectedModelSelection,
+      collaborationEnabled: isMultiModelCollaborationEnabled(),
+    })) return;
+    const nextTask = useChatStore.getState().claimQueuedTask(sessionId);
+    if (nextTask) {
+      sendMessageRef.current(nextTask.content, sessionId, nextTask.mediaItems ?? []);
+    }
+  }, []);
+
+  // 发送聊天消息
+  const sendMessage = useCallback(
+    async (content: string, sessionId: string, mediaItems: MediaItem[] = [], options?: ChatSendOptions): Promise<boolean> => {
+      if (!options?.queuedTaskId && selectedExpertTeamId(sessionId)) {
+        if (!content.trim() && !mediaItems.length) return false;
+        try {
+          const attachments: Record<string, unknown> = {};
+          let query = content;
+          if (mediaItems.length) {
+            const imageItems = mediaItems.filter((item) => item.type !== 'document');
+            const documentItems = mediaItems.filter((item) => item.type === 'document');
+            const persisted: PersistMediaResponse = imageItems.length ? await persistMedia(content, sessionId, imageItems) : {};
+            const documents: PersistMediaResponse = documentItems.length ? await persistDocuments(content, sessionId, documentItems) : {};
+            const items = [...(persisted.media_items ?? []), ...(documents.media_items ?? [])];
+            attachments.media_items = items;
+            attachments.files = { ...persisted.files, ...documents.files };
+            query = withUploadDocumentBlock(persisted.content ?? persisted.query ?? content, toUploadDocumentHints(documents.media_items));
+          }
+          return (await sendExpertMessage(query, sessionId, mediaItems, attachments)) ?? false;
+        } catch (error) {
+          onErrorRef.current?.((error as WebError).message || t('network.sendMessageFailed'));
+          return false;
+        }
+      }
+      const sessionState = useSessionStore.getState();
+      const sessionMetadata = sessionState.currentSession?.session_id === sessionId
+        ? sessionState.currentSession
+        : sessionState.sessions.find((session) => session.session_id === sessionId);
+      if (!useChatStore.getState().getRuntime(sessionId)?.isProcessing && isConversationModelGroupBlocked({
+        mode: sessionState.getRuntime(sessionId)?.mode,
+        cronId: sessionMetadata?.cron_id,
+        selectedModelSelection: sessionState.getRuntime(sessionId)?.selectedModelSelection,
+        collaborationEnabled: isMultiModelCollaborationEnabled(),
+      })) {
+        onErrorRef.current?.(t('chat.modelSelector.collaborationDisabled'));
+        return false;
+      }
+      const taskId = options?.queuedTaskId;
+      if (taskId) {
+        const store = useChatStore.getState();
+        // The button supplies input intent; Runtime decides whether it can steer the target.
+        // Keep this request's ACK/errors separate from the original chat's lifecycle.
+        await sendQueuedTaskInput(sessionId, taskId, request, {
+          mode: resolveOutgoingMode(sessionId, 'agent'),
+          ...useSessionStore.getState().getModelSelectionPayload(sessionId),
+          ...getSessionWorkContext(sessionId),
+        });
+        const runtime = useChatStore.getState().getRuntime(sessionId);
+        const task = runtime?.taskQueue.find((item) => item.id === taskId);
+        if (task?.status === 'queued') {
+          store.setInterruptResult(sessionId, {
+            intent: 'supplement', success: false,
+            message: task.error || t('network.supplementFailed'),
+          });
+          return false;
+        }
+        drainTaskQueueIfIdle(sessionId);
+        return runtime?.taskInputReceipts[taskId]?.status === 'accepted';
+      }
+      const hasMedia = mediaItems.length > 0;
+      // Attachment-only payloads are allowed when mediaItems are present.
+      // 【上传文档】-only text without any mediaItems is still blocked.
+      if (!stripUploadDocumentBlocks(content).trim() && !hasMedia) return false;
+
+      const currentMode = useSessionStore.getState().getRuntime(sessionId)?.mode;
+      const unsupportedEvolutionMode = unsupportedEvolutionModeMessage(content, currentMode ?? 'agent');
+      if (unsupportedEvolutionMode) {
+        useChatStore.getState().addMessage(sessionId, {
+          id: prefixedMessageId('error-'),
+          role: 'system',
+          content: unsupportedEvolutionMode,
+          timestamp: new Date().toISOString(),
+        });
+        return false;
+      }
+
+      resetContextCompressionTurn(sessionId);
+      userInputVersionRef.current += 1;
+      stopAllTts();
+
+      // A new query supersedes an unanswered inline question for this same session.
+      if (useChatStore.getState().getRuntime(sessionId)?.pendingQuestions[0]) {
+        useChatStore.getState().clearPendingQuestions(sessionId);
+      }
+
+      // 添加用户消息（附带输入栏选中的技能）
+      // 气泡只展示用户原文；路径提示仅随 chat.send 发给 Agent。
+      const sessionRuntime = useSessionStore.getState().getRuntime(sessionId);
+      const selectedSkills = sessionRuntime?.selectedSkills ?? [];
+      const agentSelectionIntent = sessionRuntime?.agentSelectionIntent ?? { kind: 'keep' as const };
+      const agentTemplateName = (
+        agentSelectionIntent.kind === 'select'
+          ? agentSelectionIntent.id
+          : agentSelectionIntent.kind === 'clear'
+            ? ''
+            : sessionMetadata?.session_equipment?.agent_template_name
+      )?.trim();
+      const selectedAgent = useAgentCatalogStore.getState().catalog?.find(
+        (item) => item.id === agentTemplateName || item.runtimePackageName === agentTemplateName,
+      );
+      // Only known native Agent paths publish the input timestamp confirmation.
+      const waitForInputTimestamp = !isTeamAgentMode(currentMode) && currentMode !== 'auto_harness' && (
+        !agentTemplateName || (selectedAgent !== undefined && !isExternalHarnessCatalogItem(selectedAgent))
+      );
+      const agentSelectionPayload = buildDefinitionSelectionPayloadForMode(currentMode, agentSelectionIntent);
+      const agentGroupSelectionIntent = sessionRuntime?.agentGroupSelectionIntent ?? { kind: 'keep' as const };
+      const agentGroupSelectionPayload = buildAgentGroupSelectionPayloadForMode(
+        currentMode,
+        agentGroupSelectionIntent,
+        sessionRuntime?.agentGroupBinding,
+        sessionId === NEW_CONVERSATION_ID || Boolean(sessionRuntime?.agentGroupBindingPending),
+      );
+      const selectedSkillsForRequest = resolveSelectedSkillsForRequest(
+        currentMode,
+        selectedSkills,
+        agentGroupSelectionIntent,
+        sessionRuntime?.agentGroupBinding,
+        sessionRuntime?.agentGroupBindingPending,
+      );
+      if (agentGroupSelectionPayload.agent_group_name) {
+        markPendingAgentGroupBinding(sessionId, agentGroupSelectionPayload.agent_group_name);
+      }
+      // 插件/MCP 是"+"菜单"扩展"面板里的会话级开关，和 selectedSkills 不同——不随发送清空，
+      // 持续带在本会话之后每一条消息里，直到用户在面板里手动关闭开关（见 sessionStore.ts
+      // SessionRuntime.enabledPlugins/enabledMcps 头部注释）。插件（plugin_names）后端还没有
+      // 权威字段定义，继续乐观发送（backend-requests.md 需求11遗留）；MCP 这半 2026-08-17 已经
+      // 有权威定义（MCP 接口文档 v2 §6.2，字段名是 `mcp`，见下方 chat.send 调用处）。两者都不
+      // 接入消息气泡展示——消息气泡怎么交织渲染插件/MCP 不在这轮范围内，只做输入栏可选可发送。
+      // 2026-08-21 用户明确要求：这两个数组只在用户点开关那一刻校验过一次连接态，之后如果对应
+      // MCP 断连/插件被卸载不会自动摘除，发送前用 buildExtensionSendPayload（内部调
+      // pruneEnabledExtensions）兜底重新核对一遍"我的插件/我的MCP里已连接的"，避免把早就失效的
+      // 名字发给后端；被摘掉的项同步从 sessionStore 里移除，让"+"扩展面板的开关同步变回关闭。
+      const extensionPayload = buildExtensionSendPayload(sessionId);
+      const userMessageId = prefixedMessageId('user-');
+      const displayedContent =
+        stripUploadDocumentBlocks(content) || content.replace(/\n*【上传文档[\s\S]*$/, '').trim() || content;
+      useChatStore.getState().addMessage(sessionId, {
+        id: userMessageId,
+        role: 'user',
+        content: displayedContent,
+        mediaItems,
+        timestamp: new Date().toISOString(),
+        ...(waitForInputTimestamp ? { isTimestampPending: true } : {}),
+        ...(selectedSkillsForRequest.length > 0 ? { skills: selectedSkillsForRequest } : {}),
+      });
+      // 发送后清空输入栏已选技能（一次性语义）；插件/MCP 是会话期间持续启用，不在这里清
+      if (selectedSkills.length > 0) {
+        useSessionStore.getState().clearSelectedSkills(sessionId);
+      }
+
+      // 不再预先创建助手消息，而是在收到第一个 content_chunk 时创建
+      // 这样工具调用会先显示，然后才是助手的回复
+
+      useChatStore.getState().setProcessing(sessionId, true);
+      useChatStore.getState().setThinking(sessionId, true);
+      // 标记本地发起的发送，用于 processing_status 处理器区分"旧任务被打断"
+      // 和"任务正常结束"——前者跳过自动排空
+      localSendPendingRef.current.add(sessionId);
+
+      // 正常调用接口
+      const workContext = getSessionWorkContext(sessionId);
+      if (currentMode === 'auto_harness') {
+        useHarnessStore.getState().reset(sessionId);
+      }
+      if (currentMode === 'team') {
+        useChatStore.getState().setPaused(sessionId, false);
+        // 执行中追问：先收尾上一轮仍在 streaming 的 leader，避免新一轮气泡/头像挂错簇
+        closeActiveTeamLeaderMessages(sessionId);
+        useChatStore.getState().closeReasoning(sessionId);
+      }
+      try {
+        let outgoingContent = content.replace(/\{\{skill:([^}]+)\}\}/g, '$1');
+        let outgoingMediaItems: Record<string, unknown>[] | undefined;
+        let outgoingFiles: Record<string, unknown> | undefined;
+        if (hasMedia) {
+          const mergedItems: Record<string, unknown>[] = [];
+          // 新会话的附件尚未落盘。每次只上传一项，既不触发批量数量限制，
+          // 也不把多份大文件的 base64 拼进同一条 WebSocket 消息。
+          for (const item of mediaItems) {
+            if (isPersistedMediaItem(item)) {
+              mergedItems.push(toPersistedMediaRecord(item));
+              continue;
+            }
+            const persist = item.type === 'document' ? persistDocuments : persistMedia;
+            const persisted = await persist('', sessionId, [item]);
+            const stored = persisted.media_items?.[0];
+            if (persisted.media_items?.length !== 1 || typeof stored?.path !== 'string' || !stored.path.trim()) {
+              throw new Error(`${item.filename}: ${t('chat.inputAttachment.uploadFailed')}`);
+            }
+            mergedItems.push(stored);
+          }
+          const documentHints = toUploadDocumentHints(mergedItems);
+          if (documentHints.length) {
+            outgoingContent = withUploadDocumentBlock(outgoingContent, documentHints);
+          }
+          outgoingMediaItems = slimPersistedMediaRecords(mergedItems);
+          outgoingFiles = buildPersistedMediaFiles(mergedItems);
+        }
+        // @名称 -> 文件路径的引用笔记在这里统一加（不在 InputArea 提交时加）：候选既包括这个
+        // 会话之前已经登记过的素材，也包括这条消息里刚落盘、还没跑完注册往返的文件——用
+        // pendingNames 里用户自己起的名字，没改过就用文件名去掉扩展名（和后端默认命名规则一致）。
+        // 这样欢迎页发的第一条消息（这时候 session 刚建，素材注册还没来得及跑）也能正确 @ 到
+        // 这条消息自己带的附件。
+        {
+          const pendingNames = useSessionAssetsStore.getState().pendingNames;
+          const freshAssets: NamedAsset[] = (outgoingMediaItems ?? []).flatMap((item) => {
+            const path = typeof item.path === 'string' ? item.path.trim() : '';
+            const filename = typeof item.filename === 'string' ? item.filename : '';
+            if (!path) return [];
+            const mimeType = typeof item.mime_type === 'string' ? item.mime_type : '';
+            return [{ name: pendingNames[filename] || stemFilename(filename) || filename, path, kind: assetKindFromMime(mimeType) }];
+          });
+          const knownAssets = useSessionAssetsStore.getState().bySession[sessionId] ?? [];
+          const byName = new Map<string, NamedAsset>();
+          for (const asset of knownAssets) byName.set(asset.name.toLowerCase(), asset);
+          for (const asset of freshAssets) byName.set(asset.name.toLowerCase(), asset); // 本次上传的名字优先
+          const referenced = findReferencedAssets(outgoingContent, [...byName.values()]);
+          if (referenced.length) {
+            // 笔记只加进发给 agent 的文本（outgoingContent），不进气泡——用户不需要读一段带绝对
+            // 路径的文本，引用的是什么样子应该直接看图，不是看路径字符串。
+            const lines = referenced.map((asset) => `@${asset.name} = ${asset.path} (${asset.kind})`);
+            outgoingContent = `${outgoingContent}\n\n[引用素材]\n${lines.join('\n')}`;
+            // 引用的文件如果这条消息本来就带了（最常见：刚上传、随手就 @ 了自己），气泡上已经有
+            // 一张卡片在显示它，不用再摆一张重复的；只给"引用的是之前已经存在、这条消息没有重新
+            // 上传"的素材补一张缩略图卡片，让引用在气泡上是看得见的图，不是纯文本。
+            const shownPaths = new Set(
+              [...mediaItems.map((item) => item.path), ...(outgoingMediaItems ?? []).map((item) => item.path)]
+                .filter((path): path is string => typeof path === 'string' && path.trim().length > 0)
+                .map(normalizePath),
+            );
+            const extraMediaItems: MediaItem[] = referenced
+              .filter((asset) => !shownPaths.has(normalizePath(asset.path)))
+              .map((asset) => ({
+                type: (['image', 'video', 'audio', 'document'] as const).includes(asset.kind as never)
+                  ? (asset.kind as MediaItem['type'])
+                  : 'document',
+                filename: asset.path.split(/[\\/]/).pop() || asset.name,
+                displayName: asset.name,
+                mimeType: '',
+                path: asset.path,
+              }));
+            if (extraMediaItems.length) {
+              const current = useChatStore.getState().runtimes[sessionId]?.messages.find((m) => m.id === userMessageId);
+              useChatStore.getState().updateMessage(sessionId, userMessageId, {
+                mediaItems: [...(current?.mediaItems ?? mediaItems), ...extraMediaItems],
+              });
+            }
+          }
+        }
+        // 上传的文件落盘后登记为任务素材（欢迎页发出的第一条消息也走这里；后端按路径去重）。
+        if (outgoingMediaItems?.length) {
+          void useSessionAssetsStore
+            .getState()
+            .registerUploads(sessionId, outgoingMediaItems)
+            .catch((error) => console.error('Failed to register session assets:', error));
+        }
+        // Goal 处于 active 时，普通输入按文档 §5.1 作为补充约束插入当前 Goal，而不是覆盖它
+        const activeGoal = useGoalStore.getState().getRuntime(sessionId)?.goal;
+        const inputMode = activeGoal?.status === 'active' ? 'steer' : undefined;
+        const outgoingMode = resolveOutgoingMode(sessionId, currentMode);
+        const sessionMetadata = useSessionStore.getState().getRuntime(sessionId)?.metadata;
+        const sessionRt = useSessionStore.getState().getRuntime(sessionId);
+        await request('chat.send', {
+          session_id: sessionId,
+          content: outgoingContent,
+          ...(outgoingMediaItems ? { media_items: outgoingMediaItems } : {}),
+          ...(outgoingFiles ? { files: outgoingFiles } : {}),
+          mode: outgoingMode,
+          ...useSessionStore.getState().getOutgoingModelParams(sessionId),
+          ...workContext,
+          skills: selectedSkillsForRequest,
+          ...agentSelectionPayload,
+          ...agentGroupSelectionPayload,
+          // plugin_names/mcp 的组装+字段语义说明见 utils/enabledExtensions.ts 的
+          // buildExtensionSendPayload 头注释（未恢复时省略，恢复后发送完整装备快照）。
+          ...extensionPayload,
+          ...(inputMode ? { input_mode: inputMode } : {}),
+          ...resolvePlanEntryPayload(sessionId, outgoingMode),
+          ...(sessionMetadata ? { metadata: sessionMetadata } : {}),
+          enable_swarmflow: Boolean(sessionRt?.enableSwarmflow),
+          ...(sessionRt?.enableSwarmflow && sessionRt.swarmflowBudget != null
+            ? { swarmflow_budget: sessionRt.swarmflowBudget }
+            : {}),
+          // 会话级团队调度模式：新建会话时由欢迎页开关落成显式值，恢复会话时从 metadata 读回；
+          // 未设置时不发送，后端按 会话持久化 > 团队配置 回退。
+          ...(sessionRt?.teamDispatchMode !== undefined
+            ? { team_dispatch_mode: sessionRt.teamDispatchMode }
+            : {}),
+        }, {
+          // 登记乐观 user 气泡的单号：runtime.accepted 到达时按单号回填服务端权威
+          // 时间戳（见 optimisticUserBubblesRef 注释与 runtime.accepted 处理器）。
+          onRequestId: (requestId) => {
+            const registry = optimisticUserBubblesRef.current;
+            // 兜底清理：accepted 丢失（发送失败/断连）时登记项不会被消费，限制驻留规模
+            if (registry.size >= 64) {
+              const oldest = registry.keys().next().value;
+              if (oldest !== undefined) registry.delete(oldest);
+            }
+            registry.set(requestId, { sessionId, messageId: userMessageId });
+          },
+        });
+        clearConnectionPresentationForUserAction(sessionId);
+        setOrganizationOwnerStopped(sessionId, false);
+        if (sessionMetadata) {
+          useSessionStore.getState().setSessionMetadata(sessionId, null);
+        }
+        if (agentGroupSelectionPayload.agent_group_name) {
+          await reconcileAgentGroupBinding(sessionId);
+        }
+        consumePlanEntryMark(sessionId, outgoingMode);
+        useSessionStore.getState().clearAgentSelectionIntent(sessionId, agentSelectionIntent);
+        return true;
+      } catch (error) {
+        const webError = error as WebError;
+        localSendPendingRef.current.delete(sessionId);
+        if (agentGroupSelectionPayload.agent_group_name) {
+          clearFailedAgentGroupBinding(sessionId, agentGroupSelectionPayload.agent_group_name);
+        }
+        useChatStore.getState().setProcessing(sessionId, false);
+        useChatStore.getState().setThinking(sessionId, false);
+        const errorMsg = webError.message || t('network.sendMessageFailed');
+        onErrorRef.current?.(errorMsg);
+        useChatStore.getState().addMessage(sessionId, {
+          id: prefixedMessageId('error-'),
+          role: 'system',
+          content: t('network.errorPrefix', { message: errorMsg }),
+          timestamp: new Date().toISOString(),
+        });
+        return false;
+      }
+    },
+    [
+      closeActiveTeamLeaderMessages,
+      clearConnectionPresentationForUserAction,
+      drainTaskQueueIfIdle,
+      markPendingAgentGroupBinding,
+      persistDocuments,
+      persistMedia,
+      reconcileAgentGroupBinding,
+      request,
+      resetContextCompressionTurn,
+      clearFailedAgentGroupBinding,
+      t,
+    ]
+  );
+
+  const sendStructuredChatContent = useCallback(
+    async (content: unknown, sessionId: string) => {
+      const state = useSessionStore.getState();
+      const metadata = state.currentSession?.session_id === sessionId
+        ? state.currentSession
+        : state.sessions.find((session) => session.session_id === sessionId);
+      if (!useChatStore.getState().getRuntime(sessionId)?.isProcessing && isConversationModelGroupBlocked({
+        mode: state.getRuntime(sessionId)?.mode,
+        cronId: metadata?.cron_id,
+        selectedModelSelection: state.getRuntime(sessionId)?.selectedModelSelection,
+        collaborationEnabled: isMultiModelCollaborationEnabled(),
+      })) {
+        onErrorRef.current?.(t('chat.modelSelector.collaborationDisabled'));
+        return;
+      }
+      resetContextCompressionTurn(sessionId);
+      userInputVersionRef.current += 1;
+      stopAllTts();
+
+      useChatStore.getState().setProcessing(sessionId, true);
+      useChatStore.getState().setThinking(sessionId, true);
+
+      const currentSessionState = useSessionStore.getState();
+      const currentRuntime = currentSessionState.getRuntime(sessionId);
+      const workContext = getSessionWorkContext(sessionId);
+      const currentMode = currentRuntime?.mode;
+      const agentSelectionIntent =
+        currentRuntime?.agentSelectionIntent ?? { kind: 'keep' as const };
+      const agentGroupSelectionIntent =
+        currentRuntime?.agentGroupSelectionIntent ?? { kind: 'keep' as const };
+      const agentGroupSelectionPayload = buildAgentGroupSelectionPayloadForMode(
+        currentMode,
+        agentGroupSelectionIntent,
+        currentRuntime?.agentGroupBinding,
+        sessionId === NEW_CONVERSATION_ID || Boolean(currentRuntime?.agentGroupBindingPending),
+      );
+      if (agentGroupSelectionPayload.agent_group_name) {
+        markPendingAgentGroupBinding(sessionId, agentGroupSelectionPayload.agent_group_name);
+      }
+      if (currentMode === 'auto_harness') {
+        useHarnessStore.getState().reset(sessionId);
+      }
+      if (currentMode === 'team') {
+        useChatStore.getState().setPaused(sessionId, false);
+      }
+      try {
+        const outgoingMode = resolveOutgoingMode(sessionId, currentMode);
+        const agentSelectionPayload = buildDefinitionSelectionPayloadForMode(
+          currentMode,
+          agentSelectionIntent,
+        );
+        await request('chat.send', {
+          session_id: sessionId,
+          content,
+          mode: outgoingMode,
+          ...currentSessionState.getOutgoingModelParams(sessionId),
+          ...workContext,
+          ...buildExtensionSendPayload(sessionId),
+          ...agentSelectionPayload,
+          ...agentGroupSelectionPayload,
+          ...resolvePlanEntryPayload(sessionId, outgoingMode),
+        });
+        clearConnectionPresentationForUserAction(sessionId);
+        if (agentGroupSelectionPayload.agent_group_name) {
+          await reconcileAgentGroupBinding(sessionId);
+        }
+        consumePlanEntryMark(sessionId, outgoingMode);
+        useSessionStore.getState().clearAgentSelectionIntent(sessionId, agentSelectionIntent);
+      } catch (error) {
+        const webError = error as WebError;
+        useChatStore.getState().setProcessing(sessionId, false);
+        useChatStore.getState().setThinking(sessionId, false);
+        if (agentGroupSelectionPayload.agent_group_name) {
+          clearFailedAgentGroupBinding(sessionId, agentGroupSelectionPayload.agent_group_name);
+        }
+        const errorMsg = webError.message || t('network.sendMessageFailed');
+        onErrorRef.current?.(errorMsg);
+        useChatStore.getState().addMessage(sessionId, {
+          id: prefixedMessageId('error-'),
+          role: 'system',
+          content: t('network.errorPrefix', { message: errorMsg }),
+          timestamp: new Date().toISOString(),
+        });
+      }
+    },
+    [
+      clearFailedAgentGroupBinding,
+      clearConnectionPresentationForUserAction,
+      markPendingAgentGroupBinding,
+      reconcileAgentGroupBinding,
+      request,
+      resetContextCompressionTurn,
+      t,
+    ]
+  );
+
+  // 存储sendMessage函数到ref
+  useEffect(() => {
+    sendMessageRef.current = sendMessage;
+  }, [sendMessage]);
+
+  /**
+   * Heartbeat 自动轮的会话级收口：chat.final/execution.error/chat.error 三个终态事件里
+   * 都可能触发一次，但同一个 run_id 只能真正收口一次——否则一次意外的"第二次终态事件"
+   * 会把刚被 drainTaskQueueIfIdle 重新拉起的 isProcessing 又关掉，导致第二条排队消息在
+   * 第一条还没收尾时就被并发发出去。收口动作本身沿用普通轮 chat.final 兜底同款的三个
+   * 前置条件（历史加载中/Team 模式/Goal 续跑中都不动这个状态），不能只搬动作不搬护栏。
+   */
+  const heartbeatSessionCloseHandledRunIdsRef = useRef<Set<string>>(new Set());
+  // bug003：Heartbeat 自动轮「开始」时（processing_status=true 带 automation）要刷新一次
+  // 心跳面板列表（此时后端已推进 next_run_at 并置 running）。后端可能对同一 run 重复
+  // 下发 processing=true 帧，这里按 run_id 去重，保证每轮只触发一次列表刷新；
+  // Set 会随页面生命周期存在，run_id 含时间戳+随机后缀，不会碰撞，规模也无泄漏之忧。
+  const heartbeatStartRefreshedRunIdsRef = useRef<Set<string>>(new Set());
+  const closeHeartbeatSessionState = useCallback((sessionId: string, runId: string) => {
+    if (heartbeatSessionCloseHandledRunIdsRef.current.has(runId)) return;
+    heartbeatSessionCloseHandledRunIdsRef.current.add(runId);
+    if (useChatStore.getState().getRuntime(sessionId)?.isLoadingHistory) return;
+    const currentMode = useSessionStore.getState().getRuntime(sessionId)?.mode;
+    if (currentMode === 'team') return;
+    const goalStillActive = useGoalStore.getState().runtimes[sessionId]?.goal?.status === 'active';
+    if (goalStillActive) return;
+    useChatStore.getState().setProcessing(sessionId, false);
+    useChatStore.getState().setThinking(sessionId, false);
+    drainTaskQueueIfIdle(sessionId);
+  }, [drainTaskQueueIfIdle]);
+
+  // 统一中断接口 - pause/cancel/supplement/resume
+  const interrupt = useCallback(
+    async (
+      sessionId: string,
+      intent: InterruptIntent,
+      options?: { newInput?: string }
+    ) => {
+      const newInput = options?.newInput;
+      const expertId = selectedExpertTeamId(sessionId);
+      if (expertId) {
+        if (intent === 'supplement' && newInput) {
+          return (await sendExpertMessage(newInput, sessionId)) ?? false;
+        }
+        const result = await request<{ success?: boolean }>('chat.interrupt', {
+          session_id: sessionId,
+          target_team_id: expertId,
+          mode: 'team',
+          // The team composer stops via pause; direct expert streams only support cancel.
+          intent: intent === 'pause' ? 'cancel' : intent,
+        });
+        return result?.success === true;
+      }
+      if (intent === 'supplement' && newInput) {
+        resetContextCompressionTurn(sessionId);
+        userInputVersionRef.current += 1;
+        stopAllTts();
+        if (useSessionStore.getState().getRuntime(sessionId)?.mode === 'team') {
+          closeActiveTeamLeaderMessages(sessionId);
+        }
+        useChatStore.getState().addMessage(sessionId, {
+          id: prefixedMessageId('user-'),
+          role: 'user',
+          content: newInput,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      let restoreOwnerProcessing: (() => void) | undefined;
+      try {
+        const params: Record<string, unknown> = {
+          session_id: sessionId,
+          intent,
+          ...getSessionWorkContext(sessionId),
+        };
+        const currentMode = useSessionStore.getState().getRuntime(sessionId)?.mode;
+        const ownerStopTarget = currentMode === 'team' && intent === 'cancel'
+          ? organizationOwnerStopTarget(sessionId) : null;
+        if (ownerStopTarget) {
+          params.intent = 'cancel';
+          params.target_team_id = ownerStopTarget;
+          params.organization_owner_stop = true;
+          const foregroundWasProcessing = Boolean(
+            useChatStore.getState().getRuntime(sessionId)?.foregroundIsProcessing,
+          );
+          const ownerWasStopped = isOrganizationOwnerStopped(sessionId);
+          restoreOwnerProcessing = () => {
+            setOrganizationOwnerStopped(sessionId, ownerWasStopped);
+            useChatStore.getState().setProcessing(sessionId, foregroundWasProcessing);
+          };
+          // Stop the Owner composer immediately while children finish independently.
+          setOrganizationOwnerStopped(sessionId, true, true);
+          closeActiveTeamLeaderMessages(sessionId);
+        }
+        if (['pause', 'resume', 'cancel', 'supplement'].includes(intent)) {
+          // 出站 mode 与普通消息/队列重发同一套组合逻辑（resolveOutgoingMode）：
+          // Plan 打开时补全三段命名 `agent.{work|code}.plan` / `team.{work|code}.plan`，
+          // 否则会被 normalizeAgentMode 抹平成 `agent`，后端把 supplement 续跑 /
+          // 恢复当普通模式处理，plan 语义丢失。非 plan 场景结果与 currentMode 完全一致。
+          const outgoingMode = resolveOutgoingMode(sessionId, currentMode);
+          params.mode = outgoingMode;
+          if (currentMode === 'team') {
+            params.team = true;
+          }
+          if (intent === 'supplement') {
+            // 补充输入等同普通出站请求：按需带 plan_entry_source，让防重入闸门
+            // 识别这条输入来自 plan 上下文。
+            Object.assign(params, resolvePlanEntryPayload(sessionId, outgoingMode));
+          }
+        }
+        if (intent === 'supplement') params.new_input = newInput ?? '';
+        if (intent === 'supplement' || intent === 'resume') {
+          Object.assign(params, useSessionStore.getState().getOutgoingModelParams(sessionId));
+        }
+        const result = await request<{ success?: boolean }>('chat.interrupt', params);
+        if (result?.success === false) {
+          restoreOwnerProcessing?.();
+          return false;
+        }
+        if (ownerStopTarget) setOrganizationOwnerStopped(sessionId, true);
+        if (intent === 'supplement' || intent === 'resume') {
+          setOrganizationOwnerStopped(sessionId, false);
+          clearConnectionPresentationForUserAction(sessionId);
+        }
+        if (intent === 'supplement') {
+          // 成功发出后才消费 explicit-entry 标记（与 sendMessage 一致），失败时保留以便重试。
+          consumePlanEntryMark(sessionId, String(params.mode));
+        }
+        return true;
+      } catch (error) {
+        restoreOwnerProcessing?.();
+        const webError = error as WebError;
+        onErrorRef.current?.(webError.message || t('network.interruptFailed'));
+        return false;
+      }
+    },
+    [
+      closeActiveTeamLeaderMessages,
+      clearConnectionPresentationForUserAction,
+      request,
+      resetContextCompressionTurn,
+      t,
+    ]
+  );
+
+  // 暂停 - 显式暂停当前任务
+  const pause = useCallback(
+    async (sessionId: string) => {
+      try {
+        await interrupt(sessionId, 'pause');
+      } catch (error) {
+        const webError = error as WebError;
+        onErrorRef.current?.(webError.message || t('network.pauseFailed'));
+      }
+    },
+    [interrupt, t]
+  );
+
+  const cancel = useCallback(
+    async (sessionId: string) => {
+      try {
+        const ownerOnly = Boolean(organizationOwnerStopTarget(sessionId));
+        const succeeded = await interrupt(sessionId, 'cancel');
+        if (succeeded && !ownerOnly) {
+          useSubagentStore.getState().markRunningSubagentsCancelled(sessionId);
+        }
+      } catch (error) {
+        const webError = error as WebError;
+        onErrorRef.current?.(webError.message || t('network.cancelFailed'));
+      }
+    },
+    [interrupt, t]
+  );
+
+  const supplement = useCallback(
+    async (sessionId: string, newInput: string) => {
+      try {
+        await interrupt(sessionId, 'supplement', { newInput });
+      } catch (error) {
+        const webError = error as WebError;
+        onErrorRef.current?.(webError.message || t('network.supplementFailed'));
+      }
+    },
+    [interrupt, t]
+  );
+
+  // 恢复 - 恢复暂停的任务
+  const resume = useCallback(
+    async (sessionId: string) => {
+      try {
+        await interrupt(sessionId, 'resume');
+        useChatStore.getState().setPaused(sessionId, false);
+      } catch (error) {
+        const webError = error as WebError;
+        onErrorRef.current?.(webError.message || t('network.resumeFailed'));
+      }
+    },
+    [interrupt, t]
+  );
+
+  // 切换模式
+  const switchMode = useCallback(
+    async (sessionId: string, mode: AgentMode) => {
+      // 标记正在切换模式
+      useChatStore.getState().setSwitchingMode(sessionId, true);
+
+      const currentMode = useSessionStore.getState().getRuntime(sessionId)?.mode;
+      // Reset harnessStore when leaving auto_harness mode
+      if (currentMode === 'auto_harness' && mode !== 'auto_harness') {
+        useHarnessStore.getState().reset(sessionId);
+      }
+
+      // 只有在有任务执行时才调用 interrupt
+      if (sessionId && sessionId !== 'new') {
+        const runtime = useChatStore.getState().getRuntime(sessionId);
+        if (runtime?.isProcessing || runtime?.isPaused) {
+          try {
+            await interrupt(sessionId, 'cancel');
+          } catch {
+            // 忽略中断错误
+          }
+        }
+      }
+
+      clearConnectionPresentationForUserAction(sessionId);
+      useSessionStore.getState().setMode(sessionId, mode);
+      if (sessionId && sessionId !== 'new') {
+        updateSession(sessionId, { mode });
+      }
+      // 延迟重置标志
+      setTimeout(() => {
+        useChatStore.getState().setSwitchingMode(sessionId, false);
+      }, 300);
+    },
+    [clearConnectionPresentationForUserAction, updateSession, interrupt],
+  );
+
+  // 发送用户回答
+  const sendUserAnswer = useCallback(
+    async (
+      sessionId: string,
+      requestId: string,
+      answers: UserAnswer[],
+      source?: string,
+    ): Promise<boolean> => {
+      // 「执行」分支会在请求发出前先乐观地关掉 Plan 开关并登记补发标记，失败时要撤回。
+      let planExecuteOptimistic = false;
+      let pendingAgentGroupId: string | undefined;
+      try {
+        const pendingQuestion = useChatStore.getState().getRuntime(sessionId)?.pendingQuestions[0];
+        const pendingMatches = pendingQuestion?.request_id === requestId;
+        const effectiveSource = source ?? (pendingMatches ? pendingQuestion?.source : undefined);
+        const approvalSchema =
+          pendingMatches
+            ? pendingQuestion?.approvalSchema
+            : undefined;
+        const evolutionMeta =
+          pendingMatches
+            ? pendingQuestion.evolutionMeta
+            : undefined;
+        const evolutionMetaPayload =
+          evolutionMeta && typeof evolutionMeta === 'object'
+            ? { evolution_meta: evolutionMeta }
+            : {};
+        const approvalSchemaPayload = approvalSchema ? { approval_schema: approvalSchema } : {};
+        const sourcePayload = effectiveSource ? { source: effectiveSource } : {};
+
+        // ── SwarmFlow human 回复 → chat.swarmflow_reply ──
+        if (effectiveSource === 'swarmflow_human') {
+          const meta = pendingMatches ? pendingQuestion?.swarmflowMeta : undefined;
+          const answerText =
+            answers[0]?.custom_input?.trim()
+            || answers[0]?.selected_options.join(', ').trim()
+            || '';
+          // 取消/跳过：不发送 reply，仅关闭对话框（prompt 在后端仍 pending）
+          if (!answerText || answerText.includes('已跳过') || answerText.includes('已取消')) {
+            if (pendingQuestion) {
+              useChatStore.getState().consumePendingQuestion(sessionId, pendingQuestion);
+            }
+            return true;
+          }
+          try {
+            await request('chat.swarmflow_reply', {
+              session_id: sessionId,
+              run_id: meta?.run_id ?? '',
+              correlation_id: meta?.correlation_id ?? '',
+              answer: answerText,
+            });
+          } catch (err) {
+            console.error('[swarmflow_human] chat.swarmflow_reply failed:', err);
+          }
+          if (pendingQuestion) {
+            useChatStore.getState().consumePendingQuestion(sessionId, pendingQuestion);
+          }
+          return true;
+        }
+
+        const isPlanApproval =
+          pendingMatches && pendingQuestion?.planApprovalKind === 'plan_approval';
+        const structuredPlanPayload = isPlanApproval
+          ? {
+              plan_approval_kind: pendingQuestion.planApprovalKind,
+              plan_content: pendingQuestion.planContent ?? '',
+              plan_language: pendingQuestion.planLanguage ?? 'cn',
+            }
+          : {};
+        // 「执行」分两步：这次 resume 只让后端跑完 exit_plan_mode 退出计划模式，
+        // 本轮到此为止；真正的执行由紧接着补发的普通消息开启新一轮。
+        const isPlanExecute =
+          isPlanApproval && answers.some((a) => a.selected_options?.includes('plan_execute'));
+        const approvalTransport =
+          evolutionMeta && typeof evolutionMeta.approval_transport === 'string'
+            ? evolutionMeta.approval_transport
+            : undefined;
+        const permissionAnswers =
+          effectiveSource === 'permission_interrupt'
+            ? bindPendingPermissionCard(
+                answers,
+                pendingMatches ? pendingQuestion?.questions ?? [] : [],
+              )
+            : answers;
+        if (effectiveSource === 'permission_interrupt' && (
+          !pendingMatches || pendingQuestion?.source !== 'permission_interrupt' ||
+          !pendingQuestionIdentity(pendingQuestion) || !permissionAnswers.length
+        )) return false;
+        if (pendingMatches && pendingQuestion?.duplexJobId) {
+          await request('video.search.answer', {
+            session_id: sessionId,
+            job_id: pendingQuestion.duplexJobId,
+            request_id: requestId,
+            answers: permissionAnswers,
+          });
+          useChatStore.getState().consumePendingQuestion(sessionId, pendingQuestion);
+          return true;
+        }
+        // 如果是需要走 interrupt/interact 的确认，发送 chat.send
+        if (
+          effectiveSource === 'permission_interrupt' ||
+          effectiveSource === 'confirm_interrupt' ||
+          effectiveSource === 'ask_user_interrupt' ||
+          effectiveSource === 'evolution_interrupt' ||
+          (effectiveSource === 'skill_evolution_approval' && approvalTransport === 'interrupt')
+        ) {
+          // Plan 审批的 resume 必须带回 Plan wire mode，否则后端会把这次回答
+          // 当成普通模式请求，进而把会话踢出 Plan。
+          const resumeMode = resolveInterruptResumeMode(sessionId);
+          const resolvedResumeMode = resolveOutgoingMode(sessionId, resumeMode);
+          const agentSelectionIntent =
+            useSessionStore.getState().getRuntime(sessionId)?.agentSelectionIntent ?? { kind: 'keep' as const };
+          const agentSelectionPayload = buildDefinitionSelectionPayloadForMode(
+            resumeMode,
+            agentSelectionIntent,
+          );
+          const resumeRuntime = useSessionStore.getState().getRuntime(sessionId);
+          const agentGroupSelectionIntent = resumeRuntime?.agentGroupSelectionIntent ?? { kind: 'keep' as const };
+          const agentGroupSelectionPayload = buildAgentGroupSelectionPayloadForMode(
+            resumeMode,
+            agentGroupSelectionIntent,
+            resumeRuntime?.agentGroupBinding,
+            sessionId === NEW_CONVERSATION_ID || Boolean(resumeRuntime?.agentGroupBindingPending),
+          );
+          pendingAgentGroupId = agentGroupSelectionPayload.agent_group_name;
+          if (agentGroupSelectionPayload.agent_group_name) {
+            markPendingAgentGroupBinding(sessionId, agentGroupSelectionPayload.agent_group_name);
+          }
+          // 必须在请求发出**之前**登记：本次请求的 mode 已经定格在
+          // resolvedResumeMode 里，不再看 Plan 开关；而后端很可能在 await 挂起期间
+          // 就推完 processing_status=false，那一刻若 pendingPlanExecuteRef 里还没有
+          // 这个 session，补发执行消息的逻辑会被跳过——用户点了「执行」，计划批准了
+          // 却永远不会真正开始跑。
+          if (isPlanExecute) {
+            planExecuteOptimistic = true;
+            usePlanStore.getState().setActive(sessionId, false);
+            pendingPlanExecuteRef.current.add(sessionId);
+          }
+          await request(
+            'chat.send',
+            {
+              session_id: sessionId,
+              query: '',
+              mode: resolvedResumeMode,
+              ...useSessionStore.getState().getModelSelectionPayload(sessionId),
+              ...getSessionWorkContext(sessionId),
+              request_id: requestId,
+              answers: permissionAnswers,
+              ...agentSelectionPayload,
+              ...agentGroupSelectionPayload,
+              ...sourcePayload,
+              ...structuredPlanPayload,
+              ...approvalSchemaPayload,
+              ...evolutionMetaPayload,
+              // Resume must preserve the extension snapshot selected for this session.
+              ...buildExtensionSendPayload(sessionId),
+            },
+            effectiveSource === 'permission_interrupt' && permissionAnswers[0]?.card_id
+              ? { awaitRuntimeAccepted: true }
+              : undefined,
+          );
+          if (agentGroupSelectionPayload.agent_group_name) {
+            await reconcileAgentGroupBinding(sessionId);
+          }
+          useSessionStore.getState().clearAgentSelectionIntent(
+            sessionId,
+            agentSelectionIntent,
+          );
+        } else if (effectiveSource === 'activate_confirm') {
+          const action = answers[0]?.selected_options[0] === '拒绝' ? 'reject' : 'accept';
+          const interactionId = requestId || useHarnessStore.getState().getRuntime(sessionId)?.activateInteraction?.interactionId || '';
+          if (!interactionId) {
+            throw new Error('missing activate interaction id');
+          }
+          await request('chat.send', {
+            session_id: sessionId,
+            content: '',
+            mode: 'auto_harness',
+            ...getSessionWorkContext(sessionId),
+            activate_response: {
+              interaction_id: interactionId,
+              action,
+              feedback: '',
+            },
+            ...buildExtensionSendPayload(sessionId),
+          });
+          useSessionStore.getState().clearAgentSelectionIntent(sessionId);
+          useHarnessStore.getState().setActivateInteraction(sessionId, null);
+        } else {
+          // 否则发送 chat.user_answer（自进化确认）
+          await request('chat.user_answer', {
+            session_id: sessionId,
+            ...getSessionWorkContext(sessionId),
+            request_id: requestId,
+            answers,
+            ...sourcePayload,
+            ...approvalSchemaPayload,
+            ...evolutionMetaPayload,
+          });
+        }
+        if (pendingMatches && pendingQuestion) {
+          useChatStore.getState().consumePendingQuestion(sessionId, pendingQuestion);
+        }
+        return true;
+      } catch (error) {
+        if (planExecuteOptimistic) {
+          // 请求没送出去，后端仍停在计划模式：撤回乐观更新，否则会留下一个标记，
+          // 在这个会话下一次结束处理时凭空补发一条执行消息。
+          pendingPlanExecuteRef.current.delete(sessionId);
+          usePlanStore.getState().setActive(sessionId, true);
+        }
+        const webError = error as WebError;
+        if (pendingAgentGroupId) {
+          clearFailedAgentGroupBinding(sessionId, pendingAgentGroupId);
+        }
+        onErrorRef.current?.(webError.message || t('network.submitAnswerFailed'));
+        return false;
+      }
+    },
+    [clearFailedAgentGroupBinding, markPendingAgentGroupBinding, reconcileAgentGroupBinding, request, t]
+  );
+
+  const respondActivate = useCallback(
+    async (sessionId: string, interactionId: string, action: 'accept' | 'reject', feedback?: string) => {
+      try {
+        await request('chat.send', {
+          session_id: sessionId,
+          content: '',
+          mode: 'auto_harness',
+          ...getSessionWorkContext(sessionId),
+          activate_response: {
+            interaction_id: interactionId,
+            action,
+            feedback: feedback || '',
+          },
+          ...buildExtensionSendPayload(sessionId),
+        });
+        useSessionStore.getState().clearAgentSelectionIntent(sessionId);
+        useHarnessStore.getState().setActivateInteraction(sessionId, null);
+      } catch {
+        // Keep the activation interaction open so the user can retry.
+      }
+    },
+    [request]
+  );
+
+  useEffect(() => {
+    onConnectRef.current = onConnect;
+    onDisconnectRef.current = onDisconnect;
+    onErrorRef.current = onError;
+    onConfigChangedRef.current = onConfigChanged;
+    onModelsUpdatedRef.current = onModelsUpdated;
+    onCronResultArrivedRef.current = onCronResultArrived;
+  }, [onConfigChanged, onConnect, onCronResultArrived, onDisconnect, onError, onModelsUpdated]);
+
+  const shouldDropDuplicatedEvent = useCallback(
+    (eventName: string, payload: Record<string, unknown>): boolean => {
+      const now = Date.now();
+      const dedupKey = makeEventDedupKey(eventName, payload);
+      const recent = recentEventRef.current;
+      const lastSeen = recent.get(dedupKey);
+      recent.set(dedupKey, now);
+
+      // 控制 map 大小，避免长期运行后无限增长
+      if (recent.size > 400) {
+        for (const [key, ts] of recent) {
+          if (now - ts > EVENT_DEDUP_WINDOW_MS * 6) {
+            recent.delete(key);
+          }
+        }
+      }
+
+      const dropped = lastSeen != null && now - lastSeen <= EVENT_DEDUP_WINDOW_MS;
+      if (dropped && import.meta.env.DEV) {
+        const nextCount = (eventDedupDroppedRef.current[eventName] || 0) + 1;
+        eventDedupDroppedRef.current[eventName] = nextCount;
+        if (nextCount === 1 || nextCount % 10 === 0) {
+          console.debug('[ws][metrics] eventDedupDropped', {
+            eventName,
+            count: nextCount,
+          });
+        }
+      }
+      return dropped;
+    },
+    []
+  );
+
+  // 主动推荐来源的 chunk 是后台主 agent 跑指令式 query 产生的系统推送话术，
+  // 不是用户这一轮的思考流。若让它走正常 appendReasoning / closeReasoning /
+  // setProcessing / setThinking，会把 proactive 的思考段追加进 session 全局
+  // reasoningSegments（segment 无 messageId 绑定，按 startedAt 排序并入上一轮
+  // turn），进而污染上一条用户消息的思考状态（"已完成" → "已完成 N 次思考"
+  // streak chip）。proactive 流的 chunk 只负责把推荐正文落地为卡片，不参与
+  // 会话级思考状态机。
+  const isProactiveRecommendationPayload = useCallback(
+    (payload: Record<string, unknown>): boolean =>
+      typeof payload.source === 'string' && payload.source === 'proactive_recommendation',
+    []
+  );
+
+  const clearThinkingForVisibleOutput = useCallback((sessionId: string) => {
+    const currentMode = useSessionStore.getState().getRuntime(sessionId)?.mode;
+    const isProcessingNow = useChatStore.getState().getRuntime(sessionId)?.isProcessing;
+    if (currentMode === 'auto_harness' && isProcessingNow) {
+      return;
+    }
+    useChatStore.getState().setThinking(sessionId, false);
+  }, []);
+
+  const getTeamMemberOutputKey = useCallback(
+    (payload: Record<string, unknown>, memberId: string): string => stableEventId(
+      'member-output-key',
+      getPayloadSessionId(payload),
+      memberId,
+      payload.rid,
+      payload.request_id
+    ),
+    []
+  );
+
+  const getOrCreateTeamMemberOutputEventId = useCallback(
+    (payload: Record<string, unknown>, memberId: string): string => {
+      const key = getTeamMemberOutputKey(payload, memberId);
+      const existing = teamMemberOutputEventRef.current.get(key);
+      if (existing) {
+        return existing;
+      }
+      const id = stableEventId(
+        'member-output',
+        getPayloadSessionId(payload),
+        memberId,
+        payload.rid,
+        payload.request_id,
+        Date.now()
+      );  
+      teamMemberOutputEventRef.current.set(key, id);
+      return id;
+    },
+    [getTeamMemberOutputKey]
+  );
+
+  const takeTeamMemberOutputEventId = useCallback(
+    (payload: Record<string, unknown>, memberId: string): string | undefined => {
+      const key = getTeamMemberOutputKey(payload, memberId);
+      const id = teamMemberOutputEventRef.current.get(key);
+      if (id) {
+        teamMemberOutputEventRef.current.delete(key);
+      }
+      return id;
+    },
+    [getTeamMemberOutputKey]
+  );
+
+  const appendTeamMemberOutputDelta = useCallback(
+    (sessionId: string, payload: Record<string, unknown>, memberId: string, content: string) => {
+      if (!content) {
+        return;
+      }
+      const id = getOrCreateTeamMemberOutputEventId(payload, memberId);
+      const existingContent =
+        useSessionStore.getState().getRuntime(sessionId)?.teamMemberExecutionEvents.find((event) => event.id === id)?.content || '';
+      useSessionStore.getState().addTeamMemberExecutionEvent(sessionId, {
+        id,
+        member_id: memberId,
+        kind: 'final',
+        timestamp: eventTimestampMs(payload),
+        title: t('team.process.execution.final'),
+        content: `${existingContent}${content}`,
+      });
+    },
+    [getOrCreateTeamMemberOutputEventId, t]
+  );
+
+  useEffect(() => {
+    const applyTeamMemberShutdown = (memberId: string, sessionId?: string) => {
+      const normalizedMemberId = memberId.trim();
+      if (!normalizedMemberId) {
+        return;
+      }
+      if (!sessionId) {
+        return;
+      }
+      const sessionStore = useSessionStore.getState();
+      const runtime = sessionStore.getRuntime(sessionId);
+      const currentMembers = runtime?.teamMembers ?? [];
+      const nextMembers = currentMembers.filter(
+        (member) => member.member_id !== normalizedMemberId
+      );
+      if (nextMembers.length === currentMembers.length) {
+        return;
+      }
+      clearPendingTeamMemberContextCompressionStart(sessionId, normalizedMemberId);
+      clearTeamMemberContextCompressionStatus(sessionId, normalizedMemberId);
+      sessionStore.setTeamMembers(sessionId, nextMembers);
+      // An empty roster does not end the team; later members and task events remain valid.
+    };
+
+    /**
+     * goal.snapshot / goal.updated / execution.error(带 goal 字段) 的统一落状态入口。
+     * goal 为 null 且 payload 没有顶层 session_id 时（文档 §4.4 第三种返回路径），
+     * 只能退化用当前 activeSessionId 兜底——这是文档示例本身没给出 session_id 时的已知限制。
+     */
+    const applyGoalSnapshot = (payload: Record<string, unknown>) => {
+      const goal = (payload.goal ?? null) as GoalRecord | null;
+      const sessionId =
+        getPayloadSessionId(payload) ||
+        goal?.session_id ||
+        useChatStore.getState().activeSessionId ||
+        undefined;
+      if (!sessionId) return;
+      ensureSessionRuntimes(sessionId);
+      applyIncomingGoal(sessionId, goal, goalCompletedHideTimerRef.current, lastGoalEventAtRef.current);
+    };
+
+    const applySessionResult = (payload: Record<string, unknown>) => {
+      const sessionId = resolveEventSessionId(payload);
+      if (!sessionId) return;
+      clearThinkingForVisibleOutput(sessionId);
+
+      const description = pickString(payload.description) || '';
+      const resultText =
+        pickString(payload.result, payload.error) ||
+        (payload.result != null ? stringifyCompact(payload.result) : '');
+      const taskId =
+        pickString(
+          payload.task_id,
+          payload.request_id,
+          payload.subagent_id,
+          payload.sub_session_id
+        ) || stableEventId('session-result', sessionId, description, payload.timestamp, resultText);
+      const status = (pickString(payload.status) || '').trim().toLowerCase();
+      const isPending = ['pending', 'accepted', 'queued', 'running'].includes(status);
+      const isCancelled = status === 'canceled' || status === 'cancelled';
+      const isCompleted = ['completed', 'success', 'succeeded'].includes(status);
+      const success = isPending
+        ? true
+        : status
+          ? isCompleted
+          : typeof payload.success === 'boolean'
+            ? payload.success
+            : true;
+      const summary = isPending
+        ? t('chatUi.toolGroup.sessionPending')
+        : isCancelled
+          ? t('chatUi.toolGroup.sessionCancelled')
+          : success
+            ? t('chatUi.toolGroup.sessionCompleted')
+            : t('chatUi.toolGroup.sessionFailed');
+      const toolCallId = stableEventId('session-task', sessionId, taskId);
+      const sessionToolCall: ToolCall = {
+        id: toolCallId,
+        name: 'session',
+        arguments: {
+          session_id: sessionId,
+          task_id: taskId,
+          ...(status ? { status } : {}),
+          ...(description ? { description } : {}),
+        },
+        description: description || t('chatUi.toolGroup.sessionCompleted'),
+        formatted_args: t('chatUi.toolGroup.sessionTask', { name: description || t('chatUi.toolGroup.sessionTaskUnknown') }),
+      };
+      const fullResult = [
+        description ? `${t('chatUi.toolGroup.sessionDescription')}: ${description}` : '',
+        resultText ? `${t('chatUi.toolGroup.sessionResult')}: ${resultText}` : '',
+      ].filter(Boolean).join('\n\n');
+
+      useChatStore.getState().addToolCall(sessionId, sessionToolCall, {
+        startedAt: normalizeEventTimestampIso(payload.timestamp),
+        requestId: taskId,
+      });
+      useChatStore.getState().addToolResult(sessionId, {
+        toolName: 'session',
+        result: fullResult,
+        success,
+        ...(isPending ? { pending: true } : {}),
+        toolCallId,
+        summary,
+      }, {
+        updatedAt: normalizeEventTimestampIso(payload.timestamp),
+      });
+    };
+
+    // 归档事件去抖句柄：同一时间窗内成串到达的事件只触发一次工作区刷新
+    let archiveRefreshTimer: number | null = null;
+    let archiveRefreshCron = false;
+    const scheduleArchiveWorkspaceRefresh = (includeCron: boolean) => {
+      archiveRefreshCron ||= includeCron;
+      if (archiveRefreshTimer !== null) window.clearTimeout(archiveRefreshTimer);
+      archiveRefreshTimer = window.setTimeout(() => {
+        archiveRefreshTimer = null;
+        void useWorkspaceStore.getState().refreshWorkspaceData();
+        if (archiveRefreshCron) void useCronStore.getState().loadJobs();
+        archiveRefreshCron = false;
+      }, ARCHIVE_EVENT_REFRESH_DEBOUNCE_MS);
+    };
+
+    const unsubs = [
+      webClient.on('connection.ack', ({ payload }) => {
+        handleConnectionAck(payload);
+      }),
+      webClient.on('hello', ({ payload }) => {
+        handleConnectionAck(payload);
+      }),
+      webClient.on('team.runtime_ready', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        const identity = normalizeTeamLeaderIdentity(payload.team_leader_identity);
+        if (!identity) return;
+
+        // The backend only emits this optional field for a bound AgentGroup.
+        // Keep the mode guard here so a malformed event cannot affect a
+        // single-Agent runtime; the binding read-back may arrive just after
+        // runtime_ready on the first live request.
+        const runtime = useSessionStore.getState().getRuntime(sessionId);
+        if (runtime?.mode !== 'team') return;
+        useSessionStore.getState().setTeamLeaderIdentity(sessionId, identity);
+      }),
+      webClient.on('session.message.updated', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        const message = payload.message;
+        if (!sessionId || !message || typeof message !== 'object' || Array.isArray(message)) return;
+        const record = message as Record<string, unknown>;
+        const messageId = typeof record.message_id === 'string' ? record.message_id : '';
+        if (!messageId || record.target_session_id !== sessionId) return;
+        const chatStore = useChatStore.getState();
+        if (record.status !== 'queued') {
+          chatStore.removeQueuedSessionMessage(sessionId, messageId);
+          return;
+        }
+        chatStore.upsertQueuedSessionMessage(sessionId, {
+          messageId,
+          sourceSessionId: typeof record.source_session_id === 'string' ? record.source_session_id : '',
+          sourceTitle: typeof record.source_title === 'string' ? record.source_title : '',
+          content: typeof record.content === 'string' ? record.content : '',
+        });
+      }),
+      ...['chat.input_received', 'chat.output_phase'].map((event) => webClient.on(event, ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        flushPendingStreamDelta(sessionId);
+        // output_phase 是每轮第一次模型调用前必发的帧（先于所有 reasoning/tool 事件），
+        // 作为 runtime.accepted（仅 permission_dispatched 时才发）的保底回填载体。
+        if (event === 'chat.output_phase') {
+          backfillOptimisticBubbleTimestamp(sessionId, payload);
+        }
+        handleSessionOutputBoundary(event, { ...payload, session_id: sessionId });
+      })),
+      webClient.on('chat.delta', ({ payload }) => {
+        if (shouldIgnoreSessionOutput(payload)) return;
+        if (handleTaskInputReceipt('chat.delta', payload)) return;
+          const sessionId = resolveEventSessionId(payload, 'chat.delta');
+          if (!sessionId) return;
+
+        // 页面刷新后收到活跃事件时恢复执行状态；已暂停会话的迟到事件不得重新拉起 processing
+        const activityRuntime = useChatStore.getState().getRuntime(sessionId);
+        if (
+          !isProactiveRecommendationPayload(payload) &&
+          !activityRuntime?.isProcessing && !activityRuntime?.isLoadingHistory && !activityRuntime?.isPaused
+        ) {
+          useChatStore.getState().setProcessing(sessionId, true);
+        }
+
+        const currentMode = useSessionStore.getState().getRuntime(sessionId)?.mode;
+        const agentTemplateName =
+          !isProactiveRecommendationPayload(payload)
+            ? readAgentTemplateName(payload)
+            : undefined;
+        const content = unescapeLiteralNewlines(
+          typeof payload.content === 'string' ? payload.content : ''
+        );
+
+        // 跨会话后台轮使用 request_id 固定到自己的 assistant 气泡，不复用当前
+        // session 的 currentStreamId；否则会把新回复追加/覆盖到上一轮回复。
+        const crossSession = extractCrossSessionMessage(payload);
+        if (crossSession && content) {
+          ensureCrossSessionUserTurn(
+            sessionId,
+            crossSession,
+            crossSession.content || '',
+            normalizeEventTimestampIso(payload.timestamp)
+          );
+          const assistantMsgId = crossSessionAssistantMessageId(
+            payload.turn_request_id ?? payload.request_id,
+            crossSession.messageId
+          );
+          const chatStore = useChatStore.getState();
+          const existing = chatStore
+            .getRuntime(sessionId)
+            ?.messages.find((message) => message.id === assistantMsgId);
+          if (existing) {
+            chatStore.updateMessage(sessionId, assistantMsgId, {
+              content: (existing.content || '') + content,
+            });
+          } else {
+            chatStore.addMessage(sessionId, {
+              id: assistantMsgId,
+              role: 'assistant',
+              content,
+              timestamp: normalizeEventTimestampIso(payload.timestamp),
+              isStreaming: true,
+              crossSession,
+              ...(agentTemplateName ? { agentTemplateName } : {}),
+            });
+          }
+          return;
+        }
+
+        // 主动推荐按 rec_id 固定气泡，不占用 currentStreamId。
+        // 否则后一条推荐的 delta/final 会追加或整段覆盖前一条，直播时只剩一张卡片；
+        // 重启走历史恢复才会按 rec_id 拆开，所以第二条要刷新后才出现。
+        if (isProactiveRecommendationPayload(payload)) {
+          if (!content) return;
+          const proactiveRecId = typeof payload.proactive_rec_id === 'string' ? payload.proactive_rec_id : '';
+          const proactiveType = typeof payload.proactive_type === 'string' ? payload.proactive_type : undefined;
+          const assistantMsgId = proactiveAssistantMessageId(proactiveRecId);
+          const chatStore = useChatStore.getState();
+          const existing = chatStore
+            .getRuntime(sessionId)
+            ?.messages.find((message) => message.id === assistantMsgId);
+          if (existing) {
+            chatStore.updateMessage(sessionId, assistantMsgId, {
+              content: (existing.content || '') + content,
+            });
+          } else {
+            chatStore.addMessage(sessionId, {
+              id: assistantMsgId,
+              role: 'assistant',
+              content,
+              timestamp: normalizeEventTimestampIso(payload.timestamp),
+              isStreaming: true,
+              isProactiveRecommendation: true,
+              ...(proactiveType
+                ? { proactiveType: proactiveType as 'skill_recommend' | 'task_reminder' | 'need_exploration' }
+                : {}),
+              ...(proactiveRecId ? { proactiveRecId } : {}),
+            });
+          }
+          return;
+        }
+
+        if (isHiddenTeamTeammateMessagePayload(currentMode ?? 'agent', payload)) {
+          const memberId = getTeamPayloadMemberName(payload);
+          if (memberId) {
+            appendTeamMemberOutputDelta(sessionId, payload, memberId, content);
+          }
+          return;
+        }
+        if (currentMode === 'team' && content) {
+          if (!isProactiveRecommendationPayload(payload)) {
+            clearThinkingForVisibleOutput(sessionId);
+            if (content.trim()) {
+              useChatStore.getState().bumpThinkingAnchor(sessionId);
+              useChatStore.getState().closeReasoning(sessionId, {
+                atMs: eventTimestampMs(payload),
+              });
+            }
+          }
+          const existingMsg = findActiveTeamLeaderMessage(sessionId, getPayloadRequestId(payload));
+
+          if (existingMsg) {
+            const existingContent = existingMsg.content || '';
+            const newContent = existingContent + content;
+            const updatePayload: { content: string; isStreaming?: boolean } = { content: newContent };
+            if (content.includes('MEDIA:')) {
+              updatePayload.isStreaming = false;
+            }
+            useChatStore.getState().updateMessage(sessionId, existingMsg.id, updatePayload);
+          } else {
+            // 暂停后仍按请求保留输出段关联，迟到 delta 继续拼接，但不重启光标。
+            const isPaused = Boolean(useChatStore.getState().getRuntime(sessionId)?.isPaused);
+            const msgId = prefixedMessageId('team-leader-');
+            useChatStore.getState().addMessage(sessionId, {
+              id: msgId,
+              role: 'system',
+              content: content,
+              timestamp: new Date().toISOString(),
+              isStreaming: !isPaused,
+              teamStream: { requestId: getPayloadRequestId(payload) },
+            });
+          }
+          return;
+        }
+
+        // §8 步骤2：Heartbeat 自动轮的 delta 只追加到相同 run_id 的 assistant 消息
+        // （id=heartbeat-assistant-<run_id>），不走全局 currentStreamId，不复用上一条
+        // 普通回答——否则会覆盖用户刚发的普通提问的回答。
+        const hbAutomation = extractAutomation(payload);
+        if (hbAutomation && content) {
+          const assistantMsgId = heartbeatAssistantMessageId(hbAutomation.run_id);
+          const chatStore = useChatStore.getState();
+          const existing = chatStore.getRuntime(sessionId)?.messages.find((m) => m.id === assistantMsgId);
+          if (existing) {
+            chatStore.updateMessage(sessionId, assistantMsgId, { content: (existing.content || '') + content });
+          } else {
+            chatStore.addMessage(sessionId, {
+              id: assistantMsgId,
+              role: 'assistant',
+              content,
+              timestamp: new Date().toISOString(),
+              isStreaming: true,
+              automation: hbAutomation,
+            });
+          }
+          return;
+        }
+
+        let currentStreamId = useChatStore.getState().getRuntime(sessionId)?.currentStreamId;
+        if (!isProactiveRecommendationPayload(payload)) {
+          clearThinkingForVisibleOutput(sessionId);
+          if (content.trim()) {
+            useChatStore.getState().bumpThinkingAnchor(sessionId);
+            useChatStore.getState().closeReasoning(sessionId, {
+              atMs: eventTimestampMs(payload),
+            });
+          }
+        }
+        if (!currentStreamId && content) {
+          const assistantMsgId = prefixedMessageId('assistant-');
+          const proactiveRecId = typeof payload.proactive_rec_id === 'string' ? payload.proactive_rec_id : undefined;
+          const proactiveType = typeof payload.proactive_type === 'string' ? payload.proactive_type : undefined;
+          useChatStore.getState().addMessage(sessionId, {
+            id: assistantMsgId,
+            role: 'assistant',
+            content: '',
+            timestamp: normalizeEventTimestampIso(payload.timestamp),
+            ...(typeof payload.output_phase_id === 'string' ? { outputPhaseId: payload.output_phase_id } : {}),
+            outputOrder: readOutputOrder(payload),
+            isStreaming: true,
+            ...(agentTemplateName ? { agentTemplateName } : {}),
+            ...(isProactiveRecommendationPayload(payload) ? { isProactiveRecommendation: true } : {}),
+            ...(proactiveType ? { proactiveType: proactiveType as 'skill_recommend' | 'task_reminder' | 'need_exploration' } : {}),
+            ...(proactiveRecId ? { proactiveRecId } : {}),
+          });
+          useChatStore.getState().startStreaming(sessionId, assistantMsgId);
+          currentStreamId = assistantMsgId;
+        }
+        if (!currentStreamId || !content) return;
+        const streamId = currentStreamId;
+        if (agentTemplateName) {
+          const streamMessage = useChatStore.getState().getRuntime(sessionId)?.messages.find((message) => message.id === streamId);
+          if (streamMessage?.agentTemplateName !== agentTemplateName) {
+            useChatStore.getState().updateMessage(sessionId, streamId, { agentTemplateName });
+          }
+        }
+        streamDeltaBatcherRef.current?.enqueue(streamDeltaBatchKey(sessionId, streamId), content, batchedContent => {
+          const chatStore = useChatStore.getState();
+          if (chatStore.getRuntime(sessionId)?.currentStreamId !== streamId) {
+            return;
+          }
+          chatStore.appendStreamContent(sessionId, batchedContent);
+        });
+      }),
+      webClient.on('chat.reasoning', ({ payload }) => {
+        if (shouldIgnoreSessionOutput(payload)) return;
+        if (handleTaskInputReceipt('chat.reasoning', payload)) return;
+        const sessionId = resolveEventSessionId(payload, 'chat.reasoning');
+        if (!sessionId) return;
+        // 主动推荐来源的 reasoning 不进 session 全局 reasoningSegments——否则会并入
+        // 上一轮 turn（segment 无 messageId 绑定，按 startedAt 排序），把上一条
+        // 用户消息的思考状态从"已完成"污染成"已完成 N 次思考" streak chip。
+        if (isProactiveRecommendationPayload(payload)) return;
+
+        // 页面刷新后收到活跃事件时恢复执行状态；已暂停会话的迟到事件不得重新拉起 processing
+        const activityRuntime = useChatStore.getState().getRuntime(sessionId);
+        if (!activityRuntime?.isProcessing && !activityRuntime?.isLoadingHistory && !activityRuntime?.isPaused) {
+          useChatStore.getState().setProcessing(sessionId, true);
+        }
+
+        const agentTemplateName =
+          !isProactiveRecommendationPayload(payload)
+            ? readAgentTemplateName(payload)
+            : undefined;
+        const reasoningContent =
+          typeof payload.content === 'string' ? payload.content : '';
+        if (reasoningContent) {
+          useChatStore.getState().appendReasoning(sessionId, reasoningContent, {
+            outputOrder: readOutputOrder(payload),
+            atMs: eventTimestampMs(payload),
+            ...(agentTemplateName ? { agentTemplateName } : {}),
+          });
+        }
+      }),
+      webClient.on('chat.final', ({ payload }) => {
+        if (payload.session_usage) {
+          useSessionStore.getState().receiveSessionTokenUsage(payload.session_usage);
+        }
+        if (shouldIgnoreSessionOutput(payload)) return;
+        // Supplemental requests never own a separate answer or task lifecycle.
+        if (handleTaskInputReceipt('chat.final', payload)) return;
+        const crossSession = extractCrossSessionMessage(payload);
+        // One cross-session request may emit several finals. Its stable bubble ID
+        // makes each final safe to replay, while the latest one replaces the text.
+        if (!crossSession && shouldDropDuplicatedEvent('chat.final', payload)) return;
+
+        const cronMeta = payload.cron as Record<string, unknown> | undefined;
+
+        // 达上限通知不绑定具体会话（后端 _send_notification_cb 不带 session_id），
+        // 必须在下方 session 守卫（if (!sessionId) return）之前拦截，否则会被该守卫
+        // 挡掉、用户看不到任何提示。走顶部 toast，不进会话历史。
+        if (typeof payload.source === 'string' && payload.source === 'proactive_notification') {
+          const notifContent = normalizeFinalContent(payload);
+          if (notifContent) {
+            useHarnessStore.getState().setProactiveNotification(notifContent);
+          }
+          return;
+        }
+
+        // cron 广播处理：结果到达时刷新触发会话列表（在 sessionId 路由之前，确保无论如何都刷新）
+        if (cronMeta && typeof cronMeta === 'object') {
+          const cronJobId = typeof cronMeta.job_id === 'string' ? cronMeta.job_id.trim() : '';
+          const cronStatus = typeof cronMeta.status === 'string' ? cronMeta.status.trim() : '';
+          const isPlaceholder = typeof cronMeta.is_placeholder === 'boolean' ? cronMeta.is_placeholder : false;
+          if (cronJobId && cronStatus !== 'running') {
+            const cronJob = useCronStore.getState().jobs.find((j) => j.id === cronJobId);
+            const cronProjectId = cronJob?.project_id || 'default';
+            void useCronStore.getState().loadCronSessions(cronProjectId, cronJobId);
+          }
+          // 非占位（最终结果）广播到达时标记定时任务未读
+          if (cronJobId && !isPlaceholder) {
+            useCronStore.getState().markCronJobUnread(cronJobId);
+          }
+        }
+
+        let sessionId = resolveEventSessionId(payload);
+        // cron 广播 session_id 为空（后端对 web 通道置空），
+        // 优先使用 cronMeta.exec_session_id 路由到定时任务专属会话。
+        // 若后端未提供 exec_session_id，用 job_id 查 lastRunSessionId（"立即执行"时存入）。
+        if (!sessionId && cronMeta) {
+          const execSessionId =
+            typeof cronMeta.exec_session_id === 'string'
+              ? (cronMeta.exec_session_id as string).trim()
+              : '';
+          if (execSessionId) {
+            sessionId = execSessionId;
+            ensureSessionRuntimes(sessionId);
+          } else {
+            const cronJobIdFallback = typeof cronMeta.job_id === 'string' ? cronMeta.job_id.trim() : '';
+            if (cronJobIdFallback) {
+              const lastSid = useCronStore.getState().lastRunSessionId[cronJobIdFallback] ?? '';
+              if (lastSid) {
+                sessionId = lastSid;
+                ensureSessionRuntimes(sessionId);
+              }
+            }
+          }
+        }
+        if (!sessionId) return;
+        // cron 最终结果（非占位）广播到达：自动跳转到执行会话，加载完整历史
+        // （含用户消息、agent 回复、session 标题），避免用户手动点击左侧 session。
+        // handleRestoreSession 通过队列异步执行，不会干扰当前消息处理。
+        // A failed cron result is already rendered from this push.  Do not
+        // immediately restore its history here: if persistence is delayed or
+        // unavailable, that reload can replace the just-rendered error with
+        // an older history snapshot and make the failure appear to vanish.
+        const isFailedCronResult = cronMeta?.status === 'failed';
+        if (
+          cronMeta &&
+          typeof cronMeta === 'object' &&
+          cronMeta.is_placeholder !== true &&
+          !isFailedCronResult
+        ) {
+          const cronJobIdForNav = typeof cronMeta.job_id === 'string' ? cronMeta.job_id.trim() : '';
+          onCronResultArrivedRef.current?.(sessionId, cronJobIdForNav);
+        }
+
+        // 子任务总结是独立气泡：它只记录子任务输出，不得收尾或污染父会话这一轮。
+        if (payload.source === 'session_task_summary') {
+          const summaryContent = normalizeFinalContent(payload);
+          const taskId = pickString(
+            payload.task_id,
+            payload.request_id,
+            payload.subagent_id,
+            payload.sub_session_id
+          );
+          if (summaryContent && taskId) {
+            const messageId = stableEventId('session-task-summary', sessionId, taskId);
+            const runtime = useChatStore.getState().getRuntime(sessionId);
+            const alreadyAdded = runtime?.messages.some((message) => message.id === messageId);
+            if (!alreadyAdded) {
+              const timestamp = normalizeEventTimestampIso(payload.timestamp);
+              useChatStore.getState().addMessage(sessionId, {
+                id: messageId,
+                role: 'assistant',
+                content: summaryContent,
+                timestamp,
+                completedAt: timestamp,
+                isStreaming: false,
+              });
+            }
+          }
+          return;
+        }
+        flushPendingStreamDelta(sessionId);
+
+        const memberAction = pickString(payload.member_action);
+        const actionMemberName = pickString(payload.member_name);
+        if (
+          actionMemberName &&
+          (memberAction === 'joined' || memberAction === 'left')
+        ) {
+          // 使用 upsert（若 spawned 事件尚未到达则创建占位，后续 spawned 事件会补全 teamName/sessionRef 等字段）
+          useSessionStore.getState().upsertTeamHumanShareCommand(
+            sessionId,
+            {
+              memberName: actionMemberName,
+              displayName: pickString(payload.display_name),
+              sessionId,
+              teamName: '',
+              sessionRef: '',
+              joinCommand: '',
+              exitCommand: '',
+              status: memberAction === 'joined' ? 'joined' : 'left',
+              sourceChannel: pickString(payload.source_channel),
+              userId: pickString(payload.user_id),
+              updatedAt: Date.now(),
+            },
+          );
+          const content = normalizeFinalContent(payload);
+          if (content) {
+            useChatStore.getState().addMessage(sessionId, {
+              id: `team-human-${memberAction}-${generateUuidV4()}`,
+              role: 'system',
+              content,
+              timestamp: normalizeEventTimestampIso(payload.timestamp),
+            });
+          }
+          return;
+        }
+
+        const currentMode = useSessionStore.getState().getRuntime(sessionId)?.mode;
+        const content = normalizeFinalContent(payload);
+        finishContextCompressionTurn(sessionId);
+
+        // 与 delta 使用同一稳定 ID，只收尾本次跨会话后台请求。这里不能执行普通
+        // final 的 turn collapse/segment rewrite，否则可能重写目标会话已有回复。
+        if (crossSession) {
+          ensureCrossSessionUserTurn(
+            sessionId,
+            crossSession,
+            crossSession.content || '',
+            normalizeEventTimestampIso(payload.timestamp)
+          );
+          const assistantMsgId = crossSessionAssistantMessageId(
+            payload.turn_request_id ?? payload.request_id,
+            crossSession.messageId
+          );
+          const chatStore = useChatStore.getState();
+          const existing = chatStore
+            .getRuntime(sessionId)
+            ?.messages.find((message) => message.id === assistantMsgId);
+          const completedAt = normalizeEventTimestampIso(payload.timestamp);
+          if (existing) {
+            chatStore.updateMessage(sessionId, assistantMsgId, {
+              ...(content.trim() ? { content } : {}),
+              isStreaming: false,
+              completedAt,
+              crossSession,
+            });
+          } else if (content.trim()) {
+            chatStore.addMessage(sessionId, {
+              id: assistantMsgId,
+              role: 'assistant',
+              content,
+              timestamp: completedAt,
+              completedAt,
+              isStreaming: false,
+              crossSession,
+            });
+          }
+          if (!chatStore.getRuntime(sessionId)?.isLoadingHistory) {
+            chatStore.setExecutionError(sessionId, null);
+            chatStore.setProcessing(sessionId, false);
+            chatStore.setThinking(sessionId, false);
+          }
+          return;
+        }
+
+        // team 模式下，过滤成员输出，只保留外层 leader 回复。
+        if (isHiddenTeamTeammateMessagePayload(currentMode ?? 'agent', payload)) {
+          const memberId = getTeamPayloadMemberName(payload);
+          if (memberId) {
+            const timestamp = eventTimestampMs(payload);
+            const outputEventId = takeTeamMemberOutputEventId(payload, memberId);
+            if (!content.trim()) {
+              return;
+            }
+            useSessionStore.getState().addTeamMemberExecutionEvent(sessionId, {
+              id: outputEventId || stableEventId('final', payload.session_id, memberId, payload.rid, timestamp, content.slice(0, 48)),
+              member_id: memberId,
+              kind: 'final',
+              timestamp,
+              title: t('team.process.execution.final'),
+              content,
+            });
+          }
+          return;
+        }
+
+        // §8 步骤3：Heartbeat 自动轮的 final 只完成相同 run_id 的 assistant 消息，
+        // 不进全局 currentStreamId 收尾、不触发 Goal 续跑判断——Heartbeat 不复用普通轮的
+        // 整段收尾逻辑。execution.error 已在独立处理器里按 run_id 生成可见错误并立即结束
+        // processing（§10），不在此等待。session 级 processing/thinking 收口 + 排空队列
+        // 现在统一走 closeHeartbeatSessionState（按 run_id 去重，避免多个终态事件重复收口
+        // 造成并发发送），见该函数定义处注释。
+        const hbFinalAutomation = extractAutomation(payload);
+        if (hbFinalAutomation) {
+          const assistantMsgId = heartbeatAssistantMessageId(hbFinalAutomation.run_id);
+          const chatStore = useChatStore.getState();
+          const existing = chatStore.getRuntime(sessionId)?.messages.find((m) => m.id === assistantMsgId);
+          if (existing) {
+            // 已有 delta 起的消息：用 final 的归一化内容覆盖（后端 final 是这一轮的完整正文），
+            // 关闭 streaming。content 为空时保留已有 delta 内容，只关 streaming。
+            const patch: Partial<Message> = { isStreaming: false };
+            if (content.trim()) patch.content = content;
+            chatStore.updateMessage(sessionId, assistantMsgId, patch);
+          } else if (content.trim()) {
+            // delta 全丢帧，仅有 final：补建一条已完成的消息
+            chatStore.addMessage(sessionId, {
+              id: assistantMsgId,
+              role: 'assistant',
+              content,
+              timestamp: new Date().toISOString(),
+              isStreaming: false,
+              automation: hbFinalAutomation,
+            });
+          }
+          // §2.2 兜底：chat.final 是这一轮的收尾标志之一，正常应该由紧随其后的
+          // chat.processing_status(false) 关闭 session 级 isProcessing/isThinking；
+          // 这里是它丢帧时的兜底，避免输入区转圈/停止按钮卡死。只关这个 session 的
+          // 状态，不碰任何消息内容，不会影响另一条普通聊天或另一条 Heartbeat run。
+          closeHeartbeatSessionState(sessionId, hbFinalAutomation.run_id);
+          return;
+        }
+
+        // 与 delta 使用同一 rec_id。这里不能走普通 final 的 currentStreamId 收尾：
+        // 那会把后一条推荐写进前一条气泡，并 stopStreaming 打断用户正在进行的回答。
+        if (isProactiveRecommendationPayload(payload)) {
+          const proactiveRecId = typeof payload.proactive_rec_id === 'string' ? payload.proactive_rec_id : '';
+          const proactiveType = typeof payload.proactive_type === 'string' ? payload.proactive_type : '';
+          const assistantMsgId = proactiveAssistantMessageId(proactiveRecId);
+          const chatStore = useChatStore.getState();
+          const existing = chatStore
+            .getRuntime(sessionId)
+            ?.messages.find((message) => message.id === assistantMsgId);
+          const completedAt = normalizeEventTimestampIso(payload.timestamp);
+          const proactivePatch: Partial<Message> = {
+            isStreaming: false,
+            completedAt,
+            isProactiveRecommendation: true,
+            ...(proactiveType
+              ? { proactiveType: proactiveType as 'skill_recommend' | 'task_reminder' | 'need_exploration' }
+              : {}),
+            ...(proactiveRecId ? { proactiveRecId } : {}),
+          };
+          if (existing) {
+            chatStore.updateMessage(sessionId, assistantMsgId, {
+              ...(content.trim() ? { content } : {}),
+              ...proactivePatch,
+            });
+          } else if (content.trim()) {
+            chatStore.addMessage(sessionId, {
+              id: assistantMsgId,
+              role: 'assistant',
+              content,
+              timestamp: completedAt,
+              ...proactivePatch,
+            });
+          }
+          if (content.trim() && !content.includes('MEDIA:')) {
+            handleTtsPlayback(sessionId, assistantMsgId, content);
+          }
+          return;
+        }
+
+        const teamLeaderMessageToFinalize =
+          currentMode === 'team'
+            ? findActiveTeamLeaderMessage(sessionId, getPayloadRequestId(payload))
+            : undefined;
+        if (teamLeaderMessageToFinalize) {
+          // final（包括空正文）结束输出段；pause 不承担这个协议边界。
+          useChatStore.getState().updateMessage(sessionId, teamLeaderMessageToFinalize.id, {
+            isStreaming: false,
+            teamStream: undefined,
+          });
+        }
+        // Defensive: chat.final is the definitive end-of-response marker.
+        // The primary state change is driven by chat.processing_status
+        // (is_processing=false), but if that frame is lost the UI would be stuck
+        // showing the stop button.
+        // In team mode the backend suppresses chat.final while the team is
+        // still running and only sends chat.processing_status(is_complete=true)
+        // on team.completed, so we must NOT reset isProcessing here.
+        if (!useChatStore.getState().getRuntime(sessionId)?.isLoadingHistory) {
+          useChatStore.getState().setExecutionError(sessionId, null);
+          if (currentMode !== 'team') {
+            // 有 active Goal 时，普通问答轮和 Goal 后续执行走同一条流；这次 chat.final 可能只是
+            // 普通问答轮的收尾，Goal 紧接着还要继续跑。此时不能把它当"整段彻底结束"处理——
+            // 不能关 isProcessing、不能排空任务队列、不能清 thinking/subtasks，否则会误发下一条
+            // 排队消息、或短暂闪一下"空闲"。气泡本身的收尾（下面 stopStreaming）不受影响，
+            // 该收尾还是收尾。见 Goal持续目标Web前端对接4.md「普通问答与 Goal 续跑：前端气泡收尾」。
+            const goalStillActive =
+              useGoalStore.getState().runtimes[sessionId]?.goal?.status === 'active';
+            if (!goalStillActive) {
+              useChatStore.getState().setProcessing(sessionId, false);
+              // 正常情况下排空由 chat.processing_status(false) 负责；这里是它丢帧时的兜底
+              // 重置，同样可能是"目标这一轮真正结束"的那个信号，一并兜底排空一次排队消息
+              // （见问题3：目标完成后队列消息没有紧接着发出去）。已经排空过则是空操作，不会重复发送。
+              drainTaskQueueIfIdle(sessionId);
+              useChatStore.getState().setThinking(sessionId, false);
+            }
+          } else {
+            useChatStore.getState().setThinking(sessionId, false);
+          }
+        }
+        const finalAction = interpretChatFinalAction(payload);
+        if (currentMode === 'team' && content) {
+          clearThinkingForVisibleOutput(sessionId);
+          const timestamp = payload.timestamp || Date.now();
+          const iso = normalizeEventTimestampIso(payload.timestamp);
+          const teamRuntime = useChatStore.getState().getRuntime(sessionId);
+          const teamSplit = Boolean(teamRuntime?.assistantStreamSplit);
+          const teamMessages = teamRuntime?.messages ?? [];
+
+          if (teamSplit) {
+            useChatStore.getState().clearStreamSplit(sessionId);
+            if (shouldCollapseTurnFinal(teamMessages, content, 'team', finalAction)) {
+              useChatStore.getState().collapseTurnFinal(sessionId, {
+                kind: 'team',
+                content,
+                finalId: prefixedMessageId('team-leader-'),
+                timestampIso: iso,
+              });
+              return;
+            }
+            if (finalAction.type === 'append') {
+              useChatStore.getState().addMessage(sessionId, {
+                id: prefixedMessageId('team-leader-'),
+                role: 'system',
+                content: `team.leader:${JSON.stringify({ content, timestamp: Date.parse(iso) || Date.now() })}`,
+                timestamp: iso,
+              });
+              return;
+            }
+            if (teamLeaderMessageToFinalize) {
+              useChatStore.getState().updateMessage(sessionId, teamLeaderMessageToFinalize.id, {
+                content: `team.leader:${JSON.stringify({ content, timestamp: Date.parse(iso) || Date.now() })}`,
+                isStreaming: false,
+                timestamp: iso,
+              });
+              return;
+            }
+            useChatStore.getState().addMessage(sessionId, {
+              id: prefixedMessageId('team-leader-'),
+              role: 'system',
+              content: `team.leader:${JSON.stringify({ content, timestamp: Date.parse(iso) || Date.now() })}`,
+              timestamp: iso,
+            });
+            return;
+          }
+
+          if (teamLeaderMessageToFinalize) {
+            useChatStore.getState().updateMessage(sessionId, teamLeaderMessageToFinalize.id, {
+              content: `team.leader:${JSON.stringify({ content, timestamp })}`,
+              isStreaming: false,
+              timestamp: iso,
+            });
+            return;
+          }
+
+          useChatStore.getState().addMessage(sessionId, {
+            id: prefixedMessageId('team-leader-'),
+            role: 'system',
+            content: `team.leader:${JSON.stringify({ content, timestamp })}`,
+            timestamp: new Date().toISOString(),
+          });
+          return;
+        }
+
+        const runtime = useChatStore.getState().getRuntime(sessionId);
+        const currentStreamId = runtime?.currentStreamId;
+        const messages = runtime?.messages ?? [];
+        const assistantStreamSplit = Boolean(runtime?.assistantStreamSplit);
+        useChatStore.getState().clearStreamSplit(sessionId);
+
+        const source = typeof payload.source === 'string' ? payload.source : '';
+        const isProactiveRecommendation = source === 'proactive_recommendation';
+        const proactiveType = typeof payload.proactive_type === 'string' ? payload.proactive_type : '';
+        const agentTemplateName =
+          !isProactiveRecommendation
+            ? readAgentTemplateName(payload)
+            : undefined;
+        const agentIdentityPatch = agentTemplateName ? { agentTemplateName } : {};
+        const proactiveRecId = typeof payload.proactive_rec_id === 'string' ? payload.proactive_rec_id : '';
+
+        const streamId = currentStreamId;
+        const preferredSegmentId =
+          finalAction.type === 'patch_segment' ? finalAction.segmentId : undefined;
+        // 收尾时刻单独记：勿覆盖 message.timestamp（排序/goal 卡），但任务用时必须吃到 final。
+        const completedAtIso = normalizeEventTimestampIso(payload.timestamp);
+
+        const finalOutputOrder = readOutputOrder(payload);
+        const hasSupplementalBoundary = finalOutputOrder && messages.some(
+          (message) => message.supplementalInput &&
+            message.outputOrder?.requestId === finalOutputOrder.requestId
+        );
+        if (typeof payload.output_phase_id === 'string' && hasSupplementalBoundary) {
+          const finalId = streamId || prefixedMessageId('msg-final-');
+          if (streamId) {
+            useChatStore.getState().updateMessage(sessionId, streamId, {
+              ...(content ? { content } : {}),
+              isStreaming: false,
+              completedAt: completedAtIso,
+              ...agentIdentityPatch,
+            });
+            useChatStore.getState().stopStreaming(sessionId);
+          } else if (content) {
+            useChatStore.getState().addMessage(sessionId, {
+              id: finalId,
+              role: 'assistant',
+              content,
+              timestamp: completedAtIso,
+              completedAt: completedAtIso,
+              outputPhaseId: payload.output_phase_id,
+              outputOrder: finalOutputOrder,
+              ...agentIdentityPatch,
+            });
+          }
+          if (content && !content.includes('MEDIA:')) {
+            handleTtsPlayback(sessionId, finalId, content);
+          }
+          if (!content) flushPendingGoalObjectiveBubble(sessionId);
+          return;
+        }
+
+        if (assistantStreamSplit && content) {
+          const cronMetaEarly = payload.cron as Record<string, unknown> | undefined;
+          const cronRunIdEarly =
+            typeof cronMetaEarly?.run_id === 'string' ? cronMetaEarly.run_id.trim() : '';
+          if (!cronRunIdEarly && !cronMetaEarly && !isProactiveRecommendation) {
+            if (streamId) {
+              useChatStore.getState().stopStreaming(sessionId);
+            }
+            if (shouldCollapseTurnFinal(messages, content, 'agent', finalAction)) {
+              const finalId = prefixedMessageId('msg-final-');
+              useChatStore.getState().collapseTurnFinal(sessionId, {
+                kind: 'agent',
+                content,
+                finalId,
+                timestampIso: completedAtIso,
+                ...agentIdentityPatch,
+              });
+              if (!content.includes('MEDIA:')) {
+                handleTtsPlayback(sessionId, finalId, content);
+              }
+              return;
+            }
+            if (finalAction.type !== 'append') {
+              const rewriteId = findAssistantSegmentIdForFinal(
+                messages,
+                content,
+                preferredSegmentId || streamId
+              );
+              if (rewriteId) {
+                useChatStore.getState().updateMessage(sessionId, rewriteId, {
+                  content,
+                  isStreaming: false,
+                  completedAt: completedAtIso,
+                  ...agentIdentityPatch,
+                  ...(isProactiveRecommendation && proactiveRecId ? { proactiveRecId } : {}),
+                });
+                if (!content.includes('MEDIA:')) {
+                  handleTtsPlayback(sessionId, rewriteId, content);
+                }
+                return;
+              }
+            }
+          }
+        }
+
+        // 未分段：合并进当前流。勿用 payload.timestamp 覆盖消息时间（会与 goal 完成卡抢序）；
+        // 另写 completedAt，供「任务用时」与历史 final 落盘时间对齐。
+        // 空正文的 final 只是收尾信号（用户轮答完、Goal 段答完），本轮即使已按工具边界
+        // 分过段也要走这里收尾：否则 currentStreamId 一直留着，紧接着的 Goal delta 会继续
+        // 追加进同一个气泡，最后只剩一个气泡（docs/zh/Goal持续目标Web前端对接.md §16
+        // 要求「永远可以收尾当前助手气泡」）。
+        if (streamId && (!assistantStreamSplit || !content)) {
+          useChatStore.getState().updateMessage(sessionId, streamId, {
+            ...(content ? { content } : {}),
+            isStreaming: false,
+            completedAt: completedAtIso,
+            ...agentIdentityPatch,
+            ...(isProactiveRecommendation ? { isProactiveRecommendation, ...(proactiveType ? { proactiveType: proactiveType as 'skill_recommend' | 'task_reminder' | 'need_exploration' } : {}), ...(proactiveRecId ? { proactiveRecId } : {}) } : {}),
+          });
+          useChatStore.getState().stopStreaming(sessionId);
+          if (content && !content.includes('MEDIA:')) {
+            handleTtsPlayback(sessionId, streamId, content);
+          }
+          // 空 final = 用户轮→goal 轮拆气泡边界：此时入列目标用户气泡，不打断上一轮回答
+          if (!content) {
+            flushPendingGoalObjectiveBubble(sessionId);
+          }
+          return;
+        }
+        // 无流式气泡时的空 final（上一轮未吐字就被 goal 劫持）同样要入列
+        if (!streamId && !content) {
+          flushPendingGoalObjectiveBubble(sessionId);
+          return;
+        }
+        if (streamId && assistantStreamSplit && content) {
+          const streamedMsg = messages.find((m) => m.id === streamId);
+          const streamedContent = typeof streamedMsg?.content === 'string' ? streamedMsg.content : '';
+          const nextContent = resolveStreamFinalContent(streamedContent, content, true);
+          if (nextContent !== undefined) {
+            useChatStore.getState().updateMessage(sessionId, streamId, {
+              content: nextContent,
+              isStreaming: false,
+              completedAt: completedAtIso,
+              ...agentIdentityPatch,
+              ...(isProactiveRecommendation ? { isProactiveRecommendation, ...(proactiveType ? { proactiveType: proactiveType as 'skill_recommend' | 'task_reminder' | 'need_exploration' } : {}), ...(proactiveRecId ? { proactiveRecId } : {}) } : {}),
+            });
+            useChatStore.getState().stopStreaming(sessionId);
+            if (!nextContent.includes('MEDIA:')) {
+              handleTtsPlayback(sessionId, streamId, nextContent);
+            }
+            return;
+          }
+          useChatStore.getState().updateMessage(sessionId, streamId, {
+            isStreaming: false,
+            completedAt: completedAtIso,
+            ...agentIdentityPatch,
+            ...(isProactiveRecommendation ? { isProactiveRecommendation, ...(proactiveType ? { proactiveType: proactiveType as 'skill_recommend' | 'task_reminder' | 'need_exploration' } : {}), ...(proactiveRecId ? { proactiveRecId } : {}) } : {}),
+          });
+          useChatStore.getState().stopStreaming(sessionId);
+        }
+        if (content) {
+          const cronMeta = payload.cron as Record<string, unknown> | undefined;
+          const cronRunId =
+            typeof cronMeta?.run_id === 'string' ? cronMeta.run_id.trim() : '';
+          const isCronPlaceholderContent =
+            cronMeta?.is_placeholder === true ||
+            /正在执行中，结果稍后补发/.test(content) ||
+            /^\[cron\].*正在执行中/.test(content);
+
+          if (!isCronPlaceholderContent) {
+            let placeholderId: string | null = null;
+            if (cronRunId) {
+              const byRun = messages.find((m) => m.id === `cron-placeholder-${cronRunId}`);
+              if (byRun) placeholderId = byRun.id;
+            }
+            if (!placeholderId) {
+              for (let i = messages.length - 1; i >= 0; i -= 1) {
+                const msg = messages[i];
+                if (msg.role !== 'assistant' || typeof msg.content !== 'string') continue;
+                if (
+                  /正在执行中，结果稍后补发/.test(msg.content) ||
+                  /^\[cron\].*正在执行中/.test(msg.content)
+                ) {
+                  placeholderId = msg.id;
+                  break;
+                }
+              }
+            }
+            if (placeholderId) {
+              useChatStore.getState().updateMessage(sessionId, placeholderId, {
+                content,
+                isStreaming: false,
+                completedAt: completedAtIso,
+                ...(isProactiveRecommendation ? { isProactiveRecommendation, ...(proactiveType ? { proactiveType: proactiveType as 'skill_recommend' | 'task_reminder' | 'need_exploration' } : {}), ...(proactiveRecId ? { proactiveRecId } : {}) } : {}),
+              });
+              if (!content.includes('MEDIA:')) {
+                handleTtsPlayback(sessionId, placeholderId, content);
+              }
+              return;
+            }
+          }
+
+          const messageId =
+            isCronPlaceholderContent && cronRunId
+              ? `cron-placeholder-${cronRunId}`
+              : cronRunId && !isCronPlaceholderContent
+                ? `cron-final-${cronRunId}`
+                : prefixedMessageId('msg-');
+
+          const existing = messages.find((m) => m.id === messageId);
+          if (existing) {
+            if (existing.content === content) {
+              useChatStore.getState().updateMessage(sessionId, messageId, {
+                isStreaming: false,
+                completedAt: completedAtIso,
+                ...agentIdentityPatch,
+                ...(isProactiveRecommendation ? { isProactiveRecommendation, ...(proactiveType ? { proactiveType: proactiveType as 'skill_recommend' | 'task_reminder' | 'need_exploration' } : {}), ...(proactiveRecId ? { proactiveRecId } : {}) } : {}),
+              });
+              return;
+            }
+            useChatStore.getState().updateMessage(sessionId, messageId, {
+              content,
+              isStreaming: false,
+              completedAt: completedAtIso,
+              ...agentIdentityPatch,
+              ...(isProactiveRecommendation ? { isProactiveRecommendation, ...(proactiveType ? { proactiveType: proactiveType as 'skill_recommend' | 'task_reminder' | 'need_exploration' } : {}), ...(proactiveRecId ? { proactiveRecId } : {}) } : {}),
+            });
+            if (!content.includes('MEDIA:')) {
+              handleTtsPlayback(sessionId, messageId, content);
+            }
+            return;
+          }
+
+          if (assistantStreamSplit && !cronRunId && !cronMeta) {
+            if (streamId) {
+              useChatStore.getState().stopStreaming(sessionId);
+            }
+            let turnStart = 0;
+            for (let i = messages.length - 1; i >= 0; i -= 1) {
+              if (messages[i].role === 'user') {
+                turnStart = i + 1;
+                break;
+              }
+            }
+            const shownConcat = messages
+              .slice(turnStart)
+              .filter((m) => m.role === 'assistant' && typeof m.content === 'string')
+              .map((m) => m.content as string)
+              .join('');
+
+            let remainder: string;
+            if (shownConcat && content.startsWith(shownConcat)) {
+              remainder = content.slice(shownConcat.length);
+            } else if (shownConcat && collapseWs(content) === collapseWs(shownConcat)) {
+              remainder = '';
+            } else if (shownConcat && collapseWs(shownConcat).includes(collapseWs(content))) {
+              remainder = '';
+            } else {
+              remainder = content;
+            }
+
+            if (!remainder.trim()) {
+              const rewriteId = findAssistantSegmentIdForFinal(
+                messages,
+                content,
+                preferredSegmentId || streamId
+              );
+              if (rewriteId) {
+                useChatStore.getState().updateMessage(sessionId, rewriteId, {
+                  content,
+                  isStreaming: false,
+                  completedAt: completedAtIso,
+                  ...agentIdentityPatch,
+                  ...(isProactiveRecommendation && proactiveRecId ? { proactiveRecId } : {}),
+                });
+                if (!content.includes('MEDIA:')) {
+                  handleTtsPlayback(sessionId, rewriteId, content);
+                }
+              }
+              return;
+            }
+            const finalMsgId = prefixedMessageId('msg-final-');
+            useChatStore.getState().addMessage(sessionId, {
+              id: finalMsgId,
+              role: 'assistant',
+              content: remainder,
+              timestamp: completedAtIso,
+              completedAt: completedAtIso,
+              ...agentIdentityPatch,
+              isProactiveRecommendation,
+              ...(proactiveType ? { proactiveType: proactiveType as 'skill_recommend' | 'task_reminder' | 'need_exploration' } : {}),
+              ...(proactiveRecId ? { proactiveRecId } : {}),
+            });
+            if (!remainder.includes('MEDIA:')) {
+              handleTtsPlayback(sessionId, finalMsgId, remainder);
+            }
+            return;
+          }
+
+          const rewriteId = findAssistantSegmentIdForFinal(
+            messages,
+            content,
+            preferredSegmentId || streamId
+          );
+          if (rewriteId) {
+            useChatStore.getState().updateMessage(sessionId, rewriteId, {
+              content,
+              isStreaming: false,
+              completedAt: completedAtIso,
+              ...agentIdentityPatch,
+              ...(isProactiveRecommendation && proactiveRecId ? { proactiveRecId } : {}),
+            });
+            if (!content.includes('MEDIA:')) {
+              handleTtsPlayback(sessionId, rewriteId, content);
+            }
+            return;
+          }
+          const last = messages[messages.length - 1];
+          if (last?.role === 'assistant' && last.content === content) {
+            useChatStore.getState().updateMessage(sessionId, last.id, {
+              isStreaming: false,
+              completedAt: completedAtIso,
+              ...agentIdentityPatch,
+              ...(isProactiveRecommendation && proactiveRecId ? { proactiveRecId } : {}),
+            });
+            return;
+          }
+          useChatStore.getState().addMessage(sessionId, {
+            id: messageId,
+            role: 'assistant',
+            content,
+            timestamp: completedAtIso,
+            completedAt: completedAtIso,
+            ...agentIdentityPatch,
+            isProactiveRecommendation,
+            ...(proactiveType ? { proactiveType: proactiveType as 'skill_recommend' | 'task_reminder' | 'need_exploration' } : {}),
+            ...(proactiveRecId ? { proactiveRecId } : {}),
+          });
+          if (!content.includes('MEDIA:')) {
+            handleTtsPlayback(sessionId, messageId, content);
+          }
+        }
+      }),
+      webClient.on('chat.media', ({ payload }) => {
+        if (handleTaskInputReceipt('chat.media', payload)) return;
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        const mediaPayload = payload as {
+          content?: string;
+          media_items?: MediaItem[];
+        };
+        const runtime = useChatStore.getState().getRuntime(sessionId);
+        const currentStreamId = runtime?.currentStreamId;
+        const messages = runtime?.messages ?? [];
+        const targetId =
+          currentStreamId ??
+          [...messages].reverse().find((msg) => msg.role === 'assistant')?.id;
+        if (!targetId) {
+          return;
+        }
+        const applyMediaUpdate = () => {
+          const updates: { content?: string; mediaItems?: MediaItem[] } = {};
+          if (mediaPayload.content !== undefined) {
+            updates.content = mediaPayload.content;
+          }
+          if (mediaPayload.media_items?.length) {
+            updates.mediaItems = mediaPayload.media_items;
+          }
+          if (Object.keys(updates).length > 0) {
+            useChatStore.getState().updateMessage(sessionId, targetId, updates);
+          }
+          if (mediaPayload.content) {
+            handleTtsPlayback(sessionId, targetId, mediaPayload.content);
+          }
+        };
+        if (currentStreamId && streamDeltaBatcherRef.current) {
+          streamDeltaBatcherRef.current.flushBefore(
+            streamDeltaBatchKey(sessionId, currentStreamId),
+            applyMediaUpdate
+          );
+        } else {
+          applyMediaUpdate();
+        }
+      }),
+      webClient.on('chat.file', ({ payload }) => {
+        if (handleTaskInputReceipt('chat.file', payload)) return;
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        const files = (payload.files ?? []) as FileDownloadItem[];
+        if (!files.length) return;
+        const currentMode = useSessionStore.getState().getRuntime(sessionId)?.mode;
+        if (isHiddenTeamTeammateMessagePayload(currentMode ?? 'agent', payload)) {
+          const memberId = getTeamPayloadMemberName(payload);
+          if (memberId) {
+            const timestamp = eventTimestampMs(payload);
+            const mappedFiles = files.map((file) => ({
+              name: file.name,
+              size: file.size,
+              mime_type: file.mime_type,
+              download_url: file.download_url,
+              path: file.path,
+            }));
+            const runtime = useSessionStore.getState().getRuntime(sessionId);
+            // 仅当存在相同文件身份时合并（刷新 download token）；不同文件仍新建 execution
+            const existingFileEvent = findOverlappingFileExecutionEvent(
+              runtime?.teamMemberExecutionEvents,
+              mappedFiles,
+              (event) => event.member_id === memberId && event.kind === 'file'
+            );
+            if (existingFileEvent) {
+              const mergedFiles = mergeFileDownloadItems(existingFileEvent.files, mappedFiles);
+              useSessionStore.getState().addTeamMemberExecutionEvent(sessionId, {
+                ...existingFileEvent,
+                timestamp,
+                content: mergedFiles.map((file) => file.name).join('\n'),
+                files: mergedFiles,
+              });
+              return;
+            }
+            useSessionStore.getState().addTeamMemberExecutionEvent(sessionId, {
+              id: stableEventId('file', payload.session_id, memberId, timestamp, files.map((file) => file.name).join(',')),
+              member_id: memberId,
+              kind: 'file',
+              timestamp,
+              title: t('team.process.execution.sentFile'),
+              content: files.map((file) => file.name).join('\n'),
+              files: mappedFiles,
+            });
+          }
+          return;
+        }
+        if (currentMode === 'team') {
+          const target = findActiveTeamLeaderMessage(sessionId, getPayloadRequestId(payload));
+          if (target) {
+            useChatStore.getState().updateMessage(sessionId, target.id, {
+              fileItems: mergeFileDownloadItems(target.fileItems, files),
+            });
+          } else {
+            useChatStore.getState().addMessage(sessionId, {
+              id: prefixedMessageId('team-leader-'),
+              role: 'system',
+              content: '',
+              timestamp: new Date().toISOString(),
+              isStreaming: !useChatStore.getState().getRuntime(sessionId)?.isPaused,
+              teamStream: { requestId: getPayloadRequestId(payload) },
+              fileItems: files,
+            });
+          }
+          return;
+        }
+        useChatStore.getState().addFileItems(sessionId, files, {
+          timestampIso: normalizeEventTimestampIso(payload.timestamp),
+        });
+      }),
+      webClient.on('chat.tool_call', ({ payload }) => {
+        if (shouldIgnoreSessionOutput(payload)) return;
+        if (handleTaskInputReceipt('chat.tool_call', payload)) return;
+        const sessionId = resolveEventSessionId(payload, 'chat.tool_call');
+        if (!sessionId) return;
+        if (shouldDropDuplicatedEvent('chat.tool_call', payload)) return;
+        // 页面刷新后收到活跃事件时恢复执行状态；已暂停会话的迟到事件不得重新拉起 processing
+        const activityRuntime = useChatStore.getState().getRuntime(sessionId);
+        if (
+          !isProactiveRecommendationPayload(payload) &&
+          !activityRuntime?.isProcessing && !activityRuntime?.isLoadingHistory && !activityRuntime?.isPaused
+        ) {
+          useChatStore.getState().setProcessing(sessionId, true);
+        }
+        const currentMode = useSessionStore.getState().getRuntime(sessionId)?.mode;
+        if (!isProactiveRecommendationPayload(payload)) {
+          clearThinkingForVisibleOutput(sessionId);
+          useChatStore.getState().closeReasoning(sessionId, {
+            atMs: eventTimestampMs(payload),
+          });
+        }
+        const toolCall = normalizeToolCallPayload(payload);
+        if (toolCall.name === 'subagent_send_input' || toolCall.name === 'subagent_spawn') {
+          const subagentId = typeof toolCall.arguments.subagent_id === 'string'
+            ? toolCall.arguments.subagent_id.trim()
+            : '';
+          const queryField = toolCall.name === 'subagent_spawn' ? 'task_description' : 'query';
+          const query = typeof toolCall.arguments[queryField] === 'string'
+            ? toolCall.arguments[queryField].trim()
+            : '';
+          if (toolCall.id && query && (toolCall.name === 'subagent_spawn' || subagentId)) {
+            pendingSubagentQueryRef.current.set(toolCall.id, { sessionId, subagentId, query });
+            if (toolCall.name === 'subagent_spawn') {
+              pendingSubagentSpawnQueriesRef.current.push({
+                sessionId,
+                displayName: typeof toolCall.arguments.display_name === 'string' ? toolCall.arguments.display_name.trim() : '',
+                query,
+              });
+            }
+          }
+        }
+        const shutdownMemberId = getShutdownMemberFromToolCall(toolCall);
+        if (shutdownMemberId) {
+          shutdownMemberToolCallRef.current.set(toolCall.id, shutdownMemberId);
+        }
+        if (isHiddenTeamTeammateMessagePayload(currentMode ?? 'agent', payload)) {
+          if (currentMode === 'team') {
+            applyTeamTaskToolCall(sessionId, toolCall);
+          }
+          const memberId = getTeamPayloadMemberName(payload) || toolCall.memberName;
+          if (memberId) {
+            teamToolCallMemberRef.current.set(toolCall.id, memberId);
+            const timestamp = eventTimestampMs(payload);
+            useSessionStore.getState().addTeamMemberExecutionEvent(sessionId, {
+              id: stableEventId('tool-call', payload.session_id, memberId, toolCall.id, timestamp),
+              member_id: memberId,
+              kind: 'tool_call',
+              timestamp,
+              title: t('team.process.execution.toolCallTitle', { tool: toolCall.name }),
+              content: toolCall.description || toolCall.formatted_args || stringifyCompact(toolCall.arguments),
+              tool_name: toolCall.name,
+              tool_call_id: toolCall.id,
+            });
+          }
+          return;
+        }
+        // 拆分气泡前提交已收到的正文，避免待合批的尾部在流结束后被丢弃。
+        flushPendingStreamDelta(sessionId);
+        const runtime = useChatStore.getState().getRuntime(sessionId);
+        const currentStreamId = runtime?.currentStreamId;
+        const toolRequestId = getPayloadRequestId(payload) || activeRequestIdRef.current;
+        const agentTemplateName =
+          !isProactiveRecommendationPayload(payload)
+            ? readAgentTemplateName(payload)
+            : undefined;
+        // 工具时间戳一律用事件自身时间，与 history 回放（item.at）对齐；勿绑气泡 timestamp。
+        const toolStartedAt = normalizeEventTimestampIso(payload.timestamp);
+        useChatStore.getState().addToolCall(sessionId, toolCall, {
+          startedAt: toolStartedAt,
+          requestId: toolRequestId,
+          ...(agentTemplateName ? { agentTemplateName } : {}),
+        });
+        // 工具调用会打断当前这段助手文字：收尾当前流式气泡，令后续文字另起新气泡，
+        // 从而实现 codex 风格的「文字 → 工具 → 文字 → 工具」分段交错。
+        // agent 模式走 currentStreamId；团队模式的 team-leader 气泡有独立生命周期，
+        // 需单独收尾，否则本轮 leader 文字会全部堆进同一条气泡，与刷新后的历史（按段拆分）不一致。
+        if (currentMode === 'team') {
+          useChatStore.getState().finalizeTeamLeaderSegment(sessionId, getPayloadRequestId(payload));
+        } else if (currentStreamId) {
+          useChatStore.getState().finalizeStreamSegment(sessionId);
+        }
+        if (currentMode === 'team') {
+          applyTeamTaskToolCall(sessionId, toolCall);
+        }
+      }),
+      webClient.on('chat.tool_update', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        applyToolUpdatePayload(sessionId, payload);
+      }),
+      webClient.on('chat.tool_result', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload, 'chat.tool_result');
+        if (!sessionId) return;
+        if (shouldDropDuplicatedEvent('chat.tool_result', payload)) return;
+        const currentMode = useSessionStore.getState().getRuntime(sessionId)?.mode;
+        const toolResult = normalizeToolResultPayload(payload);
+        const pendingSubagentQuery = toolResult.toolCallId
+          ? pendingSubagentQueryRef.current.get(toolResult.toolCallId)
+          : undefined;
+        if (toolResult.toolCallId) {
+          pendingSubagentQueryRef.current.delete(toolResult.toolCallId);
+        }
+        for (const result of normalizeSubagentWaitResults(payload)) {
+          useSubagentStore.getState().applyResult(sessionId, result);
+        }
+        for (const update of normalizeSubagentToolStatusUpdates(payload)) {
+          const sessionPendingQuery = pendingSubagentQuery?.sessionId === sessionId
+            ? pendingSubagentQuery
+            : undefined;
+          const query = sessionPendingQuery
+            && (!sessionPendingQuery.subagentId || sessionPendingQuery.subagentId === update.subagent_id)
+            ? sessionPendingQuery.query
+            : undefined;
+          const isSpawnQuery = Boolean(query && sessionPendingQuery && !sessionPendingQuery.subagentId);
+          const hasSubagent = Boolean(useSubagentStore.getState().getRuntime(sessionId)?.subagentsById[update.subagent_id]);
+          if (isSpawnQuery && query) {
+            const queuedIndex = pendingSubagentSpawnQueriesRef.current.findIndex(item => item.sessionId === sessionId && item.query === query);
+            if (queuedIndex >= 0) pendingSubagentSpawnQueriesRef.current.splice(queuedIndex, 1);
+            pendingSubagentAssignmentRef.current.set(update.subagent_id, {
+              sessionId,
+              query,
+              ...(update.task_id ? { taskId: update.task_id } : {}),
+            });
+          }
+          useSubagentStore.getState().applyToolStatus(
+            sessionId,
+            update.subagent_id,
+            update.status,
+            eventTimestampMs(payload),
+            query,
+            update.task_id,
+          );
+          if (isSpawnQuery && hasSubagent) {
+            pendingSubagentAssignmentRef.current.delete(update.subagent_id);
+          }
+        }
+        const activeSessionId = getPayloadSessionId(payload) || undefined;
+        // Only trust the result text — "Member shutdown: member_name=X"
+        // means success.  Error messages (e.g. "still holds active task")
+        // do NOT match the regex, so a failed shutdown will NOT remove the
+        // member from the frontend panel.
+        const shutdownMemberId = getShutdownMemberFromToolResult(toolResult);
+        // §2.4：聊天中用 Heartbeat 管理 Tool 改动任务后，若面板已打开需要立即刷新，不能要求
+        // 用户手动刷新页面。只对写操作、且 Tool 执行成功时触发；只读 Tool（list/get/preview）
+        // 和失败结果不触发。必须放在下面 Team 隐藏成员分支的 return 之前，保证单 Agent 和
+        // Team 场景都能命中（Team 模式下隐藏队友的 Tool result 会在下面提前 return）。
+        if (toolResult.success && HEARTBEAT_MUTATION_TOOL_NAMES.has(toolResult.toolName)) {
+          window.dispatchEvent(new CustomEvent('heartbeat-list-refresh', { detail: { sessionId } }));
+        }
+        if (isHiddenTeamTeammateMessagePayload(currentMode ?? 'agent', payload)) {
+          const memberId =
+            getTeamPayloadMemberName(payload) ||
+            (toolResult.toolCallId ? teamToolCallMemberRef.current.get(toolResult.toolCallId) : undefined);
+          if (memberId) {
+            const timestamp = eventTimestampMs(payload);
+            useSessionStore.getState().addTeamMemberExecutionEvent(sessionId, {
+              id: stableEventId('tool-result', payload.session_id, memberId, toolResult.toolCallId, timestamp),
+              member_id: memberId,
+              kind: 'tool_result',
+              timestamp,
+              title: t('team.process.execution.toolResultTitle', { tool: toolResult.toolName }),
+              content: toolResult.summary || stringifyCompact(toolResult.result),
+              tool_name: toolResult.toolName,
+              tool_call_id: toolResult.toolCallId,
+            });
+          }
+          if (shutdownMemberId) {
+            if (toolResult.toolCallId) {
+              shutdownMemberToolCallRef.current.delete(toolResult.toolCallId);
+            }
+            applyTeamMemberShutdown(
+              shutdownMemberId,
+              activeSessionId
+            );
+          }
+          return;
+        }
+        if (shutdownMemberId) {
+          if (toolResult.toolCallId) {
+            shutdownMemberToolCallRef.current.delete(toolResult.toolCallId);
+          }
+          applyTeamMemberShutdown(
+            shutdownMemberId,
+            activeSessionId
+          );
+        }
+        useChatStore.getState().addToolResult(
+          sessionId,
+          {
+            toolName: toolResult.toolName,
+            result: toolResult.result,
+            success: toolResult.success,
+            ...(toolResult.pending ? { pending: true } : {}),
+            toolCallId: toolResult.toolCallId,
+            summary: toolResult.summary,
+            skillTree: toolResult.skillTree,
+            beamSearch: toolResult.beamSearch,
+            ...(toolResult.mermaid ? { mermaid: toolResult.mermaid } : {}),
+            ...(toolResult.timedOut ? { timedOut: true } : {}),
+            reviewer: toolResult.reviewer,
+          },
+          {
+            updatedAt: normalizeEventTimestampIso(payload.timestamp),
+          }
+        );
+      }),
+      webClient.on('todo.updated', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        if (shouldDropDuplicatedEvent('todo.updated', payload)) return;
+        const todos = Array.isArray(payload.todos) ? payload.todos : [];
+        useTodoStore.getState().setTodos(sessionId, todos as Parameters<ReturnType<typeof useTodoStore.getState>['setTodos']>[1]);
+      }),
+      webClient.on('goal.snapshot', ({ payload }) => {
+        if (shouldDropDuplicatedEvent('goal.snapshot', payload)) return;
+        applyGoalSnapshot(payload);
+      }),
+      webClient.on('goal.updated', ({ payload }) => {
+        if (shouldDropDuplicatedEvent('goal.updated', payload)) return;
+        applyGoalSnapshot(payload);
+      }),
+      webClient.on('runtime.accepted', ({ payload }) => {
+        if (handleTaskInputReceipt('runtime.accepted', payload)) return;
+        if (shouldDropDuplicatedEvent('runtime.accepted', payload)) return;
+        // 权威时间回填：accepted 携带执行机在输出前记录的输入时间（见
+        // backfillOptimisticBubbleTimestamp 注释）。仅命中 sendMessage 登记的乐观气泡。
+        const acceptedSessionId = getPayloadSessionId(payload);
+        if (acceptedSessionId) {
+          backfillOptimisticBubbleTimestamp(acceptedSessionId, payload);
+        }
+        // Goal 的 loading 正常路径下统一以 goal.snapshot 为准（文档 §4 中 set/resume 均先于
+        // runtime.accepted 下发 goal.snapshot，实测 bug001 复现日志里 16/16 次 resume 也确认了
+        // 这个顺序），所以这里大多数时候只是个通用 ACK 占位。但 goalStore.ts 里 pendingAction
+        // 字段的注释本来就写明"收到 goal.snapshot 或 runtime.accepted 后清空"——留一个防御性
+        // 兜底：如果这个 session 的 pendingAction 还没被 goal.snapshot 清掉（比如极端情况下
+        // goal.snapshot 真的没发下来，只有这一条 runtime.accepted；或者它本身就是被去重逻辑
+        // 丢弃的那次操作的确认），就在这里把它清掉，避免编辑/暂停/删除按钮无限期置灰。
+        // 不当作错误、不重试、不新增消息（文档 §6.1）。
+        const sessionId = getPayloadSessionId(payload);
+        if (!sessionId) return;
+        const pendingAction = useGoalStore.getState().runtimes[sessionId]?.pendingAction;
+        if (pendingAction === 'resume' || pendingAction === 'set') {
+          useGoalStore.getState().setPendingAction(sessionId, null);
+        }
+      }),
+      webClient.on('execution.error', ({ payload }) => {
+        const failedSessionId = getPayloadSessionId(payload);
+        if (failedSessionId && !expertTeamId(payload, failedSessionId)) {
+          const runtime = useChatStore.getState().getRuntime(failedSessionId);
+          if (!payload.execution_id || !runtime?.activeExecutionId || payload.execution_id === runtime.activeExecutionId) {
+            useChatStore.getState().clearMoaStatus(failedSessionId);
+          }
+        }
+        const goal = payload.goal;
+        if (goal !== undefined) {
+          applyGoalSnapshot(payload);
+        }
+        // §10：Heartbeat 运行遇到 execution.error 时，后端把本轮结算为 last_run_status=failed，
+        // 前端应立即结束该 run 的 processing 展示并生成可见错误消息，不要等可能为空的 chat.final。
+        // §8 步骤4：错误消息按 run_id 去重（id=heartbeat-error-<run_id>），同一 run 不重复生成。
+        const hbErrorAutomation = extractAutomation(payload);
+        if (hbErrorAutomation) {
+          const sessionId = resolveEventSessionId(payload);
+          if (!sessionId) return;
+          const chatStore = useChatStore.getState();
+          const errorMsg =
+            typeof payload.error === 'string' && payload.error.trim()
+              ? payload.error
+              : t('network.unknownError');
+          const errorId = heartbeatErrorMessageId(hbErrorAutomation.run_id);
+          // 同一 run 已有错误消息则不重复添加（去重）
+          const existingError = chatStore.getRuntime(sessionId)?.messages.find((m) => m.id === errorId);
+          if (!existingError) {
+            chatStore.addMessage(sessionId, {
+              id: errorId,
+              role: 'system',
+              content: t('network.errorPrefix', { message: errorMsg }),
+              timestamp: new Date().toISOString(),
+              automation: hbErrorAutomation,
+            });
+          }
+          // 关掉该 run 的 assistant 消息 streaming（若有），避免光标永久闪烁
+          const assistantMsgId = heartbeatAssistantMessageId(hbErrorAutomation.run_id);
+          chatStore.updateMessage(sessionId, assistantMsgId, { isStreaming: false });
+          // §2.2/§10 兜底：execution.error 已经确定这一 run 失败，不等可能不会再来的
+          // chat.final/chat.processing_status(false)，立即关闭 session 级 processing 展示
+          // （统一走 closeHeartbeatSessionState，按 run_id 去重）。
+          closeHeartbeatSessionState(sessionId, hbErrorAutomation.run_id);
+        }
+      }),
+      webClient.on('context.usage', ({ payload }) => {
+        receiveContextUsage(payload);
+      }),
+      webClient.on<MoaStatusPayload>('chat.moa_status', ({ payload }) => {
+        const sessionId = getPayloadSessionId(payload);
+        if (!sessionId || expertTeamId(payload, sessionId)) return;
+        // These transient events must never replace the current execution with a late frame's ID.
+        useChatStore.getState().updateMoaStatus(sessionId, payload);
+      }),
+      webClient.on<ContextCompressionStatePayload>(
+        'context.compression_state',
+        ({ payload }) => {
+          const sessionId = resolveEventSessionId(payload);
+          if (!sessionId) return;
+          const memberId = findExistingTeamMemberId(sessionId, payload.member_name);
+          if (memberId) {
+            handleTeamMemberContextCompressionState(sessionId, payload, memberId);
+            return;
+          }
+          handleContextCompressionState(sessionId, payload);
+        }
+      ),
+      webClient.on('session.updated', ({ payload }) => {
+        const sessionId =
+          typeof payload.session_id === 'string' ? payload.session_id : '';
+        if (!sessionId) return;
+        updateSession(sessionId, payload as Partial<Session>);
+        useWorkspaceStore.getState().patchSession(sessionId, payload as Partial<Session>);
+        if (typeof payload.mode === 'string') {
+          useSessionStore.getState().setMode(sessionId, normalizeAgentMode(payload.mode));
+        }
+      }),
+      // 归档相关事件：集中在此分发，刷新活跃工作区数据（项目/会话/置顶）；
+      // 归档管理页自行订阅同名事件刷新归档列表。项目归档事件已随协议移除。
+      // 事件可能早于响应到达，去抖合并后按当前状态幂等刷新。
+      webClient.on<ArchiveResourceEventPayload>('session.archived', () => {
+        scheduleArchiveWorkspaceRefresh(false);
+      }),
+      webClient.on<ArchiveResourceEventPayload>('session.unarchived', () => {
+        scheduleArchiveWorkspaceRefresh(true);
+      }),
+      webClient.on<ArchiveResourceEventPayload>('session.deleted', () => {
+        scheduleArchiveWorkspaceRefresh(false);
+      }),
+      // 项目移除/恢复会连带改变其会话与定时任务的可见性:隐藏时任务被停用并
+      // 从 cron 列表剔除,恢复后重新可见(默认停用),两者都要刷新 cron。
+      webClient.on<ArchiveResourceEventPayload>('project.removed', ({ payload }) => {
+        if (payload.project_id) useWorkspaceStore.getState().hideProjectLocally(payload.project_id);
+        scheduleArchiveWorkspaceRefresh(true);
+      }),
+      webClient.on<ArchiveResourceEventPayload>('project.restored', () => {
+        scheduleArchiveWorkspaceRefresh(true);
+      }),
+      // 用户点"执行"后，后端在 exit_plan_mode 内部已恢复普通模式。这里同步关掉
+      // 本地 Plan 开关，否则下一条消息仍会带 .plan 而重新进入 Plan。
+      webClient.on('plan.mode_exited', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        usePlanStore.getState().setActive(sessionId, false);
+      }),
+      webClient.on('chat.processing_status', ({ payload }) => {
+        if (payload.session_usage) {
+          useSessionStore.getState().receiveSessionTokenUsage(payload.session_usage);
+        }
+        // Organization background rounds own their lifecycle in useOrganizationEvents.
+        // They must not close a concurrent foreground Owner request.
+        if (isTeamOrganizationUiEnabled() && String(payload.source ?? '').startsWith('org_') &&
+          payload.source !== 'org_expert_direct' && payload.team_id) return;
+        // A supplemental request never owns the original execution's lifecycle.
+        if (handleTaskInputReceipt('chat.processing_status', payload)) return;
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        if (shouldDropDuplicatedEvent('chat.processing_status', payload)) return;
+        // 主动推荐来源的 processing_status 不参与会话级状态机：它不该拉起/打断
+        // 用户轮的 processing，更不该触发 setThinking/stopStreaming/taskQueue 自动排空。
+        if (isProactiveRecommendationPayload(payload)) return;
+        // 切换模式时忽略处理状态更新
+        if (useChatStore.getState().getRuntime(sessionId)?.switchingMode) return;
+        // 加载历史消息时忽略处理状态更新
+        if (useChatStore.getState().getRuntime(sessionId)?.isLoadingHistory) return;
+        const isProcessingNow = Boolean(payload.is_processing);
+        // Delayed foreground status must not relight an explicitly stopped Owner.
+        if (isProcessingNow && isOrganizationOwnerStopped(sessionId)) return;
+
+        // 服务器在跨会话执行前先推送带原始问题的 processing=true。把它显式
+        // 追加为一个新 user turn，并关闭可能残留的旧 stream 游标；历史消息本身
+        // 不做替换。稳定 message_id 让重复推送/重连不会生成重复气泡。
+        const crossSession = extractCrossSessionMessage(payload);
+        if (crossSession && isProcessingNow) {
+          const prompt =
+            typeof payload.content === 'string' && payload.content.trim()
+              ? payload.content
+              : crossSession.content || '';
+          ensureCrossSessionUserTurn(
+            sessionId,
+            crossSession,
+            prompt,
+            normalizeEventTimestampIso(payload.timestamp)
+          );
+        }
+
+        // §8 步骤1：Heartbeat 自动触发开始时（processing_status=true 带 metadata.automation），
+        // 用 payload.content upsert 本轮 user 消息（id=heartbeat-user-<run_id>）。
+        // 不走全局 currentStreamId，避免覆盖上一条普通回答。
+        const hbAutomation = extractAutomation(payload);
+        if (hbAutomation && isProcessingNow) {
+          // bug003：触发瞬间后端 claim_run 已推进 next_run_at 并把 job 置 running，
+          // 这里立即派发一次心跳列表刷新（面板没打开时没有 listener，事件本身无副作用），
+          // 让卡片上的「下次触发时间/状态」在本轮执行期间就更新，而不是等本轮结束。
+          // 同一 run 可能收到重复的 processing=true 帧，按 run_id 去重只刷一次。
+          refreshHeartbeatListAtRunStart(
+            heartbeatStartRefreshedRunIdsRef.current,
+            hbAutomation.run_id,
+            sessionId,
+            (heartbeatSessionId) => {
+              window.dispatchEvent(
+                new CustomEvent('heartbeat-list-refresh', { detail: { sessionId: heartbeatSessionId } }),
+              );
+            },
+          );
+          const userMsgId = heartbeatUserMessageId(hbAutomation.run_id);
+          const prompt = typeof payload.content === 'string' ? payload.content : '';
+          const existing = useChatStore.getState().getRuntime(sessionId)?.messages.find((m) => m.id === userMsgId);
+          if (existing) {
+            // 同一 run 重复帧：只在内容非空且发生变化时更新，避免空 content 的重复/延迟帧
+            // 覆盖掉已经正确显示的提示词（§2.1：空 content 不能覆盖此前已经显示的非空提示词）。
+            if (prompt && existing.content !== prompt) {
+              useChatStore.getState().updateMessage(sessionId, userMsgId, { content: prompt });
+            }
+          } else {
+            useChatStore.getState().addMessage(sessionId, {
+              id: userMsgId,
+              role: 'user',
+              content: prompt,
+              timestamp: new Date().toISOString(),
+              automation: hbAutomation,
+            });
+          }
+        }
+
+        // 后端确认 processing=true 时清除本地发送标记——新任务已由后端接管
+        if (isProcessingNow) {
+          localSendPendingRef.current.delete(sessionId);
+        }
+        // 如果 interrupt_result 指示任务已完成，忽略 processing_status=true
+        const interruptResult = useChatStore.getState().getRuntime(sessionId)?.interruptResult;
+        const resumeAlreadyCompleted = isCompletedResumeResult(interruptResult);
+        if (isProcessingNow && resumeAlreadyCompleted) {
+          return;
+        }
+        if (isProcessingNow && useChatStore.getState().getRuntime(sessionId)?.isPaused) {
+          return;
+        }
+        if (!isProcessingNow) {
+          flushPendingStreamDelta(sessionId);
+        }
+        useChatStore.getState().setProcessing(sessionId, isProcessingNow);
+        const sessionPatch: Partial<Session> = {
+          is_processing: isProcessingNow,
+          updated_at: new Date().toISOString(),
+        };
+        updateSession(sessionId, sessionPatch);
+        useWorkspaceStore.getState().patchSession(sessionId, sessionPatch);
+        if (!isProcessingNow) {
+          useChatStore.getState().setThinking(sessionId, false);
+          // 轮次终态兜底：思考段若因「思考后无文本增量/无工具调用」而未关闭，
+          // 会一直挂着「思考中…」；此处统一收口（已关闭时为幂等空操作）。
+          useChatStore.getState().closeReasoning(sessionId, {
+            atMs: eventTimestampMs(payload),
+          });
+          useChatStore.getState().stopStreaming(sessionId);
+          useChatStore.getState().settleHistoricalToolExecutions(sessionId);
+
+          // §8 步骤5：Heartbeat 自动轮结束时，把对应 assistant 消息的 streaming 关掉
+          // （chat.delta 可能因丢帧未收到 final；这里兜底收尾），并静默刷新 Heartbeat
+          // list/get 以同步 run_state。不依赖全局 currentStreamId——Heartbeat 轮不走它。
+          if (hbAutomation) {
+            const assistantMsgId = heartbeatAssistantMessageId(hbAutomation.run_id);
+            useChatStore.getState().updateMessage(sessionId, assistantMsgId, { isStreaming: false });
+            // 静默刷新心跳列表，拉取本轮 run_state（last_run_status/skipped_count 等）
+            window.dispatchEvent(new CustomEvent('heartbeat-list-refresh', { detail: { sessionId } }));
+          }
+
+          // 检查是否有等待的任务队列
+          const currentMode = useSessionStore.getState().getRuntime(sessionId)?.mode;
+          const runtime = useChatStore.getState().getRuntime(sessionId);
+          const taskQueue = runtime?.taskQueue ?? [];
+          const queuePaused = runtime?.queuePaused ?? false;
+          // 如果是本地 sendMessage 触发的打断（如队列"发送"按钮立即发送），
+          // 跳过自动排空——后端即将发送 processing_status=true 启动新任务，
+          // 不应在此刻再发队列首条导致两条消息同时到达后端
+          const skipAutoDrain = localSendPendingRef.current.has(sessionId);
+          if (skipAutoDrain) {
+            localSendPendingRef.current.delete(sessionId);
+          }
+          // 批准计划那一轮刚结束（计划模式已退出）。现在补发执行消息：它以普通
+          // 模式发送，因此会像用户手打的提问一样进对话，并开启全新一轮来执行计划。
+          if (pendingPlanExecuteRef.current.has(sessionId)) {
+            pendingPlanExecuteRef.current.delete(sessionId);
+            sendMessageRef.current?.(t('plan.executePrompt'), sessionId);
+            return;
+          }
+          if (
+            !skipAutoDrain &&
+            currentMode === 'agent' &&
+            !resumeAlreadyCompleted &&
+            !queuePaused &&
+            taskQueue.length > 0
+          ) {
+            // 智能执行/单Agent模式下，自动处理队列中的下一个任务
+            drainTaskQueueIfIdle(sessionId);
+          }
+        }
+      }),
+      webClient.on('chat.symphony_status', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        const content = typeof payload.content === 'string' ? payload.content.trim() : '';
+        if (!content) return;
+        const operationId =
+          typeof payload.operation_id === 'string' && payload.operation_id.trim()
+            ? payload.operation_id.trim()
+            : typeof payload.request_id === 'string' && payload.request_id.trim()
+              ? payload.request_id.trim()
+              : `${Date.now()}`;
+        const messageId = `symphony-status-${operationId}`;
+        const status = typeof payload.status === 'string' ? payload.status : '';
+        const detail = typeof payload.detail === 'string' ? payload.detail.trim() : '';
+        const displayContent =
+          status === 'failed' && detail && !content.includes(detail)
+            ? `${content}\n${detail}`
+            : content;
+        const chatState = useChatStore.getState();
+        const messages = chatState.getRuntime(sessionId)?.messages ?? [];
+        const cachedTarget = symphonyStatusTargetRef.current.get(operationId);
+        const targetMessage = cachedTarget
+          ? messages.find((message) => message.id === cachedTarget.messageId)
+          : [...messages].reverse().find(
+            (message) =>
+              message.role === 'assistant' ||
+              (message.role === 'system' && message.id?.startsWith('team-leader-'))
+          );
+        if (targetMessage) {
+          const target = cachedTarget || {
+            messageId: targetMessage.id,
+            baseContent: targetMessage.content || '',
+          };
+          symphonyStatusTargetRef.current.set(operationId, target);
+          const baseContent = target.baseContent.trimEnd();
+          chatState.updateMessage(sessionId, target.messageId, {
+            content: baseContent ? `${baseContent}\n\n${displayContent}` : displayContent,
+            timestamp: new Date().toISOString(),
+          });
+          return;
+        }
+        const existing = messages.find((message) => message.id === messageId);
+        if (existing) {
+          chatState.updateMessage(sessionId, messageId, {
+            content: displayContent,
+            timestamp: new Date().toISOString(),
+          });
+          return;
+        }
+        chatState.addMessage(sessionId, {
+          id: messageId,
+          role: 'system',
+          content: displayContent,
+          timestamp: new Date().toISOString(),
+        });
+      }),
+      webClient.on('chat.evolution_status', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        if (shouldDropDuplicatedEvent('chat.evolution_status', payload)) return;
+        useChatStore.getState().setEvolutionStatus(sessionId, payload as unknown as EvolutionStatusPayload);
+      }),
+      webClient.on('chat.notice', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        if (shouldDropDuplicatedEvent('chat.notice', payload)) return;
+        const content = pickString(payload.content, payload.message, payload.text);
+        if (!content) return;
+        const noticeType = pickString(payload.notice_type, payload.type) || 'notice';
+        const requestId = getPayloadRequestId(payload) || generateUuidV4();
+        const messageId = `notice-${noticeType}-${requestId}`;
+        const chatState = useChatStore.getState();
+        const existing = chatState.getRuntime(sessionId)?.messages.find((message) => message.id === messageId);
+        if (existing) {
+          chatState.updateMessage(sessionId, messageId, {
+            content,
+            timestamp: normalizeEventTimestampIso(payload.timestamp),
+          });
+          return;
+        }
+        chatState.addMessage(sessionId, {
+          id: messageId,
+          role: 'system',
+          content,
+          timestamp: normalizeEventTimestampIso(payload.timestamp),
+        });
+      }),
+      webClient.on('config.changed', ({ payload }) => {
+        const updatedKeys = Array.isArray(payload?.updated_keys)
+          ? payload.updated_keys.filter((key): key is string => typeof key === 'string')
+          : undefined;
+        onConfigChangedRef.current?.(updatedKeys);
+      }),
+      webClient.on('models.updated', () => {
+        onModelsUpdatedRef.current?.();
+      }),
+      webClient.on('task.global_running', ({ payload }) => {
+        useChatStore.getState().setGlobalTaskRunning(Boolean(payload?.running));
+      }),
+      webClient.on('chat.error', ({ payload }) => {
+        if (handleTaskInputReceipt('chat.error', payload)) return;
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        if (pendingAgentGroupBindingRef.current.has(sessionId)) {
+          void reconcileAgentGroupBinding(sessionId);
+        }
+        if (shouldDropDuplicatedEvent('chat.error', payload)) return;
+        useChatStore.getState().clearMoaStatus(sessionId);
+        useChatStore.getState().setThinking(sessionId, false);
+        // 任何 chat.error 都应解除历史加载态：faas 侧 history.get 流超时
+        // （旧 session runtime 过 TTL 被回收、init 超时）只回发 chat.error
+        // 而非结束帧，若不清 isLoadingHistory 会永久吞掉后续
+        // chat.processing_status(is_processing=false)，表现为「一直加载中」。
+        useChatStore.getState().setLoadingHistory(sessionId, false);
+        const rawErrorMsg =
+          typeof payload.error === 'string' ? payload.error : t('network.unknownError');
+        const errorMsg = describeChatError(payload, rawErrorMsg, t);
+        if (payload.code === 'AGENT_GROUP_NOT_INSTALLED') {
+          const chatStore = useChatStore.getState();
+          chatStore.setAgentGroupUnavailable(sessionId, true);
+          chatStore.setProcessing(sessionId, false);
+          localSendPendingRef.current.delete(sessionId);
+        }
+        // 忽略 "invalid page_idx or session history not found" 错误，因为这是新会话的正常情况
+        if (rawErrorMsg.includes('invalid page_idx or session history not found')) {
+          return;
+        }
+        // 选了免费模型但没登录 / 登录已过期（后端预检 interface_deep._model_config_error，
+        // 或推理时被 APIG 认证器拒绝）：直接把登录框顶到用户面前，错误文案照常进对话。
+        if (payload.code === 'login_required') {
+          requestLogin('login_required');
+        }
+        // §8 步骤4：Heartbeat 轮的 chat.error 按 run_id 去重（id=heartbeat-error-<run_id>），
+        // 并关掉该 run 的 assistant streaming，避免光标永久闪烁。
+        const hbChatErrorAutomation = extractAutomation(payload);
+        if (hbChatErrorAutomation) {
+          const chatStore = useChatStore.getState();
+          const errorId = heartbeatErrorMessageId(hbChatErrorAutomation.run_id);
+          const existing = chatStore.getRuntime(sessionId)?.messages.find((m) => m.id === errorId);
+          if (!existing) {
+            chatStore.addMessage(sessionId, {
+              id: errorId,
+              role: 'system',
+              content: t('network.errorPrefix', { message: errorMsg }),
+              timestamp: new Date().toISOString(),
+              automation: hbChatErrorAutomation,
+            });
+          }
+          chatStore.updateMessage(sessionId, heartbeatAssistantMessageId(hbChatErrorAutomation.run_id), { isStreaming: false });
+          // §2.2 兜底：setThinking 已经在上面统一关过，这里补 setProcessing + 排空队列
+          // （统一走 closeHeartbeatSessionState，按 run_id 去重）。
+          closeHeartbeatSessionState(sessionId, hbChatErrorAutomation.run_id);
+          return;
+        }
+        // 会话预算耗尽提示按会话去重：后端对同一耗尽可能多次广播（终态事件
+        // 重放、新 run 撞同一干账本），重复到达时上面的思考态/历史加载态清理
+        // 已完成，这里直接返回，不再追加提示或触发后续错误通知。
+        const isSessionBudgetExhausted = payload.code === 'SWARMFLOW_SESSION_BUDGET_EXHAUSTED';
+        const sessionBudgetErrorId = `session-budget-exhausted-${sessionId}`;
+        if (
+          isSessionBudgetExhausted &&
+          useChatStore.getState().getRuntime(sessionId)?.messages.some((message) => message.id === sessionBudgetErrorId)
+        ) {
+          return;
+        }
+        useChatStore.getState().setExecutionError(sessionId, errorMsg);
+        onErrorRef.current?.(errorMsg);
+        useChatStore.getState().setSessionError(sessionId, errorMsg);
+        useChatStore.getState().addMessage(sessionId, {
+          id: isSessionBudgetExhausted ? sessionBudgetErrorId : prefixedMessageId('error-'),
+          role: 'system',
+          content: t('network.errorPrefix', { message: errorMsg }),
+          timestamp: new Date().toISOString(),
+        });
+      }),
+      webClient.on('chat.message_updated', ({ payload }) => {
+        // before_chat_request 钩子改写 query/model_name 后的实时回推（issue #2792）。
+        // 事件在请求进入 Agent 前发出，最后一条用户消息即本次发送的气泡；
+        // 改写结果与刷新后从历史拉到的内容一致，原地替换避免闪烁。
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+
+        const updates = payload.updates;
+        if (!isRecord(updates)) return;
+
+        if (typeof updates.query === 'string') {
+          const messages = useChatStore.getState().getRuntime(sessionId)?.messages ?? [];
+          for (let i = messages.length - 1; i >= 0; i -= 1) {
+            if (messages[i].role === 'user') {
+              useChatStore.getState().updateMessage(sessionId, messages[i].id, {
+                content: updates.query,
+                hookRewritten: true,
+              });
+              break;
+            }
+          }
+        }
+
+        const updatedSelection = parseModelSelection(updates.model_selection);
+        if (updatedSelection) {
+          useSessionStore.getState().setSelectedModelSelection(sessionId, updatedSelection);
+        } else if (
+          typeof updates.model_name === 'string' && updates.model_name &&
+          useSessionStore.getState().getRuntime(sessionId)?.selectedModelSelection?.type !== 'model_group'
+        ) {
+          // A resolved group member's execution name is not a new conversation selection.
+          useSessionStore.getState().setSelectedModelName(sessionId, updates.model_name);
+        }
+      }),
+      webClient.on('security.alert', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+
+        const alertMsg =
+          typeof payload.message === 'string'
+            ? payload.message
+            : '安全警告';
+
+        window.dispatchEvent(new CustomEvent('security-alert', {
+          detail: {
+            message: alertMsg,
+            message_id: payload.message_id || '',
+            tool_call_id: payload.tool_call_id || '',
+            alert_type: payload.alert_type || 'security',
+            tool_name: payload.tool_name || '',
+          }
+        }));
+      }),
+      webClient.on('chat.retract', (event: WsEvent) => {
+        const sessionId = resolveEventSessionId(event.payload);
+        if (!sessionId) return;
+
+        const retractMsg =
+          typeof event.payload.message === 'string'
+            ? event.payload.message
+            : '内容已因安全原因撤回';
+
+        const runtime = useChatStore.getState().getRuntime(sessionId);
+        const currentStreamId = runtime?.currentStreamId;
+        const messages = runtime?.messages ?? [];
+
+        // Replace current streaming message first
+        if (currentStreamId) {
+          useChatStore.getState().updateMessage(sessionId, currentStreamId, {
+            content: retractMsg,
+            isStreaming: false,
+          });
+          useChatStore.getState().stopStreaming(sessionId);
+        }
+
+        // Replace ALL assistant messages after the last user message
+        let lastUserIdx = -1;
+        for (let i = messages.length - 1; i >= 0; i -= 1) {
+          if (messages[i].role === 'user') {
+            lastUserIdx = i;
+            break;
+          }
+        }
+        if (lastUserIdx >= 0) {
+          for (let i = lastUserIdx + 1; i < messages.length; i++) {
+            if (messages[i].role === 'assistant') {
+              useChatStore.getState().updateMessage(sessionId, messages[i].id, { content: retractMsg });
+            }
+          }
+        } else {
+          for (const msg of messages) {
+            if (msg.role === 'assistant') {
+              useChatStore.getState().updateMessage(sessionId, msg.id, { content: retractMsg });
+            }
+          }
+        }
+
+        useChatStore.getState().setProcessing(sessionId, false);
+        useChatStore.getState().setThinking(sessionId, false);
+        if (shouldClearPermissionQuestionsForLifecycleEvent('retract')) {
+          useChatStore.getState().clearPermissionQuestions(sessionId);
+        }
+        activeRequestIdRef.current = undefined;
+
+        const retractRequestId = typeof event.payload.request_id === 'string' ? event.payload.request_id : undefined;
+        useChatStore.getState().clearCurrentTurnData(sessionId, retractRequestId);
+      }),
+      webClient.on('chat.interrupt_result', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        if (shouldDropDuplicatedEvent('chat.interrupt_result', payload)) return;
+        // 切换模式时忽略中断结果
+        if (useChatStore.getState().getRuntime(sessionId)?.switchingMode) return;
+        flushPendingStreamDelta(sessionId);
+        const resultPayload = payload as unknown as InterruptResultPayload;
+        useChatStore.getState().setInterruptResult(sessionId, resultPayload);
+        // has_active_task 为 false 表示没有活跃任务（任务已完成）
+        const hasActiveTask = resultPayload.has_active_task !== false;
+
+        if (resultPayload.intent === 'pause') {
+          if (resultPayload.success) {
+            useChatStore.getState().setPaused(
+              sessionId,
+              hasActiveTask,
+              hasActiveTask ? resultPayload.paused_task : undefined,
+            );
+            useChatStore.getState().setProcessing(sessionId, false);
+            useChatStore.getState().setThinking(sessionId, false);
+            // 暂停时生成已被掐断，思考段收不到后续 delta/final 兜底：这里显式收尾，
+            // 让「思考中」冻结为已完成；恢复后新到的 reasoning 会另起一段。
+            useChatStore.getState().closeReasoning(sessionId);
+            const sessionPatch: Partial<Session> = {
+              is_processing: false,
+              updated_at: new Date().toISOString(),
+            };
+            updateSession(sessionId, sessionPatch);
+            useWorkspaceStore.getState().patchSession(sessionId, sessionPatch);
+            // 集群模式下输入框的"停止"按钮走的是 pause（不是 cancel，见 App.tsx
+            // handleCancel：mode==='team' 时调用 pause）。team-leader 消息的
+            // isStreaming 不经过 currentStreamId 收尾，这里同 cancel 分支一样显式
+            // 关闭还在 streaming 的 team-leader 消息，避免光标永久闪烁（bug001）。
+            closeActiveTeamLeaderMessages(sessionId);
+          }
+        } else if (resultPayload.intent === 'resume') {
+          if (resultPayload.success) {
+            setOrganizationOwnerStopped(sessionId, false);
+            // 直接设置所有状态值
+            if (hasActiveTask) {
+              useChatStore.getState().setPaused(sessionId, false);
+              useChatStore.getState().setProcessing(sessionId, true);
+              useChatStore.getState().setThinking(sessionId, true);
+            } else {
+              useChatStore.getState().setPaused(sessionId, false);
+              useChatStore.getState().setProcessing(sessionId, false);
+              useChatStore.getState().setThinking(sessionId, false);
+              // 任务已完成时，检查并触发队列中的下一个任务
+              const currentMode = useSessionStore.getState().getRuntime(sessionId)?.mode;
+              const runtime = useChatStore.getState().getRuntime(sessionId);
+              const taskQueue = runtime?.taskQueue ?? [];
+              const queuePaused = runtime?.queuePaused ?? false;
+              if (currentMode === 'agent' && !queuePaused && taskQueue.length > 0) {
+                drainTaskQueueIfIdle(sessionId);
+              }
+            }
+          }
+        } else if (resultPayload.intent === 'cancel') {
+          if (shouldClearPermissionQuestionsForLifecycleEvent('cancel', resultPayload.success)) {
+            useChatStore.getState().clearPermissionQuestions(sessionId);
+          }
+          useChatStore.getState().setPaused(sessionId, false);
+          useChatStore.getState().setProcessing(sessionId, false);
+          useChatStore.getState().setThinking(sessionId, false);
+          // 取消后本轮已死，收不到任何收尾事件：显式冻结思考段，
+          // 否则它会一直挂着「思考中」，且在下一条用户消息入列时被整段丢弃。
+          useChatStore.getState().closeReasoning(sessionId);
+          // chat.interrupt_result 是一元响应，跟流式分片的 goal_intermediate 判断走的是完全
+          // 独立的通道——不依赖后端把"目标已清除/暂停后这一轮该不该被当成中间态"判断对，
+          // 用户主动点了停止/删除就该让当前气泡收尾，不再等一个可能被误判、永远不会来的
+          // 真正 chat.final。
+          useChatStore.getState().stopStreaming(sessionId);
+          // 集群模式下 team-leader 消息的 isStreaming 不经过 currentStreamId 收尾，
+          // stopStreaming 对它无效；取消后本该到来的 chat.final 也不会再来兜底，
+          // 这里显式收尾，避免 team-leader 气泡的光标永久闪烁（bug001）。
+          closeActiveTeamLeaderMessages(sessionId);
+        } else if (resultPayload.intent === 'supplement') {
+          if (shouldClearPermissionQuestionsForLifecycleEvent('supplement', resultPayload.success)) {
+            useChatStore.getState().clearPermissionQuestions(sessionId);
+          }
+          useChatStore.getState().setPaused(sessionId, false);
+        }
+      }),
+      webClient.on('chat.subtask_update', ({ payload }) => {
+        useSessionStore.getState().receiveSessionTokenUsage((payload as { session_usage?: unknown }).session_usage);
+        const event = normalizeSubagentStatusEvent(payload);
+        if (!event) return;
+        let pendingAssignment = pendingSubagentAssignmentRef.current.get(event.subagent.subagent_id);
+        if (pendingAssignment?.sessionId !== event.session_id) {
+          if (pendingAssignment) pendingSubagentAssignmentRef.current.delete(event.subagent.subagent_id);
+          pendingAssignment = undefined;
+        }
+        if (!event.subagent.task_description.trim() && !pendingAssignment) {
+          const matchingIndex = pendingSubagentSpawnQueriesRef.current.findIndex(item =>
+            item.sessionId === event.session_id && item.displayName === event.subagent.display_name,
+          );
+          const fallbackIndex = matchingIndex >= 0
+            ? matchingIndex
+            : pendingSubagentSpawnQueriesRef.current.findIndex(item => item.sessionId === event.session_id);
+          if (fallbackIndex >= 0) {
+            const queued = pendingSubagentSpawnQueriesRef.current.splice(fallbackIndex, 1)[0];
+            pendingAssignment = { sessionId: event.session_id, query: queued.query };
+            pendingSubagentAssignmentRef.current.set(event.subagent.subagent_id, pendingAssignment);
+          }
+        } else if (event.subagent.task_description.trim()) {
+          const matchingIndex = pendingSubagentSpawnQueriesRef.current.findIndex(item =>
+            item.sessionId === event.session_id
+              && (item.displayName === event.subagent.display_name || item.query === event.subagent.task_description),
+          );
+          if (matchingIndex >= 0) pendingSubagentSpawnQueriesRef.current.splice(matchingIndex, 1);
+        }
+        useSubagentStore.getState().applyEvent(event.session_id, event);
+        if (pendingAssignment && !event.subagent.task_description.trim()) {
+          useSubagentStore.getState().applyToolStatus(
+            event.session_id,
+            event.subagent.subagent_id,
+            event.subagent.status,
+            event.subagent.updated_at,
+            pendingAssignment.query,
+            pendingAssignment.taskId,
+          );
+        }
+        if (pendingAssignment) {
+          pendingSubagentAssignmentRef.current.delete(event.subagent.subagent_id);
+        }
+      }),
+      webClient.on('chat.subagent_activity', ({ payload }) => {
+        const event = normalizeSubagentActivityEvent(payload);
+        if (!event) return;
+        useSubagentStore.getState().applyEvent(event.session_id, event);
+        const runtime = useSubagentStore.getState().getRuntime(event.session_id);
+        let pendingAssignment = pendingSubagentAssignmentRef.current.get(event.activity.subagent_id);
+        if (pendingAssignment?.sessionId !== event.session_id) {
+          if (pendingAssignment) pendingSubagentAssignmentRef.current.delete(event.activity.subagent_id);
+          pendingAssignment = undefined;
+        }
+        if (!pendingAssignment) {
+          const queuedIndex = pendingSubagentSpawnQueriesRef.current.findIndex(item => item.sessionId === event.session_id);
+          if (queuedIndex >= 0) {
+            const queued = pendingSubagentSpawnQueriesRef.current.splice(queuedIndex, 1)[0];
+            pendingAssignment = { sessionId: event.session_id, query: queued.query };
+          }
+        }
+        const taskDescription = pendingAssignment?.query
+          ?? runtime?.subagentsById[event.activity.subagent_id]?.task_description
+          ?? '';
+        if (taskDescription.trim()) {
+          useSubagentStore.getState().applyTurn(
+            event.session_id,
+            event.activity.subagent_id,
+            event.activity.task_id,
+            taskDescription,
+            event.activity.at_ms,
+          );
+        }
+        if (pendingAssignment) {
+          pendingSubagentAssignmentRef.current.delete(event.activity.subagent_id);
+        }
+      }),
+      webClient.on('video.search.confirmation_closed', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        const data = payload as Record<string, unknown>;
+        const store = useChatStore.getState();
+        for (const question of store.getRuntime(sessionId)?.pendingQuestions ?? []) {
+          if (question.duplexJobId === data.duplex_job_id && question.request_id === data.request_id) {
+            store.consumePendingQuestion(sessionId, question);
+          }
+        }
+      }),
+      webClient.on('chat.ask_user_question', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        const questionPayload = payload as Record<string, unknown>;
+        const evolutionMeta =
+          questionPayload.evolution_meta && typeof questionPayload.evolution_meta === 'object'
+            ? (questionPayload.evolution_meta as Record<string, unknown>)
+            : questionPayload._evolution_meta && typeof questionPayload._evolution_meta === 'object'
+              ? (questionPayload._evolution_meta as Record<string, unknown>)
+              : undefined;
+        const questions = Array.isArray(questionPayload.questions) ? questionPayload.questions : [];
+        const approvalSchema =
+          typeof questionPayload.approval_schema === 'string'
+            ? questionPayload.approval_schema
+            : undefined;
+        const planApprovalKind =
+          typeof questionPayload.plan_approval_kind === 'string'
+            ? questionPayload.plan_approval_kind
+            : undefined;
+        const planContent =
+          typeof questionPayload.plan_content === 'string'
+            ? questionPayload.plan_content
+            : undefined;
+        const planLanguage =
+          questionPayload.plan_language === 'cn' || questionPayload.plan_language === 'en'
+            ? questionPayload.plan_language
+            : undefined;
+        const normalizedPayload: AskUserQuestionPayload = {
+          request_id: typeof questionPayload.request_id === 'string' ? questionPayload.request_id : '',
+          source: typeof questionPayload.source === 'string' ? questionPayload.source : undefined,
+          questions,
+          ...(typeof questionPayload.duplex_job_id === 'string'
+            ? { duplexJobId: questionPayload.duplex_job_id } : {}),
+          ...(approvalSchema ? { approvalSchema } : {}),
+          ...(evolutionMeta ? { evolutionMeta } : {}),
+          ...(planApprovalKind ? { planApprovalKind } : {}),
+          ...(planContent !== undefined ? { planContent } : {}),
+          ...(planLanguage ? { planLanguage } : {}),
+          ...(questionPayload.swarmflow_meta && typeof questionPayload.swarmflow_meta === 'object'
+            ? { swarmflowMeta: questionPayload.swarmflow_meta as AskUserQuestionPayload['swarmflowMeta'] }
+            : {}),
+        };
+        // 计划正文走对话气泡，不再塞进审批卡片：审批栏只保留「执行」和
+        // 「改进意见 + 下一步/跳过」。修订后再次提交会是新的 request_id，
+        // 所以每一版计划都会留下自己的气泡。
+        if (
+          planApprovalKind === 'plan_approval'
+          && planContent
+          && normalizedPayload.request_id
+          && !planBubbleRequestIdsRef.current.has(normalizedPayload.request_id)
+        ) {
+          planBubbleRequestIdsRef.current.add(normalizedPayload.request_id);
+          useChatStore.getState().addMessage(sessionId, {
+            id: `plan-${normalizedPayload.request_id}`,
+            role: 'assistant',
+            content: planContent,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        useChatStore.getState().enqueuePendingQuestion(sessionId, normalizedPayload);
+      }),
+      webClient.on('a4p.authorization_request', ({ payload }) => {
+        const requestPayload = payload as Record<string, unknown>;
+        const sessionId = resolveEventSessionId(requestPayload);
+        if (!sessionId) return;
+        const requestId =
+          typeof requestPayload.requestId === 'string'
+            ? requestPayload.requestId
+            : typeof requestPayload.request_id === 'string'
+              ? requestPayload.request_id
+              : '';
+        const mandate = requestPayload.mandate;
+        const signingOptions = requestPayload.signingOptions;
+        if (
+          !requestId
+          || !mandate
+          || typeof mandate !== 'object'
+          || Array.isArray(mandate)
+          || !signingOptions
+          || typeof signingOptions !== 'object'
+          || Array.isArray(signingOptions)
+        ) {
+          return;
+        }
+        const uiContext =
+          requestPayload.uiContext && typeof requestPayload.uiContext === 'object'
+            ? requestPayload.uiContext as Record<string, unknown>
+            : {};
+        useChatStore.getState().setPendingA4PAuthorization(sessionId, {
+          requestId,
+          originalActions: Array.isArray(requestPayload.originalActions)
+            ? requestPayload.originalActions as Record<string, unknown>[] : undefined,
+          preparedActionIndexes: Array.isArray(requestPayload.preparedActionIndexes)
+            ? requestPayload.preparedActionIndexes as number[] : undefined,
+          replacesRequestId: typeof requestPayload.replacesRequestId === 'string'
+            ? requestPayload.replacesRequestId : undefined,
+          repreparing: requestPayload.repreparing === true,
+          kind: typeof requestPayload.kind === 'string' ? requestPayload.kind : 'intent',
+          mandate: mandate as Record<string, unknown>,
+          signingOptions: signingOptions as Record<string, unknown>,
+          uiContext,
+          sessionId: getPayloadSessionId(requestPayload),
+        });
+      }),
+      webClient.on('a4p.authorization_terminated', ({ payload }) => {
+        const requestPayload = payload as Record<string, unknown>;
+        const sessionId = resolveEventSessionId(requestPayload);
+        if (!sessionId) return;
+        const requestId =
+          typeof requestPayload.requestId === 'string'
+            ? requestPayload.requestId
+            : typeof requestPayload.request_id === 'string'
+              ? requestPayload.request_id
+              : '';
+        if (requestId) {
+          const store = useChatStore.getState();
+          store.setPendingA4PAuthorization(sessionId, null, requestId);
+          // A termination can overtake the replacement push; retire its predecessor too.
+          if (typeof requestPayload.replacesRequestId === 'string') {
+            store.setPendingA4PAuthorization(sessionId, null, requestPayload.replacesRequestId);
+          }
+        }
+      }),
+      // 同时监听 session_result 事件，以处理后端可能发送的不同格式
+      webClient.on('session_result', ({ payload }) => {
+        applySessionResult(payload);
+      }),
+      webClient.on('chat.session_result', ({ payload }) => {
+        if (shouldDropDuplicatedEvent('chat.session_result', payload)) {
+          return;
+        }
+        applySessionResult(payload);
+      }),
+      webClient.on('team.event', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        if (shouldDropDuplicatedEvent('team.event', payload)) {
+          return;
+        }
+        clearThinkingForVisibleOutput(sessionId);
+        useChatStore.getState().addMessage(sessionId, {
+          id: prefixedMessageId('team-event-'),
+          role: 'system',
+          content: `team.event:${JSON.stringify(payload)}`,
+          timestamp: new Date().toISOString(),
+        });
+      }),
+      webClient.on('team.message', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        if (shouldDropDuplicatedEvent('team.message', payload)) {
+          return;
+        }
+        clearThinkingForVisibleOutput(sessionId);
+        useChatStore.getState().addMessage(sessionId, {
+          id: prefixedMessageId('team-message-'),
+          role: 'system',
+          content: `team.event:${JSON.stringify(payload)}`,
+          timestamp: new Date().toISOString(),
+        });
+      }),
+      // ── SwarmFlow: workflow.updated → 增量合并到 workflowRuns（树视图渲染）──
+      webClient.on('workflow.updated', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        const p = payload as { workflow?: unknown; event?: { workflow?: unknown } };
+        const workflow = (p.workflow ?? p.event?.workflow) as
+          | import('../components/teamArea/workflowTypes').WorkflowRun
+          | undefined;
+        if (workflow && typeof workflow === 'object' && workflow.id) {
+          useSessionStore.getState().applyWorkflowUpdate(sessionId, workflow);
+          // swarmflow 提问弹窗跟随节点状态，而非只等用户回答：human 超时
+          // （AGENT_FAILED → 节点 failed）、run 终态时，弹窗若不清会永久残留。
+          const swarmflowQuestions = (useChatStore.getState().getRuntime(sessionId)?.pendingQuestions ?? [])
+            .filter((question) => question.swarmflowMeta?.run_id === workflow.id);
+          if (swarmflowQuestions.length) {
+            const run = useSessionStore.getState().getRuntime(sessionId)?.workflowRuns
+              .find((item) => item.id === workflow.id);
+            const isTerminal = workflow.status === 'completed'
+              || workflow.status === 'failed'
+              || workflow.status === 'stopped';
+            const agents = run?.phases?.flatMap((phase) => phase.agents ?? []) ?? [];
+            swarmflowQuestions.forEach((question) => {
+              const node = agents.find((agent) => agent.correlation_id === question.swarmflowMeta?.correlation_id);
+              if (isTerminal || node?.status !== 'waiting_for_human') {
+                useChatStore.getState().consumePendingQuestion(sessionId, question);
+              }
+            });
+          }
+        }
+      }),
+
+      webClient.on('team.task', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        if (shouldDropDuplicatedEvent('team.task', payload)) {
+          return;
+        }
+        clearThinkingForVisibleOutput(sessionId);
+        const p = payload as { payload?: { event?: unknown }; event?: unknown };
+        const event = p.payload?.event || p.event;
+        if (event) {
+          const e = event as {
+            type?: string;
+            team_id?: string;
+            task_id?: string;
+            status?: string;
+            timestamp?: number;
+            member_id?: string;
+            assignee?: string;
+            team_name?: string;
+            title?: string;
+            name?: string;
+            description?: string;
+            content?: string;
+            updated_at?: number | string | null;
+            workflow_run_id?: string;
+          };
+          const memberId = e.assignee || e.member_id;
+          if (memberId && e.status && isRunningTeamTaskStatus(e.status)) {
+            clearPendingTeamConnectionMember(sessionId, memberId);
+            useSessionStore.getState().clearTeamConnectionPresentation(sessionId, memberId);
+          }
+          if (e.type === 'team.task.created' && e.task_id) {
+            useSessionStore.getState().registerConfirmedTeamTaskCreation(sessionId, e.task_id);
+          }
+          useSessionStore.getState().addTeamTaskEvent(sessionId, {
+            id: `task-${Date.now()}`,
+            type: e.type || '',
+            team_id: e.team_id || '',
+            task_id: e.task_id || '',
+            status: e.status || '',
+            timestamp: e.timestamp || Date.now(),
+            member_id: e.member_id,
+            assignee: e.assignee,
+            team_name: e.team_name,
+            title: e.title || e.name || e.description,
+            content: e.content,
+            updated_at: e.updated_at,
+            workflow_run_id: e.workflow_run_id,
+          });
+          const normalizedTask = normalizeTaskEvent(event);
+          if (normalizedTask) {
+            useSessionStore.getState().upsertTeamTask(sessionId, normalizedTask);
+          }
+        }
+      }),
+      webClient.on('team.member', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        if (shouldDropDuplicatedEvent('team.member', payload)) {
+          return;
+        }
+        const p = payload as { payload?: { event?: unknown }; event?: unknown };
+        const event = p.payload?.event || p.event;
+        if (event) {
+          const e = event as {
+            type?: string;
+            member_id?: string;
+            status?: string;
+            new_status?: string;
+            timestamp?: number;
+            name?: string;
+            execution_status?: string | null;
+            mode?: string;
+            role?: string;
+            cli_agent?: string | null;
+            workflow_run_id?: string;
+            agent_template?: string | null;
+            display_name?: string | null;
+            target_status?: string;
+          };
+          if (e.member_id) markTeamConnectionStateChanged(sessionId, e.member_id);
+          if (e.member_id && (e.status || e.new_status || e.execution_status)) {
+            clearPendingTeamConnectionMember(sessionId, e.member_id);
+            useSessionStore.getState().clearTeamConnectionPresentation(sessionId, e.member_id);
+          }
+          const activeSessionId = getPayloadSessionId(payload) || undefined;
+          upsertHumanShareCommandFromEvent(payload, e);
+          if (e.type === 'team.member.shutdown' && e.member_id) {
+            // 休眠退场同样发 shutdown 事件，但成员仍在名册上、被点名即可唤醒；
+            // 只有终态为 shut_down（或旧后端不带 target_status）时才移出名册，
+            // 休眠成员随后由 status_changed → dormant 更新状态。
+            if (e.target_status !== 'dormant') {
+              applyTeamMemberShutdown(e.member_id, activeSessionId);
+            }
+          } else if (e.type === 'team.member.status_changed' && e.member_id && e.new_status) {
+            useSessionStore.getState().updateTeamMemberStatus(
+              sessionId,
+              e.member_id,
+              e.new_status,
+              e.timestamp
+            );
+          } else if (e.type === 'team.member.execution_changed' && e.member_id) {
+            const existingMember = useSessionStore.getState().getRuntime(sessionId)?.teamMembers.some(
+              (member) => member.member_id === e.member_id
+            );
+            if (existingMember) {
+              useSessionStore.getState().addTeamMember(sessionId, {
+                id: `member-${Date.now()}`,
+                member_id: e.member_id,
+                status: e.status || '',
+                timestamp: e.timestamp || Date.now(),
+                name: e.name,
+                execution_status: e.execution_status || e.new_status,
+                mode: e.mode,
+                workflow_run_id: e.workflow_run_id,
+              });
+            }
+          } else if (
+            !e.type ||
+            e.type === 'team.member.spawned' ||
+            e.type === 'team.member.restarted' ||
+            // 成员刚建好还没被拉起（status=unstarted）。后端在 leader 建人后主动
+            // 补广播这条，否则成员在被消息唤醒前对前端完全不存在——而"能 @ 到"
+            // 正是唤醒它的手段（运行时会先 auto_start 再投递）。
+            e.type === 'team.member.registered'
+          ) {
+            useSessionStore.getState().addTeamMember(sessionId, {
+              id: `member-${Date.now()}`,
+              member_id: e.member_id || '',
+              status: e.status || '',
+              timestamp: e.timestamp || Date.now(),
+              name: e.name,
+              execution_status: e.execution_status,
+              mode: e.mode,
+              role: e.role,
+              cli_agent: e.cli_agent,
+              workflow_run_id: e.workflow_run_id,
+              agent_template: e.agent_template,
+              display_name: e.display_name,
+            });
+          }
+        }
+      }),
+      webClient.on('chat.usage_summary', ({ payload }) => {
+        console.log('[usage_summary] received:', payload);
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) {
+          console.log('[usage_summary] filtered by session check');
+          return;
+        }
+        if (payload.session_usage) {
+          useSessionStore.getState().receiveSessionTokenUsage(payload.session_usage);
+        }
+        const usage = payload.usage as UsageSummary | undefined;
+        if (!usage) {
+          console.log('[usage_summary] no usage field in payload');
+          return;
+        }
+        const runtime = useChatStore.getState().getRuntime(sessionId);
+        const currentStreamId = runtime?.currentStreamId;
+        const messages = runtime?.messages ?? [];
+        let targetId = currentStreamId;
+        if (!targetId) {
+          for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i].role === 'assistant') {
+              targetId = messages[i].id;
+              break;
+            }
+          }
+        }
+        console.log('[usage_summary] targetId:', targetId, 'usage:', usage);
+        if (targetId) {
+          useChatStore.getState().setUsageSummary(sessionId, targetId, usage);
+        }
+      }),
+      webClient.on('harness.message', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        const content = typeof payload.content === 'string' ? payload.content : '';
+        const stage = typeof payload.stage === 'string' ? payload.stage : undefined;
+
+        useHarnessStore.getState().addHarnessMessage(sessionId, content, stage);
+
+        // Pipeline start message contains stages array: { content, pipeline, stages: [{slot, display_name}] }
+        const rawStages = payload.stages;
+        if (Array.isArray(rawStages) && rawStages.length > 0) {
+          const stages: { slot: string; display_name: string }[] = [];
+          for (const s of rawStages) {
+            if (typeof s === 'object' && s !== null) {
+              const obj = s as Record<string, unknown>;
+              const slot = typeof obj.slot === 'string' ? obj.slot : '';
+              const displayName = typeof obj.display_name === 'string' ? obj.display_name : '';
+              if (slot) stages.push({ slot, display_name: displayName || slot });
+            }
+          }
+          if (stages.length > 0) useHarnessStore.getState().setStageDefinitions(sessionId, stages);
+        }
+
+        // Mark stage as running (skip pipeline start message which has stages array)
+        if (stage && !rawStages) {
+          const existingStage = useHarnessStore.getState().getRuntime(sessionId)?.stageResults.find(s => s.stage === stage);
+          if (existingStage?.status !== 'running') {
+            useHarnessStore.getState().updateStageResult(sessionId, { stage, status: 'running', messages: [], metrics: {} });
+          }
+        }
+
+        useChatStore.getState().addMessage(sessionId, {
+          id: prefixedMessageId('harness-msg-'),
+          role: 'system',
+          content,
+          timestamp: new Date().toISOString(),
+          isHarnessMessage: true,
+        });
+      }),
+      webClient.on('harness.stage_result', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        const stage = typeof payload.stage === 'string' ? payload.stage : '';
+        const status = typeof payload.status === 'string' ? payload.status : 'success';
+        const error = typeof payload.error === 'string' ? payload.error : undefined;
+        const messages = Array.isArray(payload.messages) ? payload.messages.filter((m) => typeof m === 'string') : [];
+        const metrics = typeof payload.metrics === 'object' && payload.metrics !== null && !Array.isArray(payload.metrics)
+          ? payload.metrics as Record<string, unknown>
+          : {};
+        const scope = typeof payload.scope === 'string' ? payload.scope : '';
+        const extensionName = typeof payload.extension_name === 'string' ? payload.extension_name : '';
+        const extensionStage = typeof payload.extension_stage === 'string' ? payload.extension_stage : '';
+        const parentStage = typeof payload.parent_stage === 'string' ? payload.parent_stage : '';
+        const taskId = typeof payload.task_id === 'string' ? payload.task_id : undefined;
+        if (scope === 'extension' && extensionName) {
+          useHarnessStore.getState().updateExtensionProgress(sessionId, {
+            extensionName,
+            taskId,
+            parentStage: parentStage || stage,
+            extensionStage,
+            status: status as 'running' | 'success' | 'failed' | 'timeout' | 'pending' | 'waiting' | 'skipped' | 'rejected',
+            error,
+            messages,
+          });
+        }
+        if (stage) {
+          useHarnessStore.getState().updateStageResult(sessionId, {
+            stage,
+            status: status as 'running' | 'success' | 'failed' | 'timeout' | 'pending',
+            error,
+            messages,
+            metrics,
+          });
+          if (status === 'failed' && error) {
+            useChatStore.getState().addMessage(sessionId, {
+              id: prefixedMessageId('harness-error-'),
+              role: 'system',
+              content: `Stage ${stage} failed: ${error}`,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        } else {
+          console.warn('[harness.stage_result] No stage field in payload, skipping update');
+        }
+      }),
+      webClient.on('harness.extension_ready', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        const extensionName = typeof payload.extension_name === 'string' ? payload.extension_name : '';
+        const runtimePath = typeof payload.runtime_path === 'string' ? payload.runtime_path : '';
+        const sessionRuntimePath = typeof payload.session_runtime_path === 'string' ? payload.session_runtime_path : runtimePath;
+        const extensionRuntimePath = typeof payload.extension_runtime_path === 'string' ? payload.extension_runtime_path : '';
+        const configPath = typeof payload.config_path === 'string' ? payload.config_path : '';
+        const runtimeExtensions = Array.isArray(payload.runtime_extensions)
+          ? payload.runtime_extensions
+              .filter((item) => typeof item === 'object' && item !== null)
+              .map((item) => {
+                const obj = item as Record<string, unknown>;
+                return {
+                  extensionName: typeof obj.extension_name === 'string' ? obj.extension_name : '',
+                  runtimePath: typeof obj.runtime_path === 'string' ? obj.runtime_path : '',
+                  configPath: typeof obj.config_path === 'string' ? obj.config_path : '',
+                };
+              })
+              .filter((item) => item.extensionName && item.runtimePath)
+          : [];
+        const verifyReport = typeof payload.verify_report === 'object' && payload.verify_report !== null && !Array.isArray(payload.verify_report)
+          ? payload.verify_report as Record<string, unknown>
+          : {};
+        const componentsSummary = typeof payload.components_summary === 'object' && payload.components_summary !== null && !Array.isArray(payload.components_summary)
+          ? payload.components_summary as Record<string, unknown>
+          : {};
+
+        useHarnessStore.getState().setExtensionReady(sessionId, {
+          extensionName,
+          runtimePath,
+          sessionRuntimePath,
+          extensionRuntimePath,
+          configPath,
+          runtimeExtensions,
+          verifyReport,
+          componentsSummary,
+        });
+      }),
+      webClient.on('harness.activate_interaction', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        const interactionId = typeof payload.interaction_id === 'string' ? payload.interaction_id : '';
+        const extensionName = typeof payload.extension_name === 'string' ? payload.extension_name : '';
+        const runtimePath = typeof payload.runtime_path === 'string' ? payload.runtime_path : '';
+        const options: string[] = Array.isArray(payload.options) ? payload.options : ['accept', 'reject'];
+
+        useHarnessStore.getState().setActivateInteraction(sessionId, {
+          interactionId,
+          extensionName,
+          runtimePath,
+          options,
+          pending: true,
+        });
+        useChatStore.getState().enqueuePendingQuestion(sessionId, {
+          request_id: interactionId,
+          source: 'activate_confirm',
+          questions: [{
+            header: '扩展激活确认',
+            question: `是否激活扩展 **${extensionName}**？`,
+            options: options.map((opt: string) => ({
+              label: opt === 'accept' ? '激活' : opt === 'reject' ? '拒绝' : opt,
+              description: '',
+            })),
+          }],
+        });
+      }),
+      webClient.on('harness.session_finished', ({ payload }) => {
+        const sessionId = resolveEventSessionId(payload);
+        if (!sessionId) return;
+        flushPendingStreamDelta(sessionId);
+        useChatStore.getState().setExecutionError(sessionId, null);
+        useChatStore.getState().setProcessing(sessionId, false);
+        useChatStore.getState().setThinking(sessionId, false);
+        useHarnessStore.getState().setHarnessRunning(sessionId, false);
+      }),
+    ];
+
+    return () => {
+      streamDeltaBatcherRef.current?.flushAll();
+      if (archiveRefreshTimer !== null) window.clearTimeout(archiveRefreshTimer);
+      unsubs.forEach((fn) => fn());
+    };
+  }, [
+    appendTeamMemberOutputDelta,
+    closeHeartbeatSessionState,
+    drainTaskQueueIfIdle,
+    isProactiveRecommendationPayload,
+    clearPendingTeamConnectionMember,
+    clearPendingTeamMemberContextCompressionStart,
+    clearTeamMemberContextCompressionStatus,
+    markTeamConnectionStateChanged,
+    findExistingTeamMemberId,
+    finishContextCompressionTurn,
+    flushPendingStreamDelta,
+    handleConnectionAck,
+    handleContextCompressionState,
+    handleTeamMemberContextCompressionState,
+    handleTtsPlayback,
+    receiveContextUsage,
+    clearThinkingForVisibleOutput,
+    findActiveTeamLeaderMessage,
+    closeActiveTeamLeaderMessages,
+    reconcileAgentGroupBinding,
+    updateSession,
+    resolveEventSessionId,
+    backfillOptimisticBubbleTimestamp,
+    shouldDropDuplicatedEvent,
+    t,
+    takeTeamMemberOutputEventId,
+  ]);
+
+  useEffect(() => {
+    const connectOptions: WebConnectOptions = {
+      provider,
+      apiKey,
+      apiBase,
+      model,
+      projectDir,
+    };
+    const nextSignature = getConnectSignature(connectOptions);
+    const previousSignature = lastConnectSignatureRef.current;
+    const state = webClient.getState();
+
+    if (nextSignature === previousSignature && state !== 'closed') {
+      return;
+    }
+
+    lastConnectSignatureRef.current = nextSignature;
+
+    const runConnect = async () => {
+      try {
+        if (previousSignature && previousSignature !== nextSignature && state !== 'closed') {
+          await webClient.disconnect('connect options changed');
+        }
+        await webClient.connect(connectOptions);
+      } catch (error) {
+        const webError = error as WebError;
+        onErrorRef.current?.(webError.message || 'WebSocket connection error');
+      }
+    };
+
+    void runConnect();
+  }, [
+    apiBase,
+    apiKey,
+    model,
+    projectDir,
+    provider,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      streamDeltaBatcherRef.current?.flushAll();
+      lastConnectSignatureRef.current = '';
+      clearPendingSubagentCorrelations();
+      pendingAgentGroupBindingRef.current.forEach(({ timer }) => window.clearTimeout(timer));
+      pendingAgentGroupBindingRef.current.clear();
+      groupBindingReconcileRef.current.clear();
+      reconcileAgentGroupBindingRef.current = null;
+      webClient.disconnect();
+      setConnected(false);
+    };
+  }, [
+    setConnected,
+    clearPendingSubagentCorrelations,
+  ]);
+
+  useEffect(() => {
+    const connectOptions: WebConnectOptions = {
+      provider,
+      apiKey,
+      apiBase,
+      model,
+      projectDir,
+    };
+    const reconnectByDebugToggle = () => {
+      void webClient.disconnect('debug mode toggled').then(() => {
+        void webClient.connect(connectOptions).catch((error) => {
+          const webError = error as WebError;
+          onErrorRef.current?.(webError.message || 'WebSocket reconnect error');
+        });
+      });
+    };
+    window.addEventListener(WS_RECONNECT_EVENT, reconnectByDebugToggle);
+    return () => {
+      window.removeEventListener(WS_RECONNECT_EVENT, reconnectByDebugToggle);
+    };
+  }, [apiBase, apiKey, model, projectDir, provider]);
+
+  useEffect(() => {
+    const unsub = webClient.onStateChange((state) => {
+      setConnectionState(state);
+      const connected = state === 'ready';
+      setIsConnected(connected);
+      setConnected(connected);
+      if (!connected) {
+        const chatStore = useChatStore.getState();
+        for (const sessionId of Object.keys(chatStore.runtimes)) {
+          chatStore.clearMoaStatus(sessionId);
+        }
+      }
+      if (connected && teamConnectionGraceTimerRef.current) {
+        const pending = teamConnectionGraceTimerRef.current;
+        if (pending.timerId !== null) window.clearTimeout(pending.timerId);
+        teamConnectionGraceTimerRef.current = null;
+        for (const sessionId of pending.affectedSessionIds) {
+          void reconcileTeamMembersFromSnapshot(sessionId);
+        }
+      }
+      if (state === 'reconnecting' && wasConnectedRef.current && !teamConnectionGraceTimerRef.current) {
+        const pending = {
+          timerId: null as number | null,
+          capturedBySession: new Map<string, TeamConnectionPresentation>(),
+          affectedSessionIds: new Set<string>(),
+          graceElapsed: false,
+        };
+        teamConnectionGraceTimerRef.current = pending;
+        for (const [sessionId, runtime] of Object.entries(useSessionStore.getState().runtimes)) {
+          if (runtime.mode === 'team') captureTeamConnectionForSession(sessionId);
+        }
+        const activeSessionId = activeSessionIdRef.current;
+        if (activeSessionId) captureTeamConnectionForSession(activeSessionId);
+
+        pending.timerId = window.setTimeout(() => {
+          if (teamConnectionGraceTimerRef.current !== pending) return;
+          pending.timerId = null;
+          const currentConnectionState = webClient.getState();
+          if (currentConnectionState !== 'reconnecting' && currentConnectionState !== 'connecting') {
+            teamConnectionGraceTimerRef.current = null;
+            return;
+          }
+          pending.graceElapsed = true;
+          for (const [sessionId, captured] of pending.capturedBySession) {
+            const currentRuntime = useSessionStore.getState().getRuntime(sessionId);
+            if (currentRuntime?.mode !== 'team') continue;
+            const presentation = retainRunningTeamConnectionPresentation(captured, currentRuntime.teamMembers);
+            if (presentation) {
+              useSessionStore.getState().setTeamConnectionPresentation(sessionId, presentation);
+            }
+          }
+        }, TEAM_CONNECTION_GRACE_MS);
+      }
+      if (!connected && (state === 'reconnecting' || state === 'closed')) {
+        streamDeltaBatcherRef.current?.flushAll();
+        clearPendingSubagentCorrelations();
+        onDisconnectRef.current?.();
+      }
+      // 断线恢复（false -> true 跳变）：真实环境联调方案 B.8——对"曾经查到过目标"的会话主动
+      // get 一次，把 GoalBar 从 disconnected 收敛回真实状态。只挑非 completed 的目标查，
+      // completed 不需要（也不参与下面的 1 分钟无更新巡检）。
+      if (connected && !wasConnectedRef.current) {
+        const runtimes = useGoalStore.getState().runtimes;
+        for (const [sid, runtime] of Object.entries(runtimes)) {
+          if (!runtime.goal || runtime.goal.status === 'completed') continue;
+          const goalMode = useSessionStore.getState().getRuntime(sid)?.mode ?? 'agent';
+          void performGoalGet(sid, goalMode, goalCompletedHideTimerRef.current, lastGoalEventAtRef.current, lastGoalGetAttemptAtRef.current);
+        }
+        const reconcile = reconcileAgentGroupBindingRef.current;
+        if (reconcile) {
+          for (const sessionId of Array.from(pendingAgentGroupBindingRef.current.keys())) {
+            const pending = pendingAgentGroupBindingRef.current.get(sessionId);
+            if (!pending) continue;
+            clearPendingAgentGroupBinding(sessionId);
+            void reconcile(sessionId).finally(() => {
+              const runtime = useSessionStore.getState().getRuntime(sessionId);
+              if (
+                runtime?.agentGroupBinding === pending.id ||
+                runtime?.agentGroupBindingPending !== pending.id
+              ) return;
+              if (useChatStore.getState().getRuntime(sessionId)?.isProcessing) {
+                markPendingAgentGroupBinding(sessionId, pending.id);
+              } else {
+                useSessionStore.getState().setAgentGroupBindingPending(sessionId, null);
+              }
+            });
+          }
+        }
+      }
+      wasConnectedRef.current = connected;
+    });
+    return () => {
+      const pending = teamConnectionGraceTimerRef.current;
+      if (pending) {
+        if (pending.timerId !== null) window.clearTimeout(pending.timerId);
+        teamConnectionGraceTimerRef.current = null;
+      }
+      unsub();
+    };
+  }, [
+    captureTeamConnectionForSession,
+    clearPendingAgentGroupBinding,
+    clearPendingSubagentCorrelations,
+    markPendingAgentGroupBinding,
+    reconcileTeamMembersFromSnapshot,
+    setConnected,
+  ]);
+
+  useEffect(() => {
+    // 真实环境联调方案 9c：未完成目标超过 1 分钟没收到新的 goal.snapshot/goal.updated 事件，
+    // 主动 get 一次兜底，避免长时间静默期间前端展示的状态跟后端实际状态脱节。用一个共享轮询
+    // 巡检所有 session，而不是给每个 session 单独起 setTimeout——避免目标频繁切换 session 时
+    // 需要额外维护一堆定时器的生命周期。
+    //
+    // unknown 态用不同的判断依据：lastGoalEventAtRef 只在成功时更新，一直失败的话这个时间戳
+    // 永远不动，会导致每 15s 巡检都判定"超过 60s 未更新"、无限重触发 performGoalGet 自己的
+    // 3 连击重试——变成每 15s 打一轮 3 连击轰炸一个已知连不上的后端。已经 unknown 的 session
+    // 改用 lastGoalGetAttemptAtRef（记录"最近一次尝试"，不管成败）+ 更长的退避间隔，直到某次
+    // get 成功、queryStatus 收敛回 'ok'，才会自动切回上面 60s 节奏的正常巡检。
+    const timer = window.setInterval(() => {
+      if (webClient.getState() !== 'ready') return;
+      const runtimes = useGoalStore.getState().runtimes;
+      const now = Date.now();
+      for (const [sid, runtime] of Object.entries(runtimes)) {
+        if (!runtime.goal || runtime.goal.status === 'completed') continue;
+        if (runtime.queryStatus === 'unknown') {
+          const lastAttempt = lastGoalGetAttemptAtRef.current.get(sid) ?? 0;
+          if (now - lastAttempt < GOAL_UNKNOWN_RETRY_INTERVAL_MS) continue;
+        } else {
+          const lastAt = lastGoalEventAtRef.current.get(sid) ?? 0;
+          if (now - lastAt < GOAL_STALE_REFRESH_MS) continue;
+        }
+        const goalMode = useSessionStore.getState().getRuntime(sid)?.mode ?? 'agent';
+        void performGoalGet(sid, goalMode, goalCompletedHideTimerRef.current, lastGoalEventAtRef.current, lastGoalGetAttemptAtRef.current);
+      }
+    }, GOAL_STALE_REFRESH_CHECK_INTERVAL_MS);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    const markAllRuntimes = () => {
+      const runtimes = useChatStore.getState().runtimes;
+      for (const sid of Object.keys(runtimes)) {
+        // 历史回放期间不要把旧 tool_call 误标 timeout，等 settleHistorical 先按结果落终态
+        if (runtimes[sid]?.isLoadingHistory) {
+          continue;
+        }
+        useChatStore.getState().markTimedOutExecutions(sid);
+      }
+    };
+    markAllRuntimes();
+    const timer = window.setInterval(markAllRuntimes, 1000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  return {
+    isConnected,
+    connectionState,
+    request,
+    persistMedia,
+    persistDocuments,
+    discardMedia,
+    sendMessage,
+    sendStructuredChatContent,
+    interrupt,
+    pause,
+    cancel,
+    supplement,
+    resume,
+    switchMode,
+    disconnect,
+    sendUserAnswer,
+    respondActivate,
+    setGoalObjective,
+    pauseGoal,
+    resumeGoal,
+    clearGoal,
+    refreshGoal,
+    drainTaskQueueIfIdle,
+  };
+}

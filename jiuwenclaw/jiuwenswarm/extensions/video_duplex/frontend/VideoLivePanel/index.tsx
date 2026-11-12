@@ -1,0 +1,1661 @@
+import { APPROVAL_SOURCES, TASK_ACCEPTED_INSTRUCTIONS, type ApprovalInteraction } from './taskPrompts';
+import { informationInteraction } from './taskInteraction';
+import { toast } from '../../../../channels/web/frontend/src/components/ui/Toast/toastStore';
+import {
+  ChangeEvent,
+  FormEvent,
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from 'react';
+import {
+  Camera,
+  CheckCircle2,
+  ChevronDown,
+  Circle,
+  FileVideo,
+  LoaderCircle,
+  Mic,
+  Monitor,
+  Search,
+  Send,
+  Square,
+  Video,
+  X,
+  XCircle,
+} from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { webClient, webRequest } from '../../../../channels/web/frontend/src/services/webClient';
+import { createRealtimeDuplexSession, RealtimeDuplexSession } from './qwenOmniSession';
+import { isVideoSourceReady, RealtimeVideoFrameScheduler, waitForFirstVideoFrame } from './videoSource';
+import { JoyAIProvider } from './joyaiProvider';
+import { captureVideoFrame, FrameEncoder } from './frameEncoding';
+import { setDuplexVoicePhase } from '../duplexAudioMeter';
+import { describeDuplexError } from '../duplexErrorMessage';
+import { reportedRuntimeState } from './runtimeState';
+import {
+  mergeSearchProgressJob,
+  searchAwareToolStatus,
+  searchProgressOptionLabel,
+  selectSearchProgressJob,
+} from './searchPresentation';
+import {
+  AgentAction,
+  ChatContextItem,
+  SearchJobPayload,
+  SearchProgressJob,
+  SearchJobState,
+  VideoSessionConfig,
+} from './types';
+import './VideoLivePanel.css';
+
+type VideoSource = 'camera' | 'file' | 'screen' | null;
+interface CapturedFrame {
+  data_url: string;
+  source_id: string;
+}
+
+interface ScreenSource {
+  id: string;
+  name: string;
+  stream: MediaStream;
+}
+
+const FRAME_INTERVAL_MS = 500;
+const MAX_FRAMES = 6;
+const MAX_SCREENS = 4;
+const SCREEN_PREVIEW_FRAME_RATE = 30;
+
+function cleanAssistantText(text: string): string {
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<\/?think>/gi, '')
+    .trim();
+}
+
+function isUsefulTranscript(text: string): boolean {
+  return text.replace(/[^\p{L}\p{N}]/gu, '').length >= 2;
+}
+
+export interface VideoLivePanelHandle {
+  startScreenDuplex: (searchSessionId?: string, shareScreen?: boolean) => Promise<boolean>;
+  stop: () => void;
+  setMicrophoneMuted: (muted: boolean) => void;
+  setSpeakerMuted: (muted: boolean) => void;
+  stopScreenSharing: () => void;
+  startScreenSharing: () => Promise<void>;
+  deliverToolResult: (payload: SearchJobPayload) => void;
+  deliverQuestion: (payload: SearchJobPayload) => void;
+  /** A typed-chat approval card in this conversation; it has no job, so job_id is "". */
+  deliverChatApproval: (interaction: { request_id: string; state: string; source?: string; questions?: unknown[] }) => void;
+  deliverTaskInteraction: (payload: SearchJobPayload) => void;
+}
+
+interface VideoLivePanelProps {
+  headless?: boolean;
+  onConversationItem?: (role: 'user' | 'assistant', text: string, presentation?: 'tool_result') => void;
+  onAssistantStream?: (update: { streamId: string; content: string; final: boolean }) => void;
+  onRuntimeState?: (state: 'idle' | 'starting' | 'active') => void;
+  onError?: (message: string) => void;
+  onScreenSharingChange?: (sharing: boolean) => void;
+  onCoreAgentProgress?: (event: 'started' | 'progress' | 'completed' | 'failed', payload: SearchJobPayload) => void;
+}
+
+export const SCREEN_SHARE_UNSUPPORTED_NOTICE = '当前环境不支持屏幕共享，已仅开启语音';
+export const SCREEN_SHARE_NO_PERMISSION_NOTICE =
+  '没有屏幕录制权限，已仅开启语音。请在“系统设置 > 隐私与安全性 > 屏幕与系统录音”中允许本应用后重试';
+export const SCREEN_PICKER_TIMEOUT_ERROR = '系统选屏框 60 秒内未选择屏幕，已自动关闭';
+// WebKit closes its system picker after 60 s and rejects with NotAllowedError,
+// the same error as a user cancel; elapsed time is the only difference.
+const SCREEN_PICKER_TIMEOUT_MS = 55_000;
+
+/** The macOS desktop shell sets this to false when WKWebView has no screen picker (macOS < 14). */
+function isDesktopScreenCaptureUnavailable(): boolean {
+  return (window as { __JIUWEN_DESKTOP_SCREEN_CAPTURE__?: boolean }).__JIUWEN_DESKTOP_SCREEN_CAPTURE__ === false;
+}
+
+/** Chromium/Electron reject with "Permission denied by system" when macOS screen recording is off. */
+function isScreenCaptureDeniedBySystem(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'NotAllowedError' && /system/i.test(error.message);
+}
+
+function isScreenCaptureUnsupported(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === 'NotSupportedError') return true;
+  const name = (error as { name?: unknown } | null)?.name;
+  const message = (error as { message?: unknown } | null)?.message;
+  return name === 'NotSupportedError' || (typeof message === 'string' && /not supported/i.test(message));
+}
+
+export const VideoLivePanel = forwardRef<VideoLivePanelHandle, VideoLivePanelProps>(function VideoLivePanel(
+  { headless = false, onConversationItem, onAssistantStream, onRuntimeState, onError, onCoreAgentProgress, onScreenSharingChange },
+  ref,
+) {
+  const { t } = useTranslation();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const chatHistoryRef = useRef<HTMLDivElement>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const screenStreamsRef = useRef<Map<string, MediaStream>>(new Map());
+  const screenVideoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
+  const fileUrlRef = useRef<string | null>(null);
+  const framesRef = useRef<CapturedFrame[]>([]);
+  const duplexRef = useRef<RealtimeDuplexSession | null>(null);
+  const joyaiProviderRef = useRef<JoyAIProvider | null>(null);
+  // Approval cards forwarded by the task runtime. The runtime binds the conversation and sends its
+  // open cards before the JoyAI provider exists, so they are kept here and handed over once it does.
+  const approvalCardsRef = useRef(new Map<string, { jobId: string; interaction: ApprovalInteraction }>());
+  const startingRealtimeRef = useRef<Promise<void> | null>(null);
+  const chatSequenceRef = useRef(0);
+  const pendingTranscriptionsRef = useRef(0);
+  const deferredAssistantAnswersRef = useRef<string[]>([]);
+  const searchSessionRef = useRef('');
+  const conversationSearchSessionRef = useRef('');
+  const mediaGenerationRef = useRef(0);
+  const mediaToolCallIdsRef = useRef(new Set<string>());
+  const mediaTaskIdsRef = useRef(new Set<string>());
+  const renewingRealtimeRef = useRef(false);
+  const renewalResultsRef = useRef(new Map<string, SearchJobPayload>());
+  const latestUserInstructionRef = useRef({ text: '', turnId: '' });
+  const searchJobsRef = useRef<Map<string, SearchJobState>>(new Map());
+  const pollingSearchJobsRef = useRef<Set<string>>(new Set());
+  const pendingScreenAutostartRef = useRef(false);
+  const wasDuplexRunningRef = useRef(false);
+  const restartRealtimeRef = useRef<() => Promise<void>>(async () => {});
+  const microphoneMutedRef = useRef(false);
+  const speakerMutedRef = useRef(false);
+
+  const [source, setSource] = useState<VideoSource>(null);
+  const [sourceName, setSourceName] = useState('');
+  const [screens, setScreens] = useState<ScreenSource[]>([]);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [frameCount, setFrameCount] = useState(0);
+  const [question, setQuestion] = useState('');
+  const [chatHistory, setChatHistory] = useState<ChatContextItem[]>([]);
+  const [streamingAnswer, setStreamingAnswer] = useState('');
+  const [error, setError] = useState('');
+  const [toolStatus, setToolStatus] = useState('');
+  const [model, setModel] = useState(() => t('videoLive.modelFallback'));
+  const [isRecording, setIsRecording] = useState(false);
+  const [isAwaitingVoiceTranscript, setIsAwaitingVoiceTranscript] = useState(false);
+  const [realtimeStatus, setRealtimeStatus] = useState('');
+  const [isRealtimeStarting, setIsRealtimeStarting] = useState(false);
+  const [searchProgressJobs, setSearchProgressJobs] = useState<SearchProgressJob[]>([]);
+  const [selectedSearchJobId, setSelectedSearchJobId] = useState('');
+  const [isSearchProgressExpanded, setIsSearchProgressExpanded] = useState(false);
+  const reportRealtimeEvent = (event: string, details: Record<string, unknown> = {}) => {
+    void webRequest(
+      'video.realtime.telemetry',
+      {
+        event,
+        client_time: new Date().toISOString(),
+        search_session_id: searchSessionRef.current,
+        ...details,
+      },
+      { timeoutMs: 5_000 },
+    ).catch(() => undefined);
+  };
+
+  const setSearchStatus = (status: string) => {
+    setToolStatus(searchAwareToolStatus(status, searchJobsRef.current.values()));
+  };
+
+  const updateSearchProgress = (payload: SearchJobPayload) => {
+    setSearchProgressJobs((jobs) => mergeSearchProgressJob(jobs, payload));
+  };
+
+  const stopModelTransport = (renewing = false) => {
+    renewingRealtimeRef.current = renewing;
+    if (!renewing) renewalResultsRef.current.clear();
+    mediaGenerationRef.current += 1;
+    startingRealtimeRef.current = null;
+    mediaToolCallIdsRef.current.clear();
+    if (!renewing) mediaTaskIdsRef.current.clear();
+    duplexRef.current?.stop();
+    duplexRef.current = null;
+    joyaiProviderRef.current?.stop();
+    joyaiProviderRef.current = null;
+    if (!renewing) approvalCardsRef.current.clear();
+    if (!renewing) {
+      microphoneMutedRef.current = false;
+      speakerMutedRef.current = false;
+    }
+  };
+
+  const resetVisualContext = () => {
+    chatSequenceRef.current = 0;
+    pendingTranscriptionsRef.current = 0;
+    deferredAssistantAnswersRef.current = [];
+    searchSessionRef.current = '';
+    latestUserInstructionRef.current = { text: '', turnId: '' };
+    searchJobsRef.current.clear();
+    pollingSearchJobsRef.current.clear();
+    if (!headless) {
+      setChatHistory([]);
+      setStreamingAnswer('');
+      setToolStatus('');
+      setSearchProgressJobs([]);
+      setSelectedSearchJobId('');
+      setIsSearchProgressExpanded(false);
+    }
+  };
+
+  const appendChat = (role: ChatContextItem['role'], text: string, presentation?: 'tool_result') => {
+    const normalized = text.trim();
+    if (!normalized) return;
+    if (!headless) {
+      const item = { id: ++chatSequenceRef.current, role, text: normalized, presentation };
+      setChatHistory((current) => [...current, item]);
+    }
+    if (role === 'user' || role === 'assistant') onConversationItem?.(role, normalized, presentation);
+  };
+
+  const commitAssistantAnswer = (text: string, toolJobId?: string) => {
+    const normalized = cleanAssistantText(text);
+    if (!normalized) return;
+    if (!headless) setStreamingAnswer('');
+    setIsAwaitingVoiceTranscript(false);
+    if (pendingTranscriptionsRef.current > 0) {
+      deferredAssistantAnswersRef.current.push(normalized);
+    } else {
+      appendChat('assistant', normalized);
+    }
+    if (toolJobId) {
+      searchJobsRef.current.delete(toolJobId);
+      setSearchStatus('');
+    }
+  };
+
+  const flushDeferredAssistantAnswers = () => {
+    const deferred = deferredAssistantAnswersRef.current;
+    deferredAssistantAnswersRef.current = [];
+    deferred.forEach((text) => appendChat('assistant', text));
+  };
+
+  const rememberSearchJob = (job: AgentAction['search_job'], fallbackTurnId = '', currentMedia = true) => {
+    const id = job?.id?.trim();
+    if (!id) return;
+    if (headless) {
+      onCoreAgentProgress?.('started', {
+        ...job,
+        job_id: id,
+        status: job?.status === 'queued' ? 'queued' : 'running',
+      });
+    }
+    if (!currentMedia || !searchSessionRef.current || job?.search_session_id !== searchSessionRef.current) return;
+    const existing = searchJobsRef.current.get(id);
+    if (existing?.status === 'queued' || existing?.status === 'failed') return;
+    searchJobsRef.current.set(id, {
+      id,
+      searchSessionId: job?.search_session_id?.trim() || searchSessionRef.current,
+      turnId: job?.turn_id?.trim() || fallbackTurnId || existing?.turnId,
+      question: job?.question?.trim() || '',
+      query: job?.query?.trim() || '',
+      status: existing?.status === 'running' ? 'running' : job?.status === 'queued' ? 'waiting' : 'running',
+      toolCallId: job?.tool_call_id?.trim() || existing?.toolCallId,
+    });
+    setSearchStatus('');
+  };
+
+  const getJoyAIProvider = (replyLanguage?: VideoSessionConfig['reply_language']): JoyAIProvider => {
+    const callbacks = {
+      getLatestFrameDataUrl: () => framesRef.current.at(-1)?.data_url || '',
+      getFrameCount: () => framesRef.current.length,
+      getSearchSessionId: () => searchSessionRef.current,
+      hasPendingTranscriptions: () => pendingTranscriptionsRef.current > 0,
+      beginTranscription: () => {
+        pendingTranscriptionsRef.current += 1;
+        setIsAwaitingVoiceTranscript(true);
+      },
+      finishTranscription: () => {
+        pendingTranscriptionsRef.current = Math.max(0, pendingTranscriptionsRef.current - 1);
+        if (pendingTranscriptionsRef.current === 0) {
+          setIsAwaitingVoiceTranscript(false);
+          flushDeferredAssistantAnswers();
+        }
+      },
+      appendChat,
+      commitAssistantAnswer: (text: string, toolJobId?: string) => {
+        commitAssistantAnswer(text, toolJobId);
+      },
+      rememberSearchJob: (job: AgentAction['search_job'], currentMedia = true) => {
+        rememberSearchJob(job, '', currentMedia);
+      },
+      setAwaitingVoiceTranscript: setIsAwaitingVoiceTranscript,
+      setError,
+      setToolStatus: setSearchStatus,
+      setRecording: setIsRecording,
+      setStatus: setRealtimeStatus,
+      setStarting: setIsRealtimeStarting,
+      report: reportRealtimeEvent,
+    };
+    if (!joyaiProviderRef.current) {
+      joyaiProviderRef.current = new JoyAIProvider(callbacks, replyLanguage);
+      for (const card of approvalCardsRef.current.values())
+        joyaiProviderRef.current.enqueueQuestion(card.jobId, card.interaction);
+    } else {
+      joyaiProviderRef.current.updateCallbacks(callbacks);
+      if (replyLanguage) joyaiProviderRef.current.setPreferredLanguage(replyLanguage);
+    }
+    return joyaiProviderRef.current;
+  };
+
+  const coreReceiptTokenRef = useRef('');
+
+  const handleFinalRealtimeUserText = (text: string) => {
+    const transcript = text.trim();
+    if (!isUsefulTranscript(transcript)) return;
+    const turnId = crypto.randomUUID();
+    latestUserInstructionRef.current = { text: transcript, turnId };
+    appendChat('user', transcript);
+    reportRealtimeEvent('qwen_user_instruction_captured', {
+      question: transcript,
+      source: 'voice',
+      turn_id: turnId,
+    });
+  };
+
+  const acceptCompletedSearch = (payload: SearchJobPayload) => {
+    if (!payload.job_id || payload.search_session_id !== searchSessionRef.current) return;
+    const existing = searchJobsRef.current.get(payload.job_id);
+    if (existing?.status === 'queued' || existing?.status === 'failed') {
+      reportRealtimeEvent('search_result_duplicate_ignored', {
+        job_id: payload.job_id,
+        search_session_id: payload.search_session_id || '',
+      });
+      return;
+    }
+    const result = payload.display_result?.trim() || payload.result?.trim() || '';
+    const question = payload.question?.trim() || existing?.question || '';
+    reportRealtimeEvent('search_result_received', {
+      job_id: payload.job_id,
+      search_session_id: payload.search_session_id || '',
+      question,
+      query: payload.query?.trim() || existing?.query || '',
+      result,
+    });
+    if (!result || !question) {
+      reportRealtimeEvent('search_result_queue_failed', {
+        job_id: payload.job_id,
+        message: !result ? 'empty search result' : 'missing original question',
+      });
+      return;
+    }
+    const callId = payload.tool_call_id?.trim() || existing?.toolCallId;
+    const turnId = payload.turn_id?.trim() || existing?.turnId;
+    const realtimeBrief = payload.realtime_brief;
+    if (!realtimeBrief?.summary?.trim()) {
+      reportRealtimeEvent('search_result_queue_failed', {
+        job_id: payload.job_id,
+        message: 'missing Core voice receipt',
+      });
+      return;
+    }
+    if (!headless) appendChat('assistant', result, 'tool_result');
+    const queued =
+      joyaiProviderRef.current?.handleCompletedSearch(payload, realtimeBrief, existing) ||
+      duplexRef.current?.enqueueToolResult({
+        jobId: payload.job_id,
+        ...(turnId ? { turnId } : {}),
+        question,
+        brief: realtimeBrief,
+        ...(callId && mediaToolCallIdsRef.current.has(callId) ? { callId } : {}),
+      }) ||
+      false;
+    searchJobsRef.current.set(payload.job_id, {
+      id: payload.job_id,
+      searchSessionId: payload.search_session_id || existing?.searchSessionId || '',
+      turnId,
+      question,
+      query: payload.query?.trim() || existing?.query || '',
+      // The authoritative result is already visible; polling must not display it again.
+      status: 'queued',
+      toolCallId: callId,
+    });
+    if (queued) {
+      setSearchStatus(`${payload.engine || 'Jiuwen Core Agent'}完成，摘要已加入播报队列…`);
+    } else {
+      reportRealtimeEvent('search_result_queue_failed', {
+        job_id: payload.job_id,
+        message: duplexRef.current ? 'tool result rejected' : 'realtime session unavailable',
+      });
+      setSearchStatus('');
+    }
+  };
+
+  const acceptFailedSearch = (payload: SearchJobPayload) => {
+    if (!payload.job_id || payload.search_session_id !== searchSessionRef.current) return;
+    const existing = searchJobsRef.current.get(payload.job_id);
+    if (existing?.status === 'failed') return;
+    const question = payload.question?.trim() || existing?.question || '';
+    const callId = payload.tool_call_id?.trim() || existing?.toolCallId;
+    const turnId = payload.turn_id?.trim() || existing?.turnId;
+    const error = payload.error?.trim() || 'Jiuwen Core Agent failed';
+    const failureText = describeDuplexError(error, 'task');
+    if (!headless) appendChat('assistant', failureText, 'tool_result');
+    if (callId) {
+      duplexRef.current?.enqueueToolResult({
+        jobId: payload.job_id,
+        ...(turnId ? { turnId } : {}),
+        question: question || '此前委托任务',
+        brief: {
+          status: 'failed',
+          result_kind: 'generic',
+          summary: '任务处理失败，错误信息已经显示在界面中。',
+          displayed_in_ui: true,
+          response_mode: 'acknowledge',
+          source: 'derived',
+        },
+        ...(mediaToolCallIdsRef.current.has(callId) ? { callId } : {}),
+      });
+    }
+    searchJobsRef.current.set(payload.job_id, {
+      id: payload.job_id,
+      searchSessionId: payload.search_session_id || existing?.searchSessionId || '',
+      turnId,
+      question,
+      query: payload.query?.trim() || existing?.query || '',
+      status: 'failed',
+      toolCallId: callId,
+    });
+    setSearchStatus(`${payload.engine || '九问搜索 Agent'}失败：${error}`);
+  };
+
+  // JoyAI answers approval cards by voice only (information forms stay on screen), like Qwen's enqueueQuestion.
+  const deliverJoyAIApproval = (jobId: string, interaction: ApprovalInteraction) => {
+    const cards = approvalCardsRef.current;
+    if (interaction.state !== 'pending') {
+      for (const [key, card] of cards) if (card.jobId === jobId) cards.delete(key);
+    } else if (interaction.source && APPROVAL_SOURCES.has(interaction.source)) {
+      cards.set(`${jobId}:${interaction.id || interaction.request_id}`, { jobId, interaction });
+    }
+    joyaiProviderRef.current?.enqueueQuestion(jobId, interaction);
+  };
+
+  const deliverTaskInteraction = (payload: SearchJobPayload) => {
+    if (!searchSessionRef.current || payload.search_session_id !== searchSessionRef.current || !payload.job_id) return;
+    const interaction = informationInteraction(payload);
+    if (payload.replay && interaction?.state === 'pending') return;
+    if (interaction) duplexRef.current?.enqueueQuestion(payload.job_id, interaction);
+  };
+
+  useEffect(() => {
+    // In task mode the conversation runtime owns subscriptions, polling and result display.
+    if (headless) return;
+    const belongsToCurrentSession = (payload: SearchJobPayload) =>
+      Boolean(searchSessionRef.current) && payload.search_session_id === searchSessionRef.current;
+    const unsubscribeStarted = webClient.on<SearchJobPayload>('video.search.started', ({ payload }) => {
+      if (!belongsToCurrentSession(payload) || !payload.job_id) return;
+      updateSearchProgress(payload);
+      onCoreAgentProgress?.('started', payload);
+      searchJobsRef.current.set(payload.job_id, {
+        id: payload.job_id,
+        searchSessionId: payload.search_session_id || searchSessionRef.current,
+        turnId: payload.turn_id?.trim(),
+        question: payload.question?.trim() || '',
+        query: payload.query?.trim() || '',
+        status: payload.status === 'queued' ? 'waiting' : 'running',
+        toolCallId: payload.tool_call_id?.trim(),
+      });
+      setSearchStatus('');
+    });
+    const unsubscribeProgress = webClient.on<SearchJobPayload>('video.search.progress', ({ payload }) => {
+      if (!belongsToCurrentSession(payload)) return;
+      deliverTaskInteraction(payload);
+      updateSearchProgress(payload);
+      onCoreAgentProgress?.('progress', payload);
+      const job = payload.job_id ? searchJobsRef.current.get(payload.job_id) : undefined;
+      if (job?.status === 'waiting' && payload.status === 'running') job.status = 'running';
+    });
+    const unsubscribeCompleted = webClient.on<SearchJobPayload>('video.search.completed', ({ payload }) => {
+      if (!belongsToCurrentSession(payload)) return;
+      updateSearchProgress(payload);
+      onCoreAgentProgress?.('completed', payload);
+      acceptCompletedSearch(payload);
+    });
+    const unsubscribeCancelled = webClient.on<SearchJobPayload>('video.search.cancelled', ({ payload }) => {
+      if (!belongsToCurrentSession(payload) || !payload.job_id || !payload.tool_call_id) return;
+      duplexRef.current?.cancelToolTask(payload.job_id, payload.tool_call_id);
+      searchJobsRef.current.delete(payload.job_id);
+    });
+    const unsubscribeFailed = webClient.on<SearchJobPayload>('video.search.failed', ({ payload }) => {
+      if (!belongsToCurrentSession(payload)) return;
+      updateSearchProgress(payload);
+      onCoreAgentProgress?.('failed', payload);
+      acceptFailedSearch(payload);
+    });
+    const pollTimer = window.setInterval(() => {
+      searchJobsRef.current.forEach((job) => {
+        if (!['running', 'waiting'].includes(job.status) || pollingSearchJobsRef.current.has(job.id)) return;
+        pollingSearchJobsRef.current.add(job.id);
+        void webRequest<SearchJobPayload>(
+          'video.search.status',
+          {
+            job_id: job.id,
+            search_session_id: job.searchSessionId,
+          },
+          { timeoutMs: 5_000 },
+        )
+          .then((payload) => {
+            updateSearchProgress(payload);
+            if (payload.status === 'queued' || payload.status === 'running') {
+              onCoreAgentProgress?.('progress', payload);
+            }
+            if (payload.status === 'completed') {
+              onCoreAgentProgress?.('completed', payload);
+              acceptCompletedSearch(payload);
+            }
+            if (payload.status === 'failed') {
+              onCoreAgentProgress?.('failed', payload);
+              acceptFailedSearch(payload);
+            }
+          })
+          .catch(() => undefined)
+          .finally(() => pollingSearchJobsRef.current.delete(job.id));
+      });
+    }, 1_000);
+    return () => {
+      unsubscribeStarted();
+      unsubscribeProgress();
+      unsubscribeCompleted();
+      unsubscribeFailed();
+      unsubscribeCancelled();
+      window.clearInterval(pollTimer);
+    };
+  }, [headless, onCoreAgentProgress]);
+
+  const coreReceiptsActive = isRecording || renewingRealtimeRef.current;
+
+  // Subscribe to ordinary text/background Core replies only for this media run.
+  // Delegated tasks keep their existing TaskService receipt path.
+  useEffect(() => {
+    const scope = searchSessionRef.current;
+    if (!coreReceiptsActive || !scope.startsWith('task-duplex:')) return;
+    const token = crypto.randomUUID();
+    coreReceiptTokenRef.current = token;
+    let stopped = false;
+    const subscribe = (action: 'start' | 'renew' | 'stop') => webRequest('video.core.subscribe', {
+      search_session_id: scope, token, action,
+    });
+    const off = webClient.on<SearchJobPayload & { subscription_token?: string }>('video.core.result', ({ payload }) => {
+      if (stopped || coreReceiptTokenRef.current !== token || payload.subscription_token !== token) return;
+      if (payload.search_session_id !== searchSessionRef.current) return;
+      if (renewingRealtimeRef.current && payload.job_id) {
+        renewalResultsRef.current.set(payload.job_id, payload);
+        return;
+      }
+      acceptCompletedSearch(payload);
+    });
+    void subscribe('start').catch((error) => {
+      if (!stopped) setError(error instanceof Error ? error.message : String(error));
+    });
+    const timer = window.setInterval(() => {
+      void subscribe('renew').catch((error) => console.warn('Core receipt subscription renewal failed:', error));
+    }, 20_000);
+    return () => {
+      stopped = true;
+      if (coreReceiptTokenRef.current === token) coreReceiptTokenRef.current = '';
+      off();
+      window.clearInterval(timer);
+      void subscribe('stop').catch(() => undefined);
+    };
+  }, [coreReceiptsActive]);
+
+  useEffect(() => {
+    const history = chatHistoryRef.current;
+    if (history) history.scrollTop = history.scrollHeight;
+  }, [chatHistory, streamingAnswer]);
+
+  const releaseSource = useCallback(() => {
+    cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    cameraStreamRef.current = null;
+    if (fileUrlRef.current) {
+      URL.revokeObjectURL(fileUrlRef.current);
+      fileUrlRef.current = null;
+    }
+    const video = videoRef.current;
+    if (video) {
+      video.pause();
+      video.srcObject = null;
+      video.removeAttribute('src');
+      video.load();
+    }
+    framesRef.current = [];
+    setFrameCount(0);
+    setIsPlaying(false);
+  }, []);
+
+  const releaseScreens = useCallback((updateState = true) => {
+    screenStreamsRef.current.forEach((stream) => {
+      stream.getTracks().forEach((track) => track.stop());
+    });
+    screenStreamsRef.current.clear();
+    screenVideoRefs.current.clear();
+    if (updateState) setScreens([]);
+  }, []);
+
+  const resetSource = () => {
+    stopModelTransport();
+    setIsRecording(false);
+    releaseScreens();
+    releaseSource();
+    setSource(null);
+    setSourceName('');
+    resetVisualContext();
+    setError('');
+  };
+
+  const closeSource = resetSource;
+
+  useEffect(
+    () => () => {
+      stopModelTransport();
+      releaseScreens(false);
+      releaseSource();
+    },
+    [releaseScreens, releaseSource],
+  );
+
+  useEffect(() => {
+    if (!isPlaying) return;
+
+    let cancelled = false;
+    let captureInFlight = false;
+
+    const frameEncoder = new FrameEncoder();
+
+    const captureVideo = async (video: HTMLVideoElement, sourceId: string): Promise<CapturedFrame | null> => {
+      const canvas = canvasRef.current;
+      if (!canvas) return null;
+      const frame = await captureVideoFrame(frameEncoder, video, canvas, sourceId, () => cancelled);
+      if (!frame) return null;
+      return {
+        data_url: frame.dataUrl,
+        source_id: sourceId,
+      };
+    };
+
+    const capture = async () => {
+      if (captureInFlight || cancelled) return;
+      captureInFlight = true;
+      const captured: CapturedFrame[] = [];
+      try {
+        if (source === 'screen') {
+          for (const screen of screens) {
+            if (cancelled) break;
+            const video = screenVideoRefs.current.get(screen.id);
+            if (!video) continue;
+            const frame = await captureVideo(video, screen.id);
+            if (frame) captured.push(frame);
+          }
+        } else {
+          const video = videoRef.current;
+          if (video) {
+            const frame = await captureVideo(video, source || 'video');
+            if (frame) captured.push(frame);
+          }
+        }
+        if (cancelled || captured.length === 0) return;
+        framesRef.current.push(...captured);
+        if (framesRef.current.length > MAX_FRAMES) {
+          framesRef.current.splice(0, framesRef.current.length - MAX_FRAMES);
+        }
+        setFrameCount(framesRef.current.length);
+      } finally {
+        captureInFlight = false;
+      }
+    };
+
+    void capture();
+    const timer = window.setInterval(() => void capture(), FRAME_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [isPlaying, screens, source]);
+
+  const startCamera = async (): Promise<boolean> => {
+    resetSource();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      cameraStreamRef.current = stream;
+      setSource('camera');
+      setSourceName('Camera');
+      const video = videoRef.current;
+      if (!video) {
+        releaseSource();
+        setSource(null);
+        setSourceName('');
+        return false;
+      }
+      video.srcObject = stream;
+      video.muted = true;
+      try {
+        await video.play();
+        setIsPlaying(true);
+        stream.getVideoTracks()[0]?.addEventListener('ended', () => {
+          releaseSource();
+          setSource(null);
+          setSourceName('');
+        }, { once: true });
+        return true;
+      } catch (playError) {
+        setError(
+          playError instanceof Error
+            ? `摄像头已连接，但画面播放失败：${playError.message}`
+            : '摄像头已连接，但画面播放失败。',
+        );
+        releaseSource();
+        setSource(null);
+        setSourceName('');
+        return false;
+      }
+    } catch (cameraError) {
+      releaseSource();
+      setSource(null);
+      setSourceName('');
+      setError(cameraError instanceof Error ? cameraError.message : '无法打开摄像头');
+      return false;
+    }
+  };
+
+  const openFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    resetSource();
+    const url = URL.createObjectURL(file);
+    fileUrlRef.current = url;
+    const video = videoRef.current;
+    if (!video) return;
+    video.srcObject = null;
+    video.src = url;
+    // Local video is visual context, not microphone input. Keeping it muted
+    // also allows reliable autoplay and prevents speaker audio feeding ASR.
+    video.muted = true;
+    await video.play().catch(() => undefined);
+    setSource('file');
+    setSourceName(file.name);
+    setIsPlaying(!video.paused);
+  };
+
+  const removeScreen = useCallback((screenId: string) => {
+    const stream = screenStreamsRef.current.get(screenId);
+    stream?.getTracks().forEach((track) => track.stop());
+    screenStreamsRef.current.delete(screenId);
+    screenVideoRefs.current.delete(screenId);
+    framesRef.current = framesRef.current.filter((frame) => frame.source_id !== screenId);
+    setFrameCount(framesRef.current.length);
+    setScreens((current) => {
+      const next = current.filter((screen) => screen.id !== screenId);
+      if (next.length === 0) {
+        setSource(null);
+        setSourceName('');
+        setIsPlaying(false);
+      } else {
+        setSourceName(`${next.length} 个屏幕`);
+      }
+      return next;
+    });
+  }, []);
+
+  /**
+   * `unsupported` means this runtime cannot capture the screen at all (e.g. the
+   * Windows desktop WebView rejects getDisplayMedia with "Not supported", #5283).
+   * With `allowUnsupported` the caller handles that case instead of an error.
+   */
+  const screenFallbackNoticeRef = useRef(SCREEN_SHARE_UNSUPPORTED_NOTICE);
+  const startScreen = async (allowUnsupported = false): Promise<boolean | 'unsupported'> => {
+    screenFallbackNoticeRef.current = SCREEN_SHARE_UNSUPPORTED_NOTICE;
+    if (screens.length >= MAX_SCREENS) {
+      setError(`最多同时读取 ${MAX_SCREENS} 个屏幕。`);
+      return false;
+    }
+    if (!navigator.mediaDevices?.getDisplayMedia || isDesktopScreenCaptureUnavailable()) {
+      if (allowUnsupported) return 'unsupported';
+      setError('当前运行环境不支持屏幕共享。');
+      return false;
+    }
+
+    setError('');
+    const pickerStartedAt = Date.now();
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          displaySurface: 'monitor',
+          frameRate: {
+            ideal: SCREEN_PREVIEW_FRAME_RATE,
+            max: SCREEN_PREVIEW_FRAME_RATE,
+          },
+        },
+        audio: false,
+      });
+      const track = stream.getVideoTracks()[0];
+      if (!track) {
+        stream.getTracks().forEach((item) => item.stop());
+        throw new Error('没有获得屏幕画面。');
+      }
+
+      // Only a camera or file source is replaced. With nothing shared, a reset
+      // would also stop the running voice transport and its conversation.
+      if (source && source !== 'screen') {
+        resetSource();
+      }
+
+      const screenId =
+        typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `screen-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const name = track.label.trim() || `屏幕 ${screens.length + 1}`;
+      screenStreamsRef.current.set(screenId, stream);
+      setScreens((current) => {
+        setSourceName(`${current.length + 1} 个屏幕`);
+        return [...current, { id: screenId, name, stream }];
+      });
+      setSource('screen');
+      setIsPlaying(true);
+      track.addEventListener('ended', () => removeScreen(screenId), {
+        once: true,
+      });
+      return true;
+    } catch (screenError) {
+      if (isScreenCaptureDeniedBySystem(screenError)) {
+        if (allowUnsupported) {
+          screenFallbackNoticeRef.current = SCREEN_SHARE_NO_PERMISSION_NOTICE;
+          return 'unsupported';
+        }
+        setError(SCREEN_SHARE_NO_PERMISSION_NOTICE);
+      } else if (screenError instanceof DOMException && (screenError.name === 'NotAllowedError' || screenError.name === 'AbortError')) {
+        // Browsers reject a cancelled picker with NotAllowedError; Electron's
+        // display-media handler denies with AbortError.
+        setError(Date.now() - pickerStartedAt >= SCREEN_PICKER_TIMEOUT_MS ? SCREEN_PICKER_TIMEOUT_ERROR : '已取消选择屏幕');
+      } else if (allowUnsupported && isScreenCaptureUnsupported(screenError)) {
+        return 'unsupported';
+      } else {
+        setError(screenError instanceof Error ? screenError.message : '无法读取屏幕。');
+      }
+      return false;
+    }
+  };
+
+  const startRealtime = async () => {
+    if (duplexRef.current || joyaiProviderRef.current?.active) return;
+    if (startingRealtimeRef.current) return startingRealtimeRef.current;
+    const mediaGeneration = mediaGenerationRef.current;
+    const start = (async () => {
+      setIsRealtimeStarting(true);
+      reportRealtimeEvent('realtime_start_clicked', {
+        source: source || 'none',
+        frame_count: framesRef.current.length,
+      });
+      if (source) {
+        setError('');
+        setRealtimeStatus('正在等待视频首帧…');
+        reportRealtimeEvent('realtime_first_frame_waiting', { source });
+        const sourceReady = () =>
+          isVideoSourceReady({
+            source,
+            cameraStream: cameraStreamRef.current,
+            screens,
+            screenStreams: screenStreamsRef.current,
+            video: videoRef.current,
+          });
+        const firstFrameReady = await waitForFirstVideoFrame(sourceReady, () => framesRef.current.length > 0);
+        if (mediaGeneration !== mediaGenerationRef.current) return;
+        if (!firstFrameReady) {
+          const message = '尚未读取到视频画面，请确认画面正在播放后重试。';
+          setError(message);
+          setRealtimeStatus('');
+          setIsRealtimeStarting(false);
+          reportRealtimeEvent('realtime_start_blocked_no_frames', { source });
+          return;
+        }
+        reportRealtimeEvent('realtime_first_frame_ready', {
+          source,
+          frame_count: framesRef.current.length,
+        });
+      }
+      setError('');
+      setRealtimeStatus('正在读取视频模型配置…');
+      reportRealtimeEvent('realtime_config_requested');
+      try {
+        searchSessionRef.current = conversationSearchSessionRef.current || searchSessionRef.current || crypto.randomUUID();
+        const config = await webRequest<VideoSessionConfig>('video.realtime.config', {
+          search_session_id: searchSessionRef.current,
+        });
+        if (mediaGeneration !== mediaGenerationRef.current) return;
+        if (config.provider === 'qwen_omni') {
+          reportRealtimeEvent('qwen_local_asr_disabled', {
+            reason: 'using_qwen_native_input_audio_transcription',
+          });
+        }
+        reportRealtimeEvent('realtime_config_received', {
+          model: config.model,
+          provider: config.provider || 'realtime',
+        });
+        setModel(config.model);
+        if (config.provider !== 'qwen_omni') {
+          throw new Error(t('videoLive.qwenOnly'));
+        }
+        const videoFrames = new RealtimeVideoFrameScheduler(1_000);
+        const session = createRealtimeDuplexSession(
+          {
+            url: config.url || '',
+            voice: config.voice,
+            tools: config.tools,
+            replyLanguage: config.reply_language,
+            restoreInstructions: config.context_restore?.instructions,
+          },
+          {
+            getVideoFrame: () => {
+              const frame = videoFrames.take(framesRef.current);
+              return frame?.data_url.split(',', 2)[1] || null;
+            },
+            onAssistantText: (text, final, toolJobId, responseId) => {
+              const visibleText = text.trim();
+              if (final && visibleText) reportRealtimeEvent('task_trace_assistant_final', {
+                text: visibleText, job_id: toolJobId, response_id: responseId,
+              });
+              if (final && toolJobId) {
+                searchJobsRef.current.delete(toolJobId);
+                setSearchStatus('');
+              }
+              if (headless && onAssistantStream && responseId) {
+                onAssistantStream({
+                  streamId: responseId,
+                  content: visibleText,
+                  final,
+                });
+                return;
+              }
+              if (!visibleText) return;
+              if (!headless && responseId) {
+                const id = ++chatSequenceRef.current;
+                setChatHistory((current) => {
+                  const existing = current.find((item) => item.responseId === responseId);
+                  return existing
+                    ? current.map((item) => (item === existing ? { ...item, text: visibleText } : item))
+                    : [...current, { id, role: 'assistant', text: visibleText, responseId }];
+                });
+                return;
+              }
+              if (!final) {
+                setStreamingAnswer(visibleText);
+              } else {
+                commitAssistantAnswer(visibleText, toolJobId);
+              }
+            },
+            onUserText: (text, final) => {
+              if (final) {
+                reportRealtimeEvent('task_trace_user_transcript', { text });
+                handleFinalRealtimeUserText(text);
+              } else {
+                const partialTranscript = text.trim();
+                if (isUsefulTranscript(partialTranscript)) {
+                  latestUserInstructionRef.current = {
+                    text: partialTranscript,
+                    turnId: '',
+                  };
+                }
+              }
+            },
+            onState: (state) => {
+              if (duplexRef.current !== session) return;
+              setDuplexVoicePhase(state);
+              if (state === 'closed') {
+                renewingRealtimeRef.current = false;
+                renewalResultsRef.current.clear();
+                duplexRef.current = null;
+                mediaGenerationRef.current += 1;
+                mediaToolCallIdsRef.current.clear();
+                mediaTaskIdsRef.current.clear();
+                searchSessionRef.current = '';
+                setIsRealtimeStarting(false);
+              }
+              setIsRecording(state !== 'closed');
+              setRealtimeStatus(
+                state === 'connecting'
+                  ? t('videoLive.status.connecting')
+                  : state === 'listening'
+                    ? ''
+                    : state === 'speaking'
+                      ? t('videoLive.status.speaking')
+                      : '',
+              );
+              if (state === 'listening') {
+                setIsRealtimeStarting(false);
+                renewingRealtimeRef.current = false;
+                const pending = [...renewalResultsRef.current.values()];
+                renewalResultsRef.current.clear();
+                for (const payload of pending) {
+                  if (payload.status === 'failed') acceptFailedSearch(payload);
+                  else acceptCompletedSearch(payload);
+                }
+              }
+            },
+            onError: setError,
+            onIdleTimeout: () => {
+              if (duplexRef.current !== session) return;
+              // Keep the conversation, shared video and controller alive while
+              // replacing Qwen's expired connection. Config reload restores
+              // current history; old socket call IDs must not cross sessions.
+              duplexRef.current = null;
+              stopModelTransport(true);
+              session.stop();
+              setIsRecording(false);
+              setIsRealtimeStarting(true);
+              const generation = mediaGenerationRef.current;
+              void Promise.resolve().then(() => {
+                // Cancel/replacement during renewal must never reopen the mic.
+                if (generation === mediaGenerationRef.current) return restartRealtimeRef.current();
+              });
+            },
+            onToolResultDispatched: () => {
+              setSearchStatus('');
+            },
+            onFunctionCall: (call) => {
+              if (mediaGeneration !== mediaGenerationRef.current) return;
+              mediaToolCallIdsRef.current.add(call.callId);
+              const searchSessionId = searchSessionRef.current;
+              const latestInstruction = {text: call.originalInstruction || call.task, turnId: call.inputId || ''};
+              const originalInstruction = latestInstruction.text.trim();
+              const toolArguments = JSON.parse(call.arguments) as { job_id?: string };
+              reportRealtimeEvent('qwen_tool_call_forwarding', {
+                name: call.name,
+                call_id: call.callId,
+                job_id: toolArguments.job_id,
+                search_session_id: searchSessionId,
+                question: originalInstruction,
+                task: call.task,
+                turn_id: latestInstruction.turnId,
+              });
+              void webRequest<AgentAction & { call_id?: string; tool_result?: unknown }>(
+                'video.qwen.tool',
+                {
+                  name: call.name,
+                  call_id: call.callId,
+                  arguments: call.arguments,
+                  question: originalInstruction,
+                  turn_id: latestInstruction.turnId,
+                  search_session_id: searchSessionId,
+                  frame_data_url: framesRef.current.at(-1)?.data_url || '',
+                },
+                { timeoutMs: call.name === 'jiuwen_queue_manage' ? 0 : 10_000 },
+              )
+                .then((action) => {
+                  reportRealtimeEvent('qwen_tool_call_receipt', {
+                    name: call.name, call_id: call.callId,
+                    job_id: action.search_job?.id || '',
+                    decision: (action.tool_result as {state?: string})?.state === 'rejected' ? 'rejected' : 'accepted',
+                  });
+                  if (action.tool_result !== undefined) {
+                    const successor = (action.tool_result as {successor_id?: string}).successor_id;
+                    if (successor && mediaGeneration === mediaGenerationRef.current) mediaTaskIdsRef.current.add(successor);
+                    if (mediaGeneration === mediaGenerationRef.current)
+                      session.enqueueOperationResult(call.callId, action.tool_result);
+                    return;
+                  }
+                  const jobId = action.search_job?.id?.trim() || '';
+                  if (!jobId) throw new Error('Jiuwen Core Agent did not create a search job');
+                  if (mediaGeneration === mediaGenerationRef.current) mediaTaskIdsRef.current.add(jobId);
+                  if (mediaGeneration === mediaGenerationRef.current) {
+                    session.enqueueOperationResult(call.callId, {
+                      state: 'accepted', job_id: jobId, status: action.search_job?.status,
+                      accepted_instruction: action.search_job?.question || originalInstruction,
+                      message: TASK_ACCEPTED_INSTRUCTIONS,
+                    });
+                  }
+                  rememberSearchJob(
+                    action.search_job,
+                    latestInstruction.turnId,
+                    mediaGeneration === mediaGenerationRef.current,
+                  );
+                })
+                .catch((toolError) => {
+                  const message = toolError instanceof Error ? toolError.message : 'Jiuwen Core Agent request failed';
+                  if (mediaGeneration !== mediaGenerationRef.current) return;
+                  reportRealtimeEvent('qwen_tool_call_receipt', {
+                    name: call.name, call_id: call.callId, decision: 'rejected', message,
+                  });
+                  setError(describeDuplexError(message, 'task'));
+                  session.enqueueOperationResult(call.callId, { state: 'rejected', error: message });
+                });
+            },
+            onDiagnostic: (event) => {
+              void webRequest('video.realtime.telemetry', {
+                ...event, search_session_id: searchSessionRef.current,
+              }, {
+                timeoutMs: 5_000,
+              }).catch(() => undefined);
+            },
+          },
+          () => reportRealtimeEvent('realtime_start_unsupported_browser'),
+        );
+        duplexRef.current = session;
+        session.setMicrophoneMuted(microphoneMutedRef.current);
+        session.setSpeakerMuted(speakerMutedRef.current);
+        await session.start();
+        if (duplexRef.current === session) {
+          session.setMicrophoneMuted(microphoneMutedRef.current);
+          session.setSpeakerMuted(speakerMutedRef.current);
+        }
+      } catch (realtimeError) {
+        if (mediaGeneration !== mediaGenerationRef.current) return;
+        stopModelTransport();
+        setIsRecording(false);
+        setRealtimeStatus('');
+        setIsRealtimeStarting(false);
+        searchSessionRef.current = '';
+        searchJobsRef.current.clear();
+        setError(realtimeError instanceof Error ? realtimeError.message : t('videoLive.errors.startFailed'));
+      }
+    })();
+    startingRealtimeRef.current = start;
+    try {
+      await start;
+    } finally {
+      if (startingRealtimeRef.current === start) startingRealtimeRef.current = null;
+    }
+  };
+  restartRealtimeRef.current = startRealtime;
+
+  const stopRealtime = () => {
+    stopModelTransport();
+    searchSessionRef.current = '';
+    searchJobsRef.current.clear();
+    setIsRecording(false);
+    setIsRealtimeStarting(false);
+    setRealtimeStatus('');
+  };
+
+  useEffect(() => {
+    if (!pendingScreenAutostartRef.current || !isPlaying) return;
+    if (source !== 'camera' && (source !== 'screen' || screens.length === 0)) return;
+    pendingScreenAutostartRef.current = false;
+    void startRealtime();
+  }, [headless, isPlaying, screens, source]);
+
+  useEffect(() => {
+    if (!isRecording && !isRealtimeStarting) return;
+    return webClient.onStateChange((state) => {
+      if (state !== 'closed' && state !== 'reconnecting') return;
+      setError((previous) => previous || 'Jiuwen 服务连接已断开，未提供具体原因。请检查网络或本地服务后重新启动全双工。');
+      stopRealtime();
+    });
+  }, [isRecording, isRealtimeStarting]);
+
+  useEffect(() => {
+    const running = isRealtimeStarting || isRecording;
+    const wasRunning = wasDuplexRunningRef.current;
+    if (headless && wasRunning && !running) {
+      releaseScreens();
+      releaseSource();
+      setSource(null);
+      setSourceName('');
+    }
+    wasDuplexRunningRef.current = running;
+    const runtimeState = reportedRuntimeState(wasRunning, isRealtimeStarting, isRecording);
+    if (runtimeState) onRuntimeState?.(runtimeState);
+  }, [headless, isRealtimeStarting, isRecording, onRuntimeState, releaseScreens, releaseSource]);
+
+  useEffect(() => {
+    if (error) onError?.(describeDuplexError(error));
+  }, [error, onError]);
+
+  useEffect(() => {
+    onScreenSharingChange?.(screens.length > 0 || source === 'camera');
+  }, [screens.length, source, onScreenSharingChange]);
+
+  useImperativeHandle(ref, () => ({
+    startScreenDuplex: async (searchSessionId, shareScreen = true) => {
+      conversationSearchSessionRef.current = searchSessionId || '';
+      if (!shareScreen) {
+        await startRealtime();
+        return Boolean(duplexRef.current || joyaiProviderRef.current?.active);
+      }
+      const result = await startScreen(true);
+      if (result === 'unsupported') {
+        // Fallback, not a root-cause fix: keep voice duplex usable when the
+        // runtime cannot share the screen (#5283).
+        pendingScreenAutostartRef.current = false;
+        toast.open({ content: screenFallbackNoticeRef.current, variant: 'warning' });
+        await startRealtime();
+        return Boolean(duplexRef.current || joyaiProviderRef.current?.active);
+      }
+      pendingScreenAutostartRef.current = result;
+      return result;
+    },
+    stop: () => {
+      pendingScreenAutostartRef.current = false;
+      resetSource();
+    },
+    setMicrophoneMuted: (muted) => {
+      microphoneMutedRef.current = muted;
+      duplexRef.current?.setMicrophoneMuted(muted);
+      joyaiProviderRef.current?.setMicrophoneMuted(muted);
+    },
+    setSpeakerMuted: (muted) => {
+      speakerMutedRef.current = muted;
+      duplexRef.current?.setSpeakerMuted(muted);
+      joyaiProviderRef.current?.setSpeakerMuted(muted);
+    },
+    startScreenSharing: async () => {
+      await startScreen();
+    },
+    stopScreenSharing: () => {
+      [...screenStreamsRef.current.keys()].forEach(removeScreen);
+      if (cameraStreamRef.current) {
+        releaseSource();
+        setSource(null);
+        setSourceName('');
+      }
+    },
+    deliverTaskInteraction,
+    deliverToolResult: (payload) => {
+      deliverTaskInteraction(payload);
+      if (!searchSessionRef.current || payload.search_session_id !== searchSessionRef.current) return;
+      // The runtime delivers terminal events once. Hold them while replacing
+      // Qwen's transport, including the interval spent fetching fresh config.
+      if (renewingRealtimeRef.current) {
+        const jobId = payload.job_id || '';
+        if (!mediaTaskIdsRef.current.has(jobId)) return;
+        if (payload.status === 'cancelled') {
+          renewalResultsRef.current.delete(jobId);
+          mediaTaskIdsRef.current.delete(jobId);
+          searchJobsRef.current.delete(jobId);
+        } else {
+          renewalResultsRef.current.set(jobId, payload);
+        }
+        return;
+      }
+      // A function_call_output is valid only on the Qwen connection that created its call ID.
+      // JoyAI jobs likewise need to belong to this media run; old results stay visible without replay.
+      if (duplexRef.current) {
+        if (!mediaTaskIdsRef.current.has(payload.job_id || '') && (!payload.tool_call_id || !mediaToolCallIdsRef.current.has(payload.tool_call_id))) return;
+      } else if (!joyaiProviderRef.current?.active || !searchJobsRef.current.has(payload.job_id || '')) {
+        return;
+      }
+      if (payload.status === 'cancelled') {
+        if (payload.tool_call_id) duplexRef.current?.cancelToolTask(payload.job_id || '', payload.tool_call_id);
+        searchJobsRef.current.delete(payload.job_id || '');
+        return;
+      }
+      if (payload.status === 'failed') acceptFailedSearch(payload);
+      else acceptCompletedSearch(payload);
+    },
+    deliverQuestion: (payload) => {
+      // Headless panels have no task subscriptions, so the runtime forwards
+      // pending questions and approval cards for the model to raise.
+      if (!searchSessionRef.current || payload.search_session_id !== searchSessionRef.current) return;
+      if (payload.job_id && payload.interaction) duplexRef.current?.enqueueQuestion(payload.job_id, payload.interaction);
+      if (payload.job_id && payload.interaction) deliverJoyAIApproval(payload.job_id, payload.interaction);
+    },
+    deliverChatApproval: (interaction) => {
+      duplexRef.current?.enqueueQuestion('', { ...interaction, id: interaction.request_id } as never);
+      deliverJoyAIApproval('', { ...interaction, id: interaction.request_id } as ApprovalInteraction);
+    },
+  }));
+
+  const sendText = async (event: FormEvent) => {
+    event.preventDefault();
+    const text = question.trim();
+    if (!text) return;
+    if (!duplexRef.current && !joyaiProviderRef.current?.active) await startRealtime();
+    if (!duplexRef.current && !joyaiProviderRef.current?.active) return;
+    try {
+      const turnId = crypto.randomUUID();
+      latestUserInstructionRef.current = { text, turnId };
+      reportRealtimeEvent('qwen_user_instruction_captured', {
+        question: text,
+        source: 'text',
+        turn_id: turnId,
+      });
+      appendChat('user', text);
+      setQuestion('');
+      if (joyaiProviderRef.current?.active) {
+        const result = await getJoyAIProvider().submitUserInstruction(text);
+        if (!result) throw new Error(t('videoLive.errors.joyaiTextNotAccepted'));
+        return;
+      }
+      const accepted = await duplexRef.current?.sendTextTurn(text);
+      if (!accepted) throw new Error(t('videoLive.errors.qwenTextNotAccepted'));
+    } catch (sendError) {
+      setError(sendError instanceof Error ? sendError.message : t('videoLive.errors.textSendFailed'));
+    }
+  };
+
+  const selectedSearchJobExists = searchProgressJobs.some((job) => job.id === selectedSearchJobId);
+  const effectiveSelectedSearchJobId = selectedSearchJobExists ? selectedSearchJobId : '';
+  const visibleSearchProgress = selectSearchProgressJob(searchProgressJobs, effectiveSelectedSearchJobId);
+  const visibleSearchStep = visibleSearchProgress?.progress.at(-1);
+
+  if (headless) {
+    return (
+      <div className="video-live-headless" aria-hidden="true">
+        <video ref={videoRef} muted playsInline />
+        {screens.map((screen) => (
+          <video
+            key={screen.id}
+            ref={(node) => {
+              if (!node) {
+                screenVideoRefs.current.delete(screen.id);
+                return;
+              }
+              screenVideoRefs.current.set(screen.id, node);
+              if (node.srcObject !== screen.stream) node.srcObject = screen.stream;
+              void node.play().catch(() => undefined);
+            }}
+            autoPlay
+            muted
+            playsInline
+          />
+        ))}
+        <canvas ref={canvasRef} />
+      </div>
+    );
+  }
+
+  return (
+    <section className="video-live">
+      <header className="video-live__header">
+        <div className="video-live__brand">
+          <span className="video-live__brand-icon">
+            <Video aria-hidden />
+          </span>
+          <div>
+            <h1>Jiuwen Full-duplex</h1>
+            <p>{t('videoLive.subtitle')}</p>
+          </div>
+        </div>
+        <div className="video-live__header-actions">
+          <div className={`video-live__status ${isPlaying ? 'is-live' : ''}`}>
+            <span />
+            {isPlaying ? 'STREAMING' : 'IDLE'}
+          </div>
+        </div>
+      </header>
+
+      <div className="video-live__grid">
+        <div className="video-live__viewer-card">
+          <div className="video-live__viewer">
+            <video
+              ref={videoRef}
+              className={source === 'screen' ? 'is-hidden' : ''}
+              controls={source === 'file'}
+              playsInline
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+              onEnded={() => setIsPlaying(false)}
+            />
+            {source === 'screen' && (
+              <div className={`video-live__screen-grid video-live__screen-grid--${Math.min(screens.length, 4)}`}>
+                {screens.map((screen) => (
+                  <div className="video-live__screen-tile" key={screen.id}>
+                    <video
+                      ref={(node) => {
+                        if (!node) {
+                          screenVideoRefs.current.delete(screen.id);
+                          return;
+                        }
+                        screenVideoRefs.current.set(screen.id, node);
+                        if (node.srcObject !== screen.stream) node.srcObject = screen.stream;
+                        void node.play().catch(() => undefined);
+                      }}
+                      autoPlay
+                      muted
+                      playsInline
+                    />
+                    <div className="video-live__screen-label">
+                      <span className="is-live" />
+                      {screen.name}
+                    </div>
+                    <button
+                      className="video-live__screen-close"
+                      type="button"
+                      onClick={() => removeScreen(screen.id)}
+                      aria-label={`关闭${screen.name}`}
+                    >
+                      <X aria-hidden />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {!source && (
+              <div className="video-live__empty">
+                <span className="video-live__empty-icon">
+                  <Video aria-hidden />
+                </span>
+                <strong>{t('videoLive.empty.title')}</strong>
+                <p>{t('videoLive.empty.description')}</p>
+              </div>
+            )}
+            {source && source !== 'screen' && (
+              <div className="video-live__source-chip">
+                <span className={isPlaying ? 'is-live' : ''} />
+                {sourceName}
+              </div>
+            )}
+            {source && source !== 'screen' && (
+              <button className="video-live__close" type="button" onClick={closeSource} aria-label={t('videoLive.actions.closeVideo')}>
+                <X aria-hidden />
+              </button>
+            )}
+          </div>
+
+          <div className="video-live__source-actions">
+            <button type="button" className="video-live__source-button" onClick={() => void startCamera()}>
+              <Camera aria-hidden />
+              {t('videoLive.sources.camera')}
+            </button>
+            <label className="video-live__source-button">
+              <FileVideo aria-hidden />
+              {t('videoLive.sources.localVideo')}
+              <input type="file" accept="video/*" onChange={(event) => void openFile(event)} />
+            </label>
+            <button
+              type="button"
+              className="video-live__source-button"
+              disabled={source === 'screen' && screens.length >= MAX_SCREENS}
+              onClick={() => void startScreen()}
+            >
+              <Monitor aria-hidden />
+              {source === 'screen' ? t('videoLive.sources.addScreen') : t('videoLive.sources.shareScreen')}
+            </button>
+            {source && (
+              <button
+                type="button"
+                className="video-live__source-button video-live__source-button--stop"
+                onClick={closeSource}
+              >
+                <X aria-hidden />
+                {source === 'camera' ? t('videoLive.sources.stopCamera') : source === 'screen' ? t('videoLive.sources.stopScreens') : t('videoLive.actions.closeVideo')}
+              </button>
+            )}
+            <span className="video-live__frame-count">
+              {source ? t('videoLive.frameWindow', { count: frameCount, max: MAX_FRAMES }) : t('videoLive.audioOnly')}
+              {source === 'screen' ? ` · ${screens.length}/${MAX_SCREENS} 屏` : ''}
+            </span>
+          </div>
+        </div>
+
+        <div className="video-live__output-card">
+          <div className="video-live__output-head">
+            <div>
+              <span className="video-live__eyebrow">VLM OUTPUT</span>
+              <strong>{model}</strong>
+            </div>
+            <div className="video-live__metrics">
+              <span>{isRealtimeStarting ? 'CONNECTING' : isRecording ? 'FULL-DUPLEX' : 'IDLE'}</span>
+            </div>
+          </div>
+
+          <div className="video-live__answer">
+            {chatHistory.length > 0 || streamingAnswer ? (
+              <div className="video-live__chat-history" ref={chatHistoryRef}>
+                {chatHistory.map((item) => (
+                  <div
+                    className={`video-live__chat-item is-${item.role}${item.presentation === 'tool_result' ? ' is-core-result' : ''}`}
+                    key={item.id}
+                  >
+                    <strong>
+                      {item.presentation === 'tool_result'
+                        ? t('videoLive.chat.coreResult')
+                        : item.role === 'user'
+                          ? t('videoLive.chat.user')
+                          : item.role === 'tool'
+                            ? t('videoLive.chat.search')
+                            : t('videoLive.chat.assistant')}
+                    </strong>
+                    <p>{item.role === 'tool' ? t('videoLive.chat.searchCompleted') : item.text}</p>
+                  </div>
+                ))}
+                {streamingAnswer && !isAwaitingVoiceTranscript && (
+                  <div className="video-live__chat-item is-assistant is-streaming">
+                    <strong>{t('videoLive.chat.assistant')}</strong>
+                    <p>{streamingAnswer}</p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="video-live__answer-empty">
+                <Video aria-hidden />
+                <strong>{isRecording ? t('videoLive.empty.listening') : t('videoLive.empty.waiting')}</strong>
+                <span>{t('videoLive.empty.hint')}</span>
+              </div>
+            )}
+          </div>
+
+          {error && <div className="video-live__error" data-testid="video-live-error-message" role="alert">{describeDuplexError(error)}</div>}
+          {realtimeStatus && <div className="video-live__realtime-status">{realtimeStatus}</div>}
+          {visibleSearchProgress && (
+            <div className={`video-live__search-progress is-${visibleSearchProgress.status}`}>
+              <div className="video-live__search-progress-head">
+                <button
+                  type="button"
+                  className="video-live__search-progress-toggle"
+                  aria-expanded={isSearchProgressExpanded}
+                  onClick={() => setIsSearchProgressExpanded((expanded) => !expanded)}
+                >
+                  <span className="video-live__search-progress-icon">
+                    {visibleSearchProgress.status === 'running' || visibleSearchProgress.status === 'queued' ? (
+                      <LoaderCircle className="video-live__spinner" aria-hidden />
+                    ) : visibleSearchProgress.status === 'completed' ? (
+                      <CheckCircle2 aria-hidden />
+                    ) : (
+                      <XCircle aria-hidden />
+                    )}
+                  </span>
+                  <span className="video-live__search-progress-copy">
+                    <strong>Jiuwen Core Agent</strong>
+                    <span>{visibleSearchStep?.title || t('videoLive.search.ready')}</span>
+                  </span>
+                  {visibleSearchProgress.latencyMs !== undefined && (
+                    <span className="video-live__search-progress-time">
+                      {(visibleSearchProgress.latencyMs / 1_000).toFixed(1)}s
+                    </span>
+                  )}
+                  <ChevronDown className={isSearchProgressExpanded ? 'is-expanded' : ''} aria-hidden />
+                </button>
+                {searchProgressJobs.length > 1 && (
+                  <select
+                    className="video-live__search-progress-select"
+                    value={effectiveSelectedSearchJobId}
+                    onChange={(event) => setSelectedSearchJobId(event.target.value)}
+                    aria-label={t('videoLive.search.selectHistory')}
+                    title={t('videoLive.search.selectHistory')}
+                  >
+                    <option value="">{t('videoLive.search.latest')}</option>
+                    {[...searchProgressJobs].reverse().map((job, index) => (
+                      <option value={job.id} key={job.id}>
+                        {searchProgressOptionLabel(job, searchProgressJobs.length - index)}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              {isSearchProgressExpanded && (
+                <div className="video-live__search-progress-detail">
+                  {visibleSearchProgress.query && (
+                    <div className="video-live__search-progress-query">
+                      <Search aria-hidden />
+                      <span>{visibleSearchProgress.query}</span>
+                    </div>
+                  )}
+                  <ol>
+                    {visibleSearchProgress.progress.map((entry) => (
+                      <li
+                        className={`is-${entry.status}`}
+                        key={`${entry.sequence}-${entry.stage}-${entry.tool_call_id || ''}`}
+                      >
+                        <span className="video-live__search-progress-step-icon">
+                          {entry.status === 'completed' ? (
+                            <CheckCircle2 aria-hidden />
+                          ) : entry.status === 'failed' ? (
+                            <XCircle aria-hidden />
+                          ) : (
+                            <Circle aria-hidden />
+                          )}
+                        </span>
+                        <div>
+                          <strong>{entry.title}</strong>
+                          {entry.detail && <p>{entry.detail}</p>}
+                        </div>
+                        {entry.elapsed_ms !== undefined && <time>{(entry.elapsed_ms / 1_000).toFixed(1)}s</time>}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+            </div>
+          )}
+          {toolStatus && <div className="video-live__tool-status">{toolStatus}</div>}
+
+          <form className="video-live__composer" onSubmit={(event) => void sendText(event)}>
+            <button
+              type="button"
+              className={`video-live__mic${isRecording ? ' is-recording' : ''}`}
+              data-testid="video-live-session-toggle"
+              onClick={isRecording ? stopRealtime : () => void startRealtime()}
+              disabled={isRealtimeStarting && !isRecording}
+              aria-label={
+                isRealtimeStarting
+                  ? t('videoLive.actions.starting')
+                  : isRecording
+                    ? t('videoLive.actions.stopSession')
+                    : t('videoLive.actions.startSession')
+              }
+              title={
+                isRealtimeStarting ? realtimeStatus : isRecording ? t('videoLive.actions.stopSession') : t('videoLive.actions.startSession')
+              }
+            >
+              {isRealtimeStarting && !isRecording ? (
+                <LoaderCircle className="video-live__spinner" aria-hidden />
+              ) : isRecording ? (
+                <Square aria-hidden />
+              ) : (
+                <Mic aria-hidden />
+              )}
+            </button>
+            <input
+              value={question}
+              onChange={(event) => setQuestion(event.target.value)}
+              placeholder={isRecording ? t('videoLive.input.activePlaceholder') : t('videoLive.input.inactivePlaceholder')}
+            />
+            <button type="submit" disabled={!question.trim()} aria-label={t('videoLive.input.send')} title={t('videoLive.input.send')}>
+              <Send aria-hidden />
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <canvas ref={canvasRef} className="video-live__capture-canvas" aria-hidden />
+    </section>
+  );
+});

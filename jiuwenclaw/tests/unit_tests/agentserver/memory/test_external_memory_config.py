@@ -55,16 +55,32 @@ def _get_agent_workspace_dir():
     return Path("/tmp/test_workspace")
 
 
-# Load the real jiuwenclaw.utils (do NOT replace it in sys.modules — that
+# Load the real jiuwenswarm.utils (do NOT replace it in sys.modules — that
 # leaks str-returning stubs into every later test in the session). Patch
-# only the two attrs we need; the module-scoped autouse fixture in this
-# package's conftest.py restores them after this module's tests finish.
-import jiuwenclaw.common.utils as utils_stub  # noqa: E402
+# only the two attrs we need; restore immediately after importing the
+# module under test so other test modules can collect.
+import jiuwenswarm.common.utils as utils_stub  # noqa: E402
+
+_saved_get_config_file = utils_stub.get_config_file
+_saved_get_agent_workspace_dir = utils_stub.get_agent_workspace_dir
 
 utils_stub.get_config_file = _get_config_file
 utils_stub.get_agent_workspace_dir = _get_agent_workspace_dir
 
-from jiuwenclaw.agents.harness.common.memory import external_memory_config as emc  # noqa: E402
+from jiuwenswarm.agents.harness.common.memory import external_memory_config as emc  # noqa: E402
+
+utils_stub.get_config_file = _saved_get_config_file
+utils_stub.get_agent_workspace_dir = _saved_get_agent_workspace_dir
+
+
+@pytest.fixture(autouse=True)
+def _isolate_utils_stubs():
+    """Re-apply utils stubs for this module's tests, restore after."""
+    utils_stub.get_config_file = _get_config_file
+    utils_stub.get_agent_workspace_dir = _get_agent_workspace_dir
+    yield
+    utils_stub.get_config_file = _saved_get_config_file
+    utils_stub.get_agent_workspace_dir = _saved_get_agent_workspace_dir
 
 
 # ---------------------------------------------------------------------------
@@ -181,13 +197,15 @@ def _patch_embed(monkeypatch, api_key="k", base_url="u", model="m"):
 
 def test_openjiuwen_provider_config_defaults(monkeypatch):
     _patch_embed(monkeypatch)
-    out = emc.build_openjiuwen_provider_config({"openjiuwen": {}})
+    out, _ = emc.build_openjiuwen_provider_config({"openjiuwen": {}})
     assert out["kv"]["backend"] == "shelve"
     assert out["vector"]["backend"] == "chroma"
     assert out["db"]["backend"] == "sqlite"
     assert "kv" in out["kv"]["path"] or out["kv"]["path"].endswith("kv")
     assert out["embedding"]["model_name"] == "m"
     assert out["embedding"]["api_key"] == "k"
+    # scope_config depends on the resolved config.yaml models section and is
+    # exercised separately; this test only asserts provider_config shape.
 
 
 def test_openjiuwen_provider_config_overrides_applied(monkeypatch):
@@ -200,7 +218,7 @@ def test_openjiuwen_provider_config_overrides_applied(monkeypatch):
         "db_type": "sqlite",
         "db_path": "/custom/db.sqlite",
     }}
-    out = emc.build_openjiuwen_provider_config(ext_cfg)
+    out, _ = emc.build_openjiuwen_provider_config(ext_cfg)
     assert out["kv"] == {"backend": "in_memory", "path": "/custom/kv"}
     assert out["vector"]["persist_directory"] == "/custom/vec"
     assert out["db"]["path"] == "/custom/db.sqlite"
@@ -214,13 +232,13 @@ def test_openjiuwen_provider_config_missing_embedding_does_not_raise(monkeypatch
     )
     for var in ("EMBED_API_KEY", "EMBED_BASE_URL", "EMBED_MODEL"):
         monkeypatch.delenv(var, raising=False)
-    out = emc.build_openjiuwen_provider_config({"openjiuwen": {}})
+    out, _ = emc.build_openjiuwen_provider_config({"openjiuwen": {}})
     assert out["embedding"]["model_name"] == ""
 
 
 def test_openjiuwen_provider_config_missing_subsection_uses_defaults(monkeypatch):
     _patch_embed(monkeypatch)
-    out = emc.build_openjiuwen_provider_config({})
+    out, _ = emc.build_openjiuwen_provider_config({})
     assert out["kv"]["backend"] == "shelve"
     assert out["vector"]["backend"] == "chroma"
     assert out["db"]["backend"] == "sqlite"

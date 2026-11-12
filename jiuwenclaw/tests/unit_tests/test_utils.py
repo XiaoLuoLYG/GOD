@@ -2,14 +2,21 @@
 
 """Unit tests for utils module."""
 
+# TEST ONLY: credential-shaped values are constructed synthetic fixtures and
+# URL literals use RFC-reserved domains; no external request is performed.
+
+import ast
+import importlib
+import json
 import os
 import sys
+import time
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from jiuwenclaw.common import utils
+from jiuwenswarm.common import utils
 
 
 class TestPathResolution:
@@ -49,6 +56,32 @@ class TestPathResolution:
         assert "agent" in str(agent_workspace)
 
     @staticmethod
+    def test_get_default_project_workspace_dir():
+        """Test no-project task workspace lives under agent workspace/projects."""
+        project_workspace = utils.get_default_project_workspace_dir()
+        assert isinstance(project_workspace, Path)
+        assert project_workspace == utils.get_agent_workspace_dir() / "projects"
+
+    @staticmethod
+    def test_get_default_project_session_workspace_dir():
+        """Test no-project task workspace is scoped by session."""
+        session_workspace = utils.get_default_project_session_workspace_dir("abc-123")
+        assert isinstance(session_workspace, Path)
+        assert session_workspace == (
+            utils.get_default_project_workspace_dir()
+            / "abc-123"
+        )
+        assert session_workspace.exists()
+
+    @staticmethod
+    def test_get_default_project_session_workspace_dir_without_session():
+        """Test early initialization does not create a throwaway session folder."""
+        session_workspace = utils.get_default_project_session_workspace_dir()
+        assert isinstance(session_workspace, Path)
+        assert session_workspace == utils.get_default_project_workspace_dir()
+        assert session_workspace.exists()
+
+    @staticmethod
     def test_path_caching():
         """Test that path results are cached."""
         # First call
@@ -76,7 +109,7 @@ class TestLoggerSetup:
     def test_setup_logger_default():
         """Test logger setup with default level from explicit override."""
         logger = utils.setup_logger("INFO")
-        assert logger.name == "jiuwenclaw"
+        assert logger.name == "jiuwenswarm"
         assert logger.level == 20  # INFO level
 
     @staticmethod
@@ -99,12 +132,300 @@ class TestLoggerSetup:
         assert "StreamHandler" in handler_types
         assert handler_types.count("SafeRotatingFileHandler") == 5
 
+    @staticmethod
+    @pytest.mark.parametrize("outcome", ["allow", "deny", "block", "cancel"])
+    def test_log_sanitizer_preserves_only_safe_authorization_outcome(outcome: str):
+        """Keep terminal enums observable without exposing authorization data."""
+        raw = (
+            '{"authorization":"Bearer live-token",'
+            f'"authorization_outcome":"{outcome}",'
+            '"other_authorization_outcome":"live-secret"}'
+        )
+
+        sanitized = utils._sanitize_log_text(raw)
+
+        assert f'"authorization_outcome":"{outcome}"' in sanitized
+        assert "live-token" not in sanitized
+        assert "live-secret" not in sanitized
+        assert sanitized.count("******(fp:") == 2
+
+    @staticmethod
+    def test_log_sanitizer_does_not_unmask_embedded_outcome_field():
+        """An outcome-shaped substring inside a secret remains protected."""
+        raw = (
+            '{"authorization":"secretprefix '
+            '\"authorization_outcome\":\"allow\" secretsuffix",'
+            '"token":"tokenprefix '
+            '\"authorization_outcome\":\"deny\" tokensuffix"}'
+        )
+
+        sanitized = utils._sanitize_log_text(raw)
+
+        assert "secretprefix" not in sanitized
+        assert "secretsuffix" not in sanitized
+        assert "tokenprefix" not in sanitized
+        assert "tokensuffix" not in sanitized
+        assert '\"authorization_outcome\":\"allow\"' not in sanitized
+        assert '\"authorization_outcome\":\"deny\"' not in sanitized
+        assert sanitized.count("******(fp:") == 2
+
+    @staticmethod
+    def test_log_sanitizer_handles_oversized_identifiers_in_linear_time():
+        """A 10KB session/run id must not trigger quadratic regex backtracking."""
+        raw = (
+            "session_id=" + "s" * 10_240
+            + " run_id=" + "x" * 10_240
+        )
+
+        started = time.perf_counter()
+        sanitized = utils._sanitize_log_text(raw)
+        elapsed = time.perf_counter() - started
+
+        assert sanitized == raw
+        assert elapsed < 1.0, f"log sanitization took {elapsed:.3f}s"
+
+    @staticmethod
+    def test_log_sanitizer_unclosed_quote_does_not_leak_next_line_secret():
+        """A truncated secret must not swallow a later line's masking.
+
+        The closing-quote lookup must not cross the newline: otherwise the
+        next line's value-opening quote is consumed as this value's closing
+        quote and that secret stays in plaintext.
+        """
+        raw = "'my_auth_token': 'oops-truncated\npassword_v2: 'hunter2'"
+
+        sanitized = utils._sanitize_log_text(raw)
+
+        assert "oops-truncated" not in sanitized
+        assert "hunter2" not in sanitized
+
+    @staticmethod
+    def test_log_sanitizer_unclosed_quote_masks_only_current_line():
+        """An unclosed quote masks to end of line; later lines stay readable.
+
+        Uses a quoted key so only the named-KV channel (not the earlier
+        unquoted-key pass) can match, exercising the unclosed-quote branch.
+        """
+        raw = "'user_token': 'abc\ncritical error detail: disk full"
+
+        sanitized = utils._sanitize_log_text(raw)
+
+        assert "abc" not in sanitized
+        assert "critical error detail: disk full" in sanitized
+
+    @staticmethod
+    def test_log_sanitizer_quoted_value_does_not_cross_newline():
+        """Closing-quote lookup stays on the current line (old-regex semantics)."""
+        raw = "'auth_token': \"a\nb\""
+
+        sanitized = utils._sanitize_log_text(raw)
+
+        assert '"a' not in sanitized
+        assert '\nb"' in sanitized
+
+
+class TestSourceRecordMasking:
+    """Test install_source_record_masking (source-level LogRecord factory masking).
+
+    Covers the security-critical paths called out in review:
+    - third-party (non-jiuwenswarm) logger message masking,
+    - traceback-embedded secret masking,
+    - double-masking safety (_is_already_masked keeps fingerprint stable),
+    - idempotency.
+    """
+
+    PLAINTEXT_KEY = "sk-" + ("T" * 28)
+
+    @staticmethod
+    def _capture_logger(name):
+        """Build a logger with its own handler (no SensitiveDataFilter), so any
+        masking observed must come from the source record factory, not handler filter.
+        """
+        import io
+        import logging
+
+        lg = logging.getLogger(name)
+        for h in lg.handlers[:]:
+            lg.removeHandler(h)
+        buf = io.StringIO()
+        handler = logging.StreamHandler(buf)
+        # Formatter 默认在 message 后自动追加 traceback（若 record 有 exc_info/exc_text），
+        # 无需显式 %(exc_text)s，否则会与生产行为不一致导致 traceback 重复。
+        handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+        lg.addHandler(handler)
+        lg.setLevel(logging.DEBUG)
+        lg.propagate = False
+        return lg, buf
+
+    @staticmethod
+    def _save_state():
+        """Snapshot the global LogRecord factory + install flag for later restore."""
+        import logging
+
+        return logging.getLogRecordFactory(), utils._source_record_masking_installed
+
+    @staticmethod
+    def _restore_state(state):
+        """Restore the global factory + install flag (avoid cross-test pollution)."""
+        import logging
+
+        factory, flag = state
+        logging.setLogRecordFactory(factory)
+        utils._source_record_masking_installed = flag
+
+    def test_third_party_logger_message_masked(self):
+        """Source factory masks messages from non-jiuwenswarm loggers (openjiuwen/
+        openai/httpx style) that bypass the jiuwenswarm handler-level filter."""
+        import logging
+
+        state = self._save_state()
+        try:
+            # Reset to plain factory, then install — proves masking comes from install.
+            logging.setLogRecordFactory(logging.LogRecord)
+            utils._source_record_masking_installed = False
+            utils.install_source_record_masking()
+
+            lg, buf = self._capture_logger("openjiuwen.harness.security")
+            key = self.PLAINTEXT_KEY
+            lg.info("config: api_key=%s, base=https://log.example.invalid", key)
+            out = buf.getvalue()
+            assert key not in out, "plaintext api_key leaked from third-party logger"
+            assert "******" in out, "api_key not masked"
+            assert "https://log.example.invalid" in out, (
+                "non-sensitive api_base should be preserved"
+            )
+        finally:
+            self._restore_state(state)
+
+    def test_traceback_embedded_secret_masked(self):
+        """logger.exception masks api_key embedded in the rendered traceback."""
+        import logging
+
+        state = self._save_state()
+        try:
+            logging.setLogRecordFactory(logging.LogRecord)
+            utils._source_record_masking_installed = False
+            utils.install_source_record_masking()
+
+            lg, buf = self._capture_logger("openai._base_client")
+            key = self.PLAINTEXT_KEY
+            try:
+                raise ValueError("build failed: api_key=" + key)
+            except ValueError:
+                lg.exception("init error")
+            out = buf.getvalue()
+            assert key not in out, "plaintext api_key leaked via traceback"
+            assert "Traceback" in out, "traceback should still be rendered"
+            assert "******" in out, "api_key in traceback not masked"
+        finally:
+            self._restore_state(state)
+
+    def test_double_masking_preserves_fingerprint(self):
+        """A record masked at source, then re-processed by _sanitize_log_text (handler
+        layer), keeps the same fingerprint — _is_already_masked prevents 'fingerprint
+        of fingerprint' corruption."""
+        import logging
+        import re
+
+        state = self._save_state()
+        try:
+            logging.setLogRecordFactory(logging.LogRecord)
+            utils._source_record_masking_installed = False
+            utils.install_source_record_masking()
+
+            lg, buf = self._capture_logger("httpx")
+            key = self.PLAINTEXT_KEY
+            lg.info("api_key=%s", key)
+            source_out = buf.getvalue()
+
+            # Re-run the handler-layer sanitizer on the already-masked text.
+            double_masked = utils._sanitize_log_text(source_out)
+
+            fp_source = re.search(r"fp:([0-9a-f]+)", source_out)
+            fp_double = re.search(r"fp:([0-9a-f]+)", double_masked)
+            assert fp_source, "source masking should produce a fingerprint"
+            assert fp_double, "double-masked text should still carry a fingerprint"
+            assert fp_source.group(1) == fp_double.group(1), (
+                "fingerprint changed after double masking — _is_already_masked not effective"
+            )
+            # True fingerprint of the plaintext key (cross-check).
+            assert fp_source.group(1) == utils._fingerprint(key)
+        finally:
+            self._restore_state(state)
+
+    def test_cloud_credential_keys_masked(self):
+        """access_key / secret_key / project_id (e.g. HUAWEI_ACCESS_KEY) are
+        masked — the bare ``_KEY`` suffix form was a gap before access[_-]?key
+        / secret[_-]?key / project[_-]?id were added to the keyword list."""
+        raw = (
+            "params={'env': {'HUAWEI_ACCESS_KEY': 'HPUASSNLEYPK55WDLS5X', "
+            "'HUAWEI_PROJECT_ID': '4e273616d7724562be9c286f916cf417', "
+            "'HUAWEI_SECRET_KEY': 'xXznbRtIRS2Zq1QctJ0YgRErGeXP613rPnukZPtb'}}"
+        )
+        masked = utils._sanitize_log_text(raw)
+        assert "HPUASSNLEYPK55WDLS5X" not in masked, "HUAWEI_ACCESS_KEY leaked"
+        assert "xXznbRtIRS2Zq1QctJ0YgRErGeXP613rPnukZPtb" not in masked, "HUAWEI_SECRET_KEY leaked"
+        assert "4e273616d7724562be9c286f916cf417" not in masked, "HUAWEI_PROJECT_ID leaked"
+        assert masked.count("******") == 3, "all three credential fields must be masked"
+
+    def test_cli_flag_credentials_masked(self):
+        """Command-line flags serialized as list elements (pydantic repr of
+        args=['--token', 'xxx', '--api-key', 'yyy']) are masked — KV patterns
+        only match ``key:value`` / ``key=value``, not ``'--flag', 'value'``."""
+        raw = (
+            "args=['--token', 'tok-secret', '--api-key', 'ak-secret', "
+            "'--access-key', 'ak2-secret', '--secret-key', 'sk-secret']"
+        )
+        masked = utils._sanitize_log_text(raw)
+        assert "tok-secret" not in masked, "--token value leaked"
+        assert "ak-secret" not in masked, "--api-key value leaked"
+        assert "ak2-secret" not in masked, "--access-key value leaked"
+        assert "sk-secret" not in masked, "--secret-key value leaked"
+
+    def test_install_is_idempotent(self):
+        """Repeated install_source_record_masking calls are safe (no-op after first)."""
+        import logging
+
+        state = self._save_state()
+        try:
+            logging.setLogRecordFactory(logging.LogRecord)
+            utils._source_record_masking_installed = False
+            utils.install_source_record_masking()
+            factory_after_first = logging.getLogRecordFactory()
+            utils.install_source_record_masking()
+            factory_after_second = logging.getLogRecordFactory()
+            assert factory_after_first is factory_after_second, (
+                "second install should not replace the factory (idempotent)"
+            )
+            assert utils._source_record_masking_installed is True
+        finally:
+            self._restore_state(state)
+
+
+def test_sanitize_log_text_stays_linear_on_long_identifier_runs():
+    """A long identifier-like run must not make masking quadratic.
+
+    Tool results and model output routinely carry long unbroken runs (base64,
+    hashes, minified code). The named-key pattern once rescanned the run from
+    every offset, so 8k chars took seconds and 200k chars would take minutes.
+    """
+    run = "y" * 200_000
+    raw = f"{run} {{'CAT_CAFE_CALLBACK_TOKEN': 'tok-secret'}} {run}"
+
+    started = time.perf_counter()
+    masked = utils._sanitize_log_text(raw)
+    elapsed = time.perf_counter() - started
+
+    assert "tok-secret" not in masked
+    assert masked.startswith(run)
+    assert elapsed < 2.0, f"masking 400k chars took {elapsed:.2f}s"
+
 
 class TestUserWorkspace:
     """Test user workspace functions."""
 
-    @patch("jiuwenclaw.common.utils.get_user_workspace_dir")
-    @patch("jiuwenclaw.common.utils._find_package_root")
+    @patch("jiuwenswarm.common.utils.get_user_workspace_dir")
+    @patch("jiuwenswarm.common.utils._find_package_root")
     @patch("pathlib.Path.exists")
     @patch("builtins.input")
     def test_init_user_workspace_cancelled(
@@ -114,6 +435,80 @@ class TestUserWorkspace:
         # This test requires more complex mocking due to file operations
         # Simplified version
         pass
+
+
+def test_prepare_workspace_does_not_copy_legacy_heartbeat_template(
+    tmp_path: Path,
+) -> None:
+    workspace_dir = tmp_path / ".jiuwenswarm"
+
+    utils.prepare_workspace(
+        overwrite=False,
+        preferred_language="en",
+        workspace_dir=workspace_dir,
+    )
+
+    assert not (workspace_dir / "agent" / "workspace" / "HEARTBEAT.md").exists()
+
+
+def test_prepare_workspace_copies_rsi_program_dataset_creator(
+    tmp_path: Path,
+) -> None:
+    """Initial workspace preparation includes the new built-in skill."""
+    workspace_dir = tmp_path / ".jiuwenswarm"
+
+    utils.prepare_workspace(
+        overwrite=False,
+        preferred_language="en",
+        workspace_dir=workspace_dir,
+    )
+
+    assert (
+        workspace_dir
+        / "agent"
+        / "workspace"
+        / "skills"
+        / "rsi-program-dataset-creator"
+        / "SKILL.md"
+    ).is_file()
+
+
+@pytest.mark.parametrize("skill_name", ["rsi-program-dataset-creator", "agent-group-creator"])
+def test_ensure_default_builtin_skills_installs_program_evolution_design(
+    tmp_path: Path,
+    monkeypatch,
+    skill_name,
+) -> None:
+    """New built-in skills are copied into an existing workspace on startup."""
+    builtin_dir = tmp_path / "builtin-skills"
+    user_skills_dir = tmp_path / "user-skills"
+    source_skill = builtin_dir / skill_name
+    source_skill.mkdir(parents=True)
+    (source_skill / "SKILL.md").write_text(
+        f"---\nname: {skill_name}\ndescription: test\n---\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(utils, "get_builtin_skills_dir", lambda: builtin_dir)
+    monkeypatch.setattr(utils, "get_agent_skills_dir", lambda: user_skills_dir)
+
+    utils.ensure_default_builtin_skills()
+
+    installed_skill = user_skills_dir / skill_name
+    assert (installed_skill / "SKILL.md").read_text(encoding="utf-8") == (
+        source_skill / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    state = json.loads(
+        (user_skills_dir / "skills_state.json").read_text(encoding="utf-8")
+    )
+    assert any(
+        item.get("name") == skill_name
+        and item.get("source") == "builtin"
+        for item in state["installed_plugins"]
+    )
+
+    installed_skill.joinpath("SKILL.md").write_text("user edit\n", encoding="utf-8")
+    utils.ensure_default_builtin_skills()
+    assert installed_skill.joinpath("SKILL.md").read_text(encoding="utf-8") == "user edit\n"
 
 
 class TestConstants:
@@ -126,34 +521,37 @@ class TestConstants:
         assert isinstance(utils.get_user_home(), Path)
 
     @staticmethod
-    def test_get_user_workspace_dir_defined():
+    def test_get_user_workspace_dir_defined(monkeypatch):
         """Test get_user_workspace_dir is defined."""
+        monkeypatch.delenv("JIUWENSWARM_DATA_DIR", raising=False)
+        monkeypatch.setattr(utils, "_workspace_base_dir", None)
+        monkeypatch.setattr(utils, "_user_home", None)
         assert hasattr(utils, "get_user_workspace_dir")
         assert isinstance(utils.get_user_workspace_dir(), Path)
-        assert ".jiuwenclaw" in str(utils.get_user_workspace_dir())
+        assert ".jiuwenswarm" in str(utils.get_user_workspace_dir())
 
 
 class TestMultiInstanceEnvVars:
     """Test environment variable support for multi-instance isolation (Phase 1)."""
 
     @staticmethod
-    def test_jiuwenclaw_workspace_env_var():
-        """Test JIUWENCLAW_DATA_DIR environment variable overrides default workspace."""
+    def test_workspace_env_var():
+        """Test JIUWENSWARM_DATA_DIR environment variable overrides default workspace."""
         # Reset cache before test - must reset _workspace_base_dir for workspace tests
         setattr(utils, '_workspace_base_dir', None)
         setattr(utils, '_user_home', None)
-        original_env = os.environ.pop("JIUWENCLAW_DATA_DIR", None)
-        original_home_env = os.environ.pop("JIUWENCLAW_HOME", None)
+        original_env = os.environ.pop("JIUWENSWARM_DATA_DIR", None)
+        original_home_env = os.environ.pop("JIUWENSWARM_HOME", None)
 
         try:
             # Test default behavior
             default_workspace = utils.get_user_workspace_dir()
-            assert ".jiuwenclaw" in str(default_workspace)
+            assert ".jiuwenswarm" in str(default_workspace)
 
             # Reset cache and set env var
             setattr(utils, '_workspace_base_dir', None)
             setattr(utils, '_user_home', None)
-            os.environ["JIUWENCLAW_DATA_DIR"] = "/custom/workspace/path"
+            os.environ["JIUWENSWARM_DATA_DIR"] = "/custom/workspace/path"
             custom_workspace = utils.get_user_workspace_dir()
             # Use Path comparison for cross-platform compatibility
             assert custom_workspace == Path("/custom/workspace/path")
@@ -161,68 +559,158 @@ class TestMultiInstanceEnvVars:
             # Cleanup
             setattr(utils, '_workspace_base_dir', None)
             setattr(utils, '_user_home', None)
-            os.environ.pop("JIUWENCLAW_DATA_DIR", None)
+            os.environ.pop("JIUWENSWARM_DATA_DIR", None)
             if original_env:
-                os.environ["JIUWENCLAW_DATA_DIR"] = original_env
+                os.environ["JIUWENSWARM_DATA_DIR"] = original_env
             if original_home_env:
-                os.environ["JIUWENCLAW_HOME"] = original_home_env
+                os.environ["JIUWENSWARM_HOME"] = original_home_env
 
     @staticmethod
-    def test_jiuwenclaw_home_env_var():
-        """Test JIUWENCLAW_HOME environment variable overrides default home."""
+    def test_jiuwenswarm_home_env_var():
+        """Test JIUWENSWARM_HOME environment variable overrides default home."""
         # Reset cache before test
         setattr(utils, '_user_home', None)
-        original_home_env = os.environ.pop("JIUWENCLAW_HOME", None)
-        original_workspace_env = os.environ.pop("JIUWENCLAW_DATA_DIR", None)
+        original_home_env = os.environ.pop("JIUWENSWARM_HOME", None)
+        original_workspace_env = os.environ.pop("JIUWENSWARM_DATA_DIR", None)
 
         try:
-            # Set JIUWENCLAW_HOME
-            os.environ["JIUWENCLAW_HOME"] = "/custom/home"
+            # Set JIUWENSWARM_HOME
+            os.environ["JIUWENSWARM_HOME"] = "/custom/home"
             custom_home = utils.get_user_home()
             assert custom_home == Path("/custom/home")
 
             # Workspace should derive from custom home
             setattr(utils, '_user_home', None)
-            os.environ.pop("JIUWENCLAW_HOME", None)  # Clear for fresh test
+            os.environ.pop("JIUWENSWARM_HOME", None)  # Clear for fresh test
             workspace = utils.get_user_workspace_dir()
             # Without env vars, should use Path.home()
             assert isinstance(workspace, Path)
         finally:
             # Cleanup
             setattr(utils, '_user_home', None)
-            os.environ.pop("JIUWENCLAW_HOME", None)
-            os.environ.pop("JIUWENCLAW_DATA_DIR", None)
+            os.environ.pop("JIUWENSWARM_HOME", None)
+            os.environ.pop("JIUWENSWARM_DATA_DIR", None)
             if original_home_env:
-                os.environ["JIUWENCLAW_HOME"] = original_home_env
+                os.environ["JIUWENSWARM_HOME"] = original_home_env
             if original_workspace_env:
-                os.environ["JIUWENCLAW_DATA_DIR"] = original_workspace_env
+                os.environ["JIUWENSWARM_DATA_DIR"] = original_workspace_env
 
     @staticmethod
     def test_workspace_priority_over_home():
-        """Test JIUWENCLAW_DATA_DIR takes priority over JIUWENCLAW_HOME for workspace."""
+        """Test JIUWENSWARM_DATA_DIR takes priority over JIUWENSWARM_HOME for workspace."""
         # Reset both caches - _workspace_base_dir is used by get_user_workspace_dir
         setattr(utils, '_workspace_base_dir', None)
         setattr(utils, '_user_home', None)
-        original_home_env = os.environ.pop("JIUWENCLAW_HOME", None)
-        original_workspace_env = os.environ.pop("JIUWENCLAW_DATA_DIR", None)
+        original_home_env = os.environ.pop("JIUWENSWARM_HOME", None)
+        original_workspace_env = os.environ.pop("JIUWENSWARM_DATA_DIR", None)
 
         try:
             # Set both env vars
-            os.environ["JIUWENCLAW_HOME"] = "/home/a"
-            os.environ["JIUWENCLAW_DATA_DIR"] = "/workspace/b"
+            os.environ["JIUWENSWARM_HOME"] = "/home/a"
+            os.environ["JIUWENSWARM_DATA_DIR"] = "/workspace/b"
 
-            # Workspace should use JIUWENCLAW_DATA_DIR directly, not derive from HOME
+            # Workspace should use JIUWENSWARM_DATA_DIR directly, not derive from HOME
             workspace = utils.get_user_workspace_dir()
             assert workspace == Path("/workspace/b")
         finally:
             setattr(utils, '_workspace_base_dir', None)
             setattr(utils, '_user_home', None)
-            os.environ.pop("JIUWENCLAW_HOME", None)
-            os.environ.pop("JIUWENCLAW_DATA_DIR", None)
+            os.environ.pop("JIUWENSWARM_HOME", None)
+            os.environ.pop("JIUWENSWARM_DATA_DIR", None)
             if original_home_env:
-                os.environ["JIUWENCLAW_HOME"] = original_home_env
+                os.environ["JIUWENSWARM_HOME"] = original_home_env
             if original_workspace_env:
-                os.environ["JIUWENCLAW_DATA_DIR"] = original_workspace_env
+                os.environ["JIUWENSWARM_DATA_DIR"] = original_workspace_env
+
+
+class TestFreeSearchRuntimeDefaults:
+    """Test apply_free_search_runtime_defaults (free-search opt-in survives process start).
+
+    Every entrypoint calls this immediately after loading `.env`. Its predecessor
+    assigned both flags unconditionally, so a value read from `.env` — including one
+    the config UI had just persisted — was discarded one line later, and enabling free
+    search was silently lost on the next restart.
+    """
+
+    DDG_FLAG = "FREE_SEARCH_DDG_ENABLED"
+    BING_FLAG = "FREE_SEARCH_BING_ENABLED"
+
+    @staticmethod
+    def _unset(monkeypatch, *names):
+        """Unset flags so monkeypatch still restores them after the test.
+
+        `delenv` alone records nothing when the variable is already absent, so the
+        `setdefault` under test would leak its value into later tests.
+        """
+        for name in names:
+            monkeypatch.setenv(name, "")
+            monkeypatch.delenv(name)
+
+    def test_explicit_opt_in_survives(self, monkeypatch):
+        """An explicit opt-in from .env, the config UI, or the shell is preserved."""
+        monkeypatch.setenv(self.DDG_FLAG, "true")
+        monkeypatch.setenv(self.BING_FLAG, "true")
+
+        utils.apply_free_search_runtime_defaults()
+
+        assert os.environ[self.DDG_FLAG] == "true", "explicit DDG opt-in was discarded"
+        assert os.environ[self.BING_FLAG] == "true", "explicit Bing opt-in was discarded"
+
+    def test_explicit_opt_out_is_left_alone(self, monkeypatch):
+        """An explicit "false" stays disabled — the default never re-enables anything."""
+        monkeypatch.setenv(self.DDG_FLAG, "false")
+        monkeypatch.setenv(self.BING_FLAG, "false")
+
+        utils.apply_free_search_runtime_defaults()
+
+        assert os.environ[self.DDG_FLAG] == "false"
+        assert os.environ[self.BING_FLAG] == "false"
+
+    def test_unset_flags_get_the_disabled_default(self, monkeypatch):
+        """A fresh install that configures nothing still starts with both engines off."""
+        self._unset(monkeypatch, self.DDG_FLAG, self.BING_FLAG)
+
+        utils.apply_free_search_runtime_defaults()
+
+        assert os.environ[self.DDG_FLAG] == "false"
+        assert os.environ[self.BING_FLAG] == "false"
+
+    def test_empty_value_is_kept_and_still_reads_as_disabled(self, monkeypatch):
+        """An empty value counts as set, and both consumers still treat it as off."""
+        from jiuwenswarm.agents.harness.common.tools.mcp_toolkits import _is_free_search_enabled
+        from jiuwenswarm.agents.harness.common.tools.search_tools import _env_flag
+
+        monkeypatch.setenv(self.DDG_FLAG, "")
+        monkeypatch.setenv(self.BING_FLAG, "")
+
+        utils.apply_free_search_runtime_defaults()
+
+        assert (
+            os.environ[self.DDG_FLAG] == ""
+        ), "an empty value is set, so it is not a default to fill"
+        assert os.environ[self.BING_FLAG] == ""
+        # Blank reads as disabled on both sides, so keeping it changes no behaviour.
+        assert _env_flag(self.DDG_FLAG, default=False) is False
+        assert _env_flag(self.BING_FLAG, default=False) is False
+        assert _is_free_search_enabled() is False
+
+    def test_flags_are_handled_independently(self, monkeypatch):
+        """Opting one engine in leaves the other at the disabled default."""
+        self._unset(monkeypatch, self.BING_FLAG)
+        monkeypatch.setenv(self.DDG_FLAG, "true")
+
+        utils.apply_free_search_runtime_defaults()
+
+        assert os.environ[self.DDG_FLAG] == "true", "DDG opt-in was discarded"
+        assert os.environ[self.BING_FLAG] == "false", "unset Bing flag should take the default"
+
+        self._unset(monkeypatch, self.DDG_FLAG)
+        monkeypatch.setenv(self.BING_FLAG, "true")
+
+        utils.apply_free_search_runtime_defaults()
+
+        assert os.environ[self.BING_FLAG] == "true", "Bing opt-in was discarded"
+        assert os.environ[self.DDG_FLAG] == "false", "unset DDG flag should take the default"
 
 
 class TestHardcodedPathsPhase2:
@@ -234,7 +722,7 @@ class TestHardcodedPathsPhase2:
     @staticmethod
     def test_cron_tools_path_equivalence():
         """Test cron_tools.py path matches expected structure (cross-platform)."""
-        from jiuwenclaw.common.utils import get_agent_home_dir, get_user_workspace_dir
+        from jiuwenswarm.common.utils import get_agent_home_dir, get_user_workspace_dir
 
         # Original hardcoded: get_user_workspace_dir() / "agent" / "home" / "cron_jobs.json"
         # New: get_agent_home_dir() / "cron_jobs.json"
@@ -249,7 +737,7 @@ class TestHardcodedPathsPhase2:
 
     @staticmethod
     def test_task_tools_path_structure():
-        """Test task_tools.py path uses jiuwenclaw_workspace (migrated from legacy workspace)."""
+        """Test task_tools.py path uses workspace (migrated from legacy jiuwenswarm_workspace)."""
         # Reset caches to ensure clean state after previous tests
         setattr(utils, '_user_home', None)
         setattr(utils, '_initialized', False)
@@ -257,11 +745,11 @@ class TestHardcodedPathsPhase2:
         setattr(utils, '_workspace_dir', None)
         setattr(utils, '_root_dir', None)
 
-        from jiuwenclaw.agents.harness.common.tools.task_tools import _get_task_data_path
-        from jiuwenclaw.common.utils import get_user_workspace_dir
+        from jiuwenswarm.agents.harness.common.tools.task_tools import _get_task_data_path
+        from jiuwenswarm.common.utils import get_user_workspace_dir
 
         workspace = get_user_workspace_dir()
-        expected_path = workspace / "agent" / "jiuwenclaw_workspace" / "task-data.json"
+        expected_path = workspace / "agent" / "workspace" / "task-data.json"
         actual_path = Path(_get_task_data_path())
 
         assert str(actual_path.resolve()) == str(expected_path.resolve()), \
@@ -277,10 +765,10 @@ class TestHardcodedPathsPhase2:
         setattr(utils, '_workspace_dir', None)
         setattr(utils, '_root_dir', None)
 
-        from jiuwenclaw.common.utils import get_deepagent_user_md_path, get_user_workspace_dir
+        from jiuwenswarm.common.utils import get_deepagent_user_md_path, get_user_workspace_dir
 
         workspace = get_user_workspace_dir()
-        expected_path = workspace / "agent" / "jiuwenclaw_workspace" / "USER.md"
+        expected_path = workspace / "agent" / "workspace" / "USER.md"
         actual_path = get_deepagent_user_md_path()
 
         assert str(actual_path.resolve()) == str(expected_path.resolve()), \
@@ -294,13 +782,16 @@ class TestAdditionalHardcodedPaths:
     """
 
     @staticmethod
-    def test_rail_manager_path_structure():
+    def test_rail_manager_path_structure(monkeypatch):
         """Test rail_manager.py uses get_agent_workspace_dir() for extensions path."""
-        from jiuwenclaw.agents.harness.common.plugins.rail_manager import RailManager
-        from jiuwenclaw.common.utils import get_user_workspace_dir
+        from jiuwenswarm.agents.harness.common.plugins.rail_manager import RailManager
+        from jiuwenswarm.common.utils import get_user_workspace_dir
+
+        # RailManager is a singleton; drop any instance built under another test's workspace.
+        monkeypatch.setattr(RailManager, "_instance", None)
 
         workspace = get_user_workspace_dir()
-        expected_path = workspace / "agent" / "jiuwenclaw_workspace" / "extensions"
+        expected_path = workspace / "agent" / "workspace" / "extensions"
         rail_manager = RailManager()
 
         extensions_dir = getattr(rail_manager, '_extensions_dir')
@@ -308,17 +799,20 @@ class TestAdditionalHardcodedPaths:
             f"Expected: {expected_path.resolve()}, Got: {extensions_dir.resolve()}"
 
     @staticmethod
-    def test_config_module_dir_structure():
-        """Test config.py _CONFIG_MODULE_DIR uses get_config_dir()."""
-        from jiuwenclaw.common.config import _CONFIG_MODULE_DIR
-        from jiuwenclaw.common.utils import get_config_dir
+    def test_config_module_dir_structure(tmp_path):
+        """Test config.py _CONFIG_MODULE_DIR honors explicit config dir."""
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
 
-        config_dir = get_config_dir()
-        expected_path = config_dir
+        import jiuwenswarm.common.config as config_module
 
-        # Use absolute path comparison
-        assert str(_CONFIG_MODULE_DIR.resolve()) == str(expected_path.resolve()), \
-            f"Expected: {expected_path.resolve()}, Got: {_CONFIG_MODULE_DIR.resolve()}"
+        with patch.dict(os.environ, {"JIUWENSWARM_CONFIG_DIR": str(config_dir)}):
+            config_module = importlib.reload(config_module)
+            module_config_dir = config_module.__dict__["_CONFIG_MODULE_DIR"]
+            assert str(module_config_dir.resolve()) == str(config_dir.resolve()), \
+                f"Expected: {config_dir.resolve()}, Got: {module_config_dir.resolve()}"
+
+        importlib.reload(config_module)
 
     @staticmethod
     def test_interactions_dir_structure():
@@ -327,13 +821,178 @@ class TestAdditionalHardcodedPaths:
         setattr(utils, '_user_home', None)
         setattr(utils, '_workspace_base_dir', None)
 
-        from jiuwenclaw.common.utils import get_interactions_dir, get_user_workspace_dir
+        from jiuwenswarm.common.utils import get_interactions_dir, get_user_workspace_dir
 
         workspace = get_user_workspace_dir()
-        expected_path = workspace / "agent" / "jiuwenclaw_workspace" / "interactions"
+        expected_path = workspace / "agent" / "workspace" / "interactions"
         actual_path = get_interactions_dir()
 
         assert str(actual_path.resolve()) == str(expected_path.resolve()), \
             f"Expected: {expected_path.resolve()}, Got: {actual_path.resolve()}"
 
-    
+
+class TestCleanupStaleOpenjiuwenDescs:
+    @staticmethod
+    def _fake_package(tmp_path):
+        import types
+
+        package_dir = tmp_path / "openjiuwen"
+        package_dir.mkdir()
+        fake = types.ModuleType("openjiuwen")
+        fake.__file__ = str(package_dir / "__init__.py")
+        return fake, package_dir / "agent_teams" / "tools" / "locales" / "descs"
+
+    @staticmethod
+    def test_removes_only_flat_files_with_nested_replacements(tmp_path):
+        fake, descs = TestCleanupStaleOpenjiuwenDescs._fake_package(tmp_path)
+
+        for lang in ("cn", "en"):
+            domain_dir = descs / lang / "async_task"
+            domain_dir.mkdir(parents=True)
+            (domain_dir / "async_task_cancel.md").write_text("new", encoding="utf-8")
+            (descs / lang / "async_task_cancel.md").write_text("old", encoding="utf-8")
+            (descs / lang / "flat_only.md").write_text("canonical", encoding="utf-8")
+
+            fragments = descs / lang / "fragments"
+            fragments.mkdir()
+            (fragments / "fragment_name.md").write_text("fragment", encoding="utf-8")
+            (descs / lang / "fragment_name.md").write_text("canonical", encoding="utf-8")
+
+        with patch.dict(sys.modules, {"openjiuwen": fake}):
+            utils.cleanup_stale_openjiuwen_descs()
+
+        for lang in ("cn", "en"):
+            assert not (descs / lang / "async_task_cancel.md").exists()
+            assert (descs / lang / "async_task" / "async_task_cancel.md").exists()
+            assert (descs / lang / "flat_only.md").exists()
+            assert (descs / lang / "fragment_name.md").exists()
+
+    @staticmethod
+    def test_raises_actionable_error_when_stale_file_is_not_writable(tmp_path):
+        fake, descs = TestCleanupStaleOpenjiuwenDescs._fake_package(tmp_path)
+        domain_dir = descs / "cn" / "async_task"
+        domain_dir.mkdir(parents=True)
+        (domain_dir / "async_task_cancel.md").write_text("new", encoding="utf-8")
+        flat = descs / "cn" / "async_task_cancel.md"
+        flat.write_text("old", encoding="utf-8")
+
+        with (
+            patch.dict(sys.modules, {"openjiuwen": fake}),
+            patch.object(Path, "unlink", side_effect=PermissionError("read-only")),
+            pytest.raises(RuntimeError, match="reinstall OpenJiuwen"),
+        ):
+            utils.cleanup_stale_openjiuwen_descs()
+
+        assert flat.exists()
+
+    @staticmethod
+    def test_tolerates_concurrent_removal(tmp_path):
+        fake, descs = TestCleanupStaleOpenjiuwenDescs._fake_package(tmp_path)
+        domain_dir = descs / "cn" / "async_task"
+        domain_dir.mkdir(parents=True)
+        (domain_dir / "async_task_cancel.md").write_text("new", encoding="utf-8")
+        (descs / "cn" / "async_task_cancel.md").write_text("old", encoding="utf-8")
+
+        with (
+            patch.dict(sys.modules, {"openjiuwen": fake}),
+            patch.object(Path, "unlink", side_effect=FileNotFoundError),
+        ):
+            utils.cleanup_stale_openjiuwen_descs()
+
+    @staticmethod
+    def test_skips_cleanup_for_frozen_windows_bundle(tmp_path, monkeypatch):
+        fake, descs = TestCleanupStaleOpenjiuwenDescs._fake_package(tmp_path)
+        domain_dir = descs / "cn" / "async_task"
+        domain_dir.mkdir(parents=True)
+        (domain_dir / "async_task_cancel.md").write_text("new", encoding="utf-8")
+        flat = descs / "cn" / "async_task_cancel.md"
+        flat.write_text("old", encoding="utf-8")
+
+        monkeypatch.setattr(utils.sys, "platform", "win32")
+        monkeypatch.setattr(utils.sys, "frozen", True, raising=False)
+        with (
+            patch.dict(sys.modules, {"openjiuwen": fake}),
+            patch.object(Path, "unlink", side_effect=PermissionError("read-only")),
+        ):
+            utils.cleanup_stale_openjiuwen_descs()
+
+        assert flat.exists()
+
+    @staticmethod
+    def test_noop_when_openjiuwen_missing():
+        with patch.dict(sys.modules, {"openjiuwen": None}):
+            utils.cleanup_stale_openjiuwen_descs()
+
+    @staticmethod
+    @pytest.mark.parametrize(
+        "relative_path",
+        (
+            "jiuwenswarm/app.py",
+            "jiuwenswarm/gateway/app_gateway.py",
+        ),
+    )
+    def test_startup_entrypoints_clean_before_openjiuwen_import(relative_path):
+        root = Path(__file__).resolve().parents[2]
+        source = (root / relative_path).read_text(encoding="utf-8")
+        cleanup_call = source.index("cleanup_stale_openjiuwen_descs()")
+
+        openjiuwen_imports = [
+            source.find(marker)
+            for marker in ("from openjiuwen", "import openjiuwen")
+            if source.find(marker) >= 0
+        ]
+        if openjiuwen_imports:
+            assert cleanup_call < min(openjiuwen_imports)
+
+    @staticmethod
+    def test_agentserver_runtime_backend_cleans_before_openjiuwen_import():
+        """Front defers OpenJiuwen; Runtime backend must still clean first."""
+        root = Path(__file__).resolve().parents[2]
+        source = (root / "jiuwenswarm" / "server" / "worker" / "lifecycle.py").read_text(
+            encoding="utf-8"
+        )
+        tree = ast.parse(source)
+        func = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "_preload_runtime_backend"
+        )
+        cleanup_lineno: int | None = None
+        openjiuwen_lineno: int | None = None
+        for node in ast.walk(func):
+            if isinstance(node, ast.Call):
+                name = None
+                if isinstance(node.func, ast.Name):
+                    name = node.func.id
+                elif isinstance(node.func, ast.Attribute):
+                    name = node.func.attr
+                if name == "prepare_runtime_workspace":
+                    keywords = {kw.arg: kw.value for kw in node.keywords}
+                    flag = keywords.get("cleanup_stale_descs")
+                    if isinstance(flag, ast.Constant) and flag.value is True:
+                        cleanup_lineno = node.lineno
+                if (
+                    isinstance(node.func, ast.Name)
+                    and node.func.id == "_configure_openjiuwen_logging"
+                ):
+                    openjiuwen_lineno = (
+                        node.lineno if openjiuwen_lineno is None else min(openjiuwen_lineno, node.lineno)
+                    )
+            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
+                "openjiuwen"
+            ):
+                openjiuwen_lineno = (
+                    node.lineno if openjiuwen_lineno is None else min(openjiuwen_lineno, node.lineno)
+                )
+            if isinstance(node, ast.Import):
+                if any(
+                    alias.name == "openjiuwen" or alias.name.startswith("openjiuwen.")
+                    for alias in node.names
+                ):
+                    openjiuwen_lineno = (
+                        node.lineno if openjiuwen_lineno is None else min(openjiuwen_lineno, node.lineno)
+                    )
+        assert cleanup_lineno is not None
+        assert openjiuwen_lineno is not None
+        assert cleanup_lineno < openjiuwen_lineno

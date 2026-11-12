@@ -1,6 +1,6 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
-"""Unit tests for ProjectMemoryRail (jiuwenclaw product-side)."""
+"""Unit tests for ProjectMemoryRail (jiuwenswarm product-side)."""
 from __future__ import annotations
 
 import tempfile
@@ -11,12 +11,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from jiuwenclaw.agents.harness.common.rails import project_memory_rail as _rail_mod
-from jiuwenclaw.agents.harness.common.rails.project_memory import SECTION_NAME
-from jiuwenclaw.agents.harness.common.rails.project_memory import (
+from jiuwenswarm.agents.harness.common.rails import project_memory_rail as _rail_mod
+from jiuwenswarm.agents.harness.common.rails.project_memory import SECTION_NAME
+from jiuwenswarm.agents.harness.common.rails.project_memory import (
     files as _files_mod,
 )
-from jiuwenclaw.agents.harness.common.rails.project_memory_rail import (
+from jiuwenswarm.agents.harness.common.rails.project_memory_rail import (
     ProjectMemoryRail,
 )
 
@@ -61,24 +61,45 @@ def _make_agent_with_builder() -> MagicMock:
     return agent
 
 
+def _make_ctx(agent: MagicMock, session_id: str = "sess1") -> SimpleNamespace:
+    return SimpleNamespace(
+        agent=agent,
+        session=SimpleNamespace(session_id=session_id),
+        inputs=SimpleNamespace(),
+        extra={},
+    )
+
+
+async def _project_memory_section(agent: MagicMock):
+    for section in reversed(agent.system_prompt_builder.added_sections):
+        if section.name == SECTION_NAME:
+            return section
+    return None
+
+
+async def _project_memory_body(agent: MagicMock, language: str = "en") -> str:
+    for section in reversed(agent.system_prompt_builder.added_sections):
+        if section.name == SECTION_NAME:
+            return section.render(language)
+    return ""
+
+
 @pytest.mark.asyncio
-async def test_loads_jiuwenclaw_md_from_root():
+async def test_loads_jiuwenswarm_md_from_root():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         _touch(root, ".git/HEAD", "")
-        _touch(root, "JIUWENCLAW.md", "# test\nPROJECT RULE 1\n")
+        _touch(root, "JIUWENSWARM.md", "# test\nPROJECT RULE 1\n")
 
         rail = ProjectMemoryRail(workspace=str(root), language="en")
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
+        await rail.before_model_call(ctx=_make_ctx(agent))
 
-        sections = agent.system_prompt_builder.added_sections
-        assert sections
-        section = sections[-1]
-        assert section.name == SECTION_NAME
-        assert "PROJECT RULE 1" in section.content["en"]
-        assert "PROJECT RULE 1" in section.content["cn"]
+        section = await _project_memory_section(agent)
+        assert section is not None
+        assert "PROJECT RULE 1" in section.render("en")
+        agent.system_prompt_builder.add_section.assert_called()
 
 
 @pytest.mark.asyncio
@@ -86,16 +107,16 @@ async def test_section_is_bilingual_with_localized_headers():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         _touch(root, ".git/HEAD", "")
-        _touch(root, "JIUWENCLAW.md", "BODY")
+        _touch(root, "JIUWENSWARM.md", "BODY")
 
         rail = ProjectMemoryRail(workspace=str(root), language="en")
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
+        await rail.before_model_call(ctx=_make_ctx(agent))
 
-        section = agent.system_prompt_builder.added_sections[-1]
-        assert "Project Memory" in section.content["en"]
-        assert "项目记忆" in section.content["cn"]
+        section = await _project_memory_section(agent)
+        assert section is not None
+        assert "Project Memory" in section.render("en")
 
 
 @pytest.mark.asyncio
@@ -103,15 +124,15 @@ async def test_merges_nested_project_memory_files():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         _touch(root, ".git/HEAD", "")
-        _touch(root, "JIUWENCLAW.md", "JIUWEN-CONTENT")
-        _touch(root, ".jiuwen/JIUWENCLAW.md", "NESTED-JIUWEN-CONTENT")
+        _touch(root, "JIUWENSWARM.md", "JIUWEN-CONTENT")
+        _touch(root, ".jiuwen/JIUWENSWARM.md", "NESTED-JIUWEN-CONTENT")
 
         rail = ProjectMemoryRail(workspace=str(root), language="cn")
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
+        await rail.before_model_call(ctx=_make_ctx(agent))
 
-        body = agent.system_prompt_builder.added_sections[-1].content["cn"]
+        body = await _project_memory_body(agent, "cn")
         assert "JIUWEN-CONTENT" in body
         assert "NESTED-JIUWEN-CONTENT" in body
 
@@ -121,15 +142,15 @@ async def test_local_takes_highest_priority_position():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         _touch(root, ".git/HEAD", "")
-        _touch(root, "JIUWENCLAW.md", "PROJECT-LINE")
-        _touch(root, "JIUWENCLAW.local.md", "LOCAL-LINE")
+        _touch(root, "JIUWENSWARM.md", "PROJECT-LINE")
+        _touch(root, "JIUWENSWARM.local.md", "LOCAL-LINE")
 
         rail = ProjectMemoryRail(workspace=str(root), language="en")
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
+        await rail.before_model_call(ctx=_make_ctx(agent))
 
-        body = agent.system_prompt_builder.added_sections[-1].content["en"]
+        body = await _project_memory_body(agent, "en")
         assert body.index("PROJECT-LINE") < body.index("LOCAL-LINE")
 
 
@@ -142,13 +163,9 @@ async def test_empty_directory_no_section():
         rail = ProjectMemoryRail(workspace=str(root), language="en")
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
+        await rail.before_model_call(ctx=_make_ctx(agent))
 
-        project_sections = [
-            s for s in agent.system_prompt_builder.added_sections
-            if s.name == SECTION_NAME
-        ]
-        assert project_sections == []
+        assert await _project_memory_section(agent) is None
 
 
 @pytest.mark.asyncio
@@ -156,16 +173,16 @@ async def test_walk_up_from_subdir():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         _touch(root, ".git/HEAD", "")
-        _touch(root, "JIUWENCLAW.md", "ROOT-RULE")
+        _touch(root, "JIUWENSWARM.md", "ROOT-RULE")
         sub = root / "src" / "feature"
         sub.mkdir(parents=True)
 
         rail = ProjectMemoryRail(workspace=str(sub), language="en")
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
+        await rail.before_model_call(ctx=_make_ctx(agent))
 
-        body = agent.system_prompt_builder.added_sections[-1].content["en"]
+        body = await _project_memory_body(agent, "en")
         assert "ROOT-RULE" in body
 
 
@@ -174,18 +191,18 @@ async def test_refreshes_after_file_change():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         _touch(root, ".git/HEAD", "")
-        _touch(root, "JIUWENCLAW.md", "VERSION-1")
+        _touch(root, "JIUWENSWARM.md", "VERSION-1")
 
         rail = ProjectMemoryRail(workspace=str(root), language="en")
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
-        body1 = agent.system_prompt_builder.added_sections[-1].content["en"]
+        await rail.before_model_call(ctx=_make_ctx(agent))
+        body1 = await _project_memory_body(agent, "en")
         assert "VERSION-1" in body1
 
-        _touch(root, "JIUWENCLAW.md", "VERSION-2")
-        await rail.before_model_call(ctx=MagicMock())
-        body2 = agent.system_prompt_builder.added_sections[-1].content["en"]
+        _touch(root, "JIUWENSWARM.md", "VERSION-2")
+        await rail.before_model_call(ctx=_make_ctx(agent))
+        body2 = await _project_memory_body(agent, "en")
         assert "VERSION-2" in body2
         assert "VERSION-1" not in body2
 
@@ -201,13 +218,9 @@ async def test_ignores_legacy_runtime_files():
         rail = ProjectMemoryRail(workspace=str(root), language="en")
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
+        await rail.before_model_call(ctx=_make_ctx(agent))
 
-        sections = [
-            s for s in agent.system_prompt_builder.added_sections
-            if s.name == SECTION_NAME
-        ]
-        assert sections == []
+        assert await _project_memory_section(agent) is None
 
 
 @pytest.mark.asyncio
@@ -221,9 +234,9 @@ async def test_reads_rules_glob_dir():
         rail = ProjectMemoryRail(workspace=str(root), language="en")
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
+        await rail.before_model_call(ctx=_make_ctx(agent))
 
-        body = agent.system_prompt_builder.added_sections[-1].content["en"]
+        body = await _project_memory_body(agent, "en")
         assert "STYLE-RULE" in body
         assert "TEST-RULE" in body
 
@@ -236,16 +249,16 @@ async def test_supports_include_directives():
         _touch(root, ".jiuwen/rules/shared.md", "SHARED-RULE")
         _touch(
             root,
-            "JIUWENCLAW.md",
+            "JIUWENSWARM.md",
             "ROOT-LINE\n@include .jiuwen/rules/shared.md\nTAIL-LINE\n",
         )
 
         rail = ProjectMemoryRail(workspace=str(root), language="en")
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
+        await rail.before_model_call(ctx=_make_ctx(agent))
 
-        body = agent.system_prompt_builder.added_sections[-1].content["en"]
+        body = await _project_memory_body(agent, "en")
         assert "ROOT-LINE" in body
         assert "TAIL-LINE" in body
         assert "SHARED-RULE" in body
@@ -268,9 +281,9 @@ async def test_conditional_rule_matches_workspace_subdir():
         rail = ProjectMemoryRail(workspace=str(subdir), language="en")
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
+        await rail.before_model_call(ctx=_make_ctx(agent))
 
-        body = agent.system_prompt_builder.added_sections[-1].content["en"]
+        body = await _project_memory_body(agent, "en")
         assert "SCOPED-RULE" in body
 
 
@@ -290,9 +303,9 @@ async def test_conditional_rule_matches_inline_paths_list():
         rail = ProjectMemoryRail(workspace=str(subdir), language="en")
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
+        await rail.before_model_call(ctx=_make_ctx(agent))
 
-        body = agent.system_prompt_builder.added_sections[-1].content["en"]
+        body = await _project_memory_body(agent, "en")
         assert "INLINE-SCOPED-RULE" in body
 
 
@@ -312,13 +325,9 @@ async def test_conditional_rule_skips_nonmatching_workspace():
         rail = ProjectMemoryRail(workspace=str(docs), language="en")
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
+        await rail.before_model_call(ctx=_make_ctx(agent))
 
-        sections = [
-            s for s in agent.system_prompt_builder.added_sections
-            if s.name == SECTION_NAME
-        ]
-        assert sections == []
+        assert await _project_memory_section(agent) is None
 
 
 @pytest.mark.asyncio
@@ -328,16 +337,16 @@ async def test_frontmatter_stripped():
         _touch(root, ".git/HEAD", "")
         _touch(
             root,
-            "JIUWENCLAW.md",
+            "JIUWENSWARM.md",
             "---\npaths: 'src/**'\nversion: 1\n---\nBODY-ONLY\n",
         )
 
         rail = ProjectMemoryRail(workspace=str(root / "src"), language="en")
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
+        await rail.before_model_call(ctx=_make_ctx(agent))
 
-        body = agent.system_prompt_builder.added_sections[-1].content["en"]
+        body = await _project_memory_body(agent, "en")
         assert "BODY-ONLY" in body
         assert "paths:" not in body
         assert "version:" not in body
@@ -348,18 +357,14 @@ async def test_frontmatter_at_end_of_file_stripped():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         _touch(root, ".git/HEAD", "")
-        _touch(root, "JIUWENCLAW.md", "---\nkey: v\n---")
+        _touch(root, "JIUWENSWARM.md", "---\nkey: v\n---")
 
         rail = ProjectMemoryRail(workspace=str(root), language="en")
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
+        await rail.before_model_call(ctx=_make_ctx(agent))
 
-        sections = [
-            s for s in agent.system_prompt_builder.added_sections
-            if s.name == SECTION_NAME
-        ]
-        assert sections == []
+        assert await _project_memory_section(agent) is None
 
 
 @pytest.mark.asyncio
@@ -367,28 +372,26 @@ async def test_uninit_clears_section():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         _touch(root, ".git/HEAD", "")
-        _touch(root, "JIUWENCLAW.md", "BEFORE-UNINIT")
+        _touch(root, "JIUWENSWARM.md", "BEFORE-UNINIT")
 
         rail = ProjectMemoryRail(workspace=str(root), language="en")
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
-        assert agent.system_prompt_builder.added_sections
+        await rail.before_model_call(ctx=_make_ctx(agent))
+        assert await _project_memory_section(agent) is not None
 
         rail.uninit(agent)
-        assert [
-            s for s in agent.system_prompt_builder.added_sections
-            if s.name == SECTION_NAME
-        ] == []
+        agent.system_prompt_builder.remove_section.assert_any_call(SECTION_NAME)
+        assert await _project_memory_section(agent) is None
 
 
 @pytest.mark.asyncio
 async def test_no_builder_is_safe():
     rail = ProjectMemoryRail(workspace="/tmp", language="en")
-    agent = MagicMock()
+    agent = SimpleNamespace()
     agent.system_prompt_builder = None
     rail.init(agent)
-    await rail.before_model_call(ctx=MagicMock())
+    await rail.before_model_call(ctx=_make_ctx(agent))
 
 
 @pytest.mark.asyncio
@@ -396,13 +399,13 @@ async def test_set_language_switches_active_language():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         _touch(root, ".git/HEAD", "")
-        _touch(root, "JIUWENCLAW.md", "BODY")
+        _touch(root, "JIUWENSWARM.md", "BODY")
 
         rail = ProjectMemoryRail(workspace=str(root), language="cn")
         rail.set_language("en")
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
+        await rail.before_model_call(ctx=_make_ctx(agent))
 
         assert rail.get_language() == "en"
 
@@ -418,23 +421,23 @@ async def test_loads_user_and_managed_rules(monkeypatch):
         user_root = Path(user_td)
         managed_root = Path(managed_td)
         _touch(root, ".git/HEAD", "")
-        _touch(user_root, "JIUWENCLAW.md", "USER-MEMORY")
+        _touch(user_root, "JIUWENSWARM.md", "USER-MEMORY")
         _touch(user_root, "rules/user_rule.md", "USER-RULE")
-        _touch(managed_root, "JIUWENCLAW.md", "MANAGED-MEMORY")
+        _touch(managed_root, "JIUWENSWARM.md", "MANAGED-MEMORY")
         _touch(managed_root, "rules/managed_rule.md", "MANAGED-RULE")
 
-        monkeypatch.setattr(_files_mod, "USER_MEMORY_FILES", (str(user_root / "JIUWENCLAW.md"),))
+        monkeypatch.setattr(_files_mod, "USER_MEMORY_FILES", (str(user_root / "JIUWENSWARM.md"),))
         monkeypatch.setattr(_files_mod, "USER_MEMORY_GLOBS", (str(user_root / "rules" / "*.md"),))
-        monkeypatch.setattr(_files_mod, "MANAGED_MEMORY_FILES", (str(managed_root / "JIUWENCLAW.md"),))
+        monkeypatch.setattr(_files_mod, "MANAGED_MEMORY_FILES", (str(managed_root / "JIUWENSWARM.md"),))
         monkeypatch.setattr(_files_mod, "MANAGED_MEMORY_GLOBS", (str(managed_root / "rules" / "*.md"),))
         _files_mod.clear_project_memory_cache()
 
         rail = ProjectMemoryRail(workspace=str(root), language="en")
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
+        await rail.before_model_call(ctx=_make_ctx(agent))
 
-        body = agent.system_prompt_builder.added_sections[-1].content["en"]
+        body = await _project_memory_body(agent, "en")
         assert "USER-MEMORY" in body
         assert "USER-RULE" in body
         assert "MANAGED-MEMORY" in body
@@ -447,7 +450,7 @@ async def test_additional_directories_load_project_memory():
         root = Path(td)
         extra = Path(extra_td)
         _touch(root, ".git/HEAD", "")
-        _touch(extra, "JIUWENCLAW.md", "EXTRA-PROJECT-RULE")
+        _touch(extra, "JIUWENSWARM.md", "EXTRA-PROJECT-RULE")
 
         rail = ProjectMemoryRail(
             workspace=str(root),
@@ -456,9 +459,9 @@ async def test_additional_directories_load_project_memory():
         )
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
+        await rail.before_model_call(ctx=_make_ctx(agent))
 
-        body = agent.system_prompt_builder.added_sections[-1].content["en"]
+        body = await _project_memory_body(agent, "en")
         assert "EXTRA-PROJECT-RULE" in body
 
 
@@ -474,7 +477,7 @@ async def test_additional_directories_relative_to_workspace():
         root = base / "repo"
         extra = base / "shared-memory"
         _touch(root, ".git/HEAD", "")
-        _touch(extra, "JIUWENCLAW.md", "RELATIVE-EXTRA-RULE")
+        _touch(extra, "JIUWENSWARM.md", "RELATIVE-EXTRA-RULE")
 
         rail = ProjectMemoryRail(
             workspace=str(root),
@@ -483,9 +486,9 @@ async def test_additional_directories_relative_to_workspace():
         )
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
+        await rail.before_model_call(ctx=_make_ctx(agent))
 
-        body = agent.system_prompt_builder.added_sections[-1].content["en"]
+        body = await _project_memory_body(agent, "en")
         assert "RELATIVE-EXTRA-RULE" in body
 
 
@@ -494,21 +497,18 @@ async def test_b1_parent_set_workspace_does_not_break_path_resolution():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         _touch(root, ".git/HEAD", "")
-        _touch(root, "JIUWENCLAW.md", "STILL-WORKING")
+        _touch(root, "JIUWENSWARM.md", "STILL-WORKING")
 
         rail = ProjectMemoryRail(workspace="/nonexistent-stub-path", language="en")
         rail.set_workspace(_FakeWorkspace(root_path=str(root)))  # type: ignore[arg-type]
 
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
+        await rail.before_model_call(ctx=_make_ctx(agent))
 
-        sections = [
-            s for s in agent.system_prompt_builder.added_sections
-            if s.name == SECTION_NAME
-        ]
-        assert sections
-        assert "STILL-WORKING" in sections[-1].content["en"]
+        section = await _project_memory_section(agent)
+        assert section is not None
+        assert "STILL-WORKING" in section.render("en")
 
 
 @pytest.mark.asyncio
@@ -516,17 +516,18 @@ async def test_b1_no_workspace_falls_back_to_constructor_path():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         _touch(root, ".git/HEAD", "")
-        _touch(root, "JIUWENCLAW.md", "FROM-CTOR-PATH")
+        _touch(root, "JIUWENSWARM.md", "FROM-CTOR-PATH")
 
         rail = ProjectMemoryRail(workspace=str(root), language="en")
         assert rail.workspace is None
 
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
+        await rail.before_model_call(ctx=_make_ctx(agent))
 
-        section = agent.system_prompt_builder.added_sections[-1]
-        assert "FROM-CTOR-PATH" in section.content["en"]
+        section = await _project_memory_section(agent)
+        assert section is not None
+        assert "FROM-CTOR-PATH" in section.render("en")
 
 
 @pytest.mark.asyncio
@@ -536,9 +537,9 @@ async def test_nested_worktree_skips_canonical_project_but_keeps_local(monkeypat
         worktree = canonical / ".jiuwen" / "worktrees" / "feature"
         _touch(canonical, ".git/HEAD", "")
         _touch(worktree, ".git/HEAD", "")
-        _touch(canonical, "JIUWENCLAW.md", "CANONICAL-PROJECT")
-        _touch(canonical, "JIUWENCLAW.local.md", "CANONICAL-LOCAL")
-        _touch(worktree, "JIUWENCLAW.md", "WORKTREE-PROJECT")
+        _touch(canonical, "JIUWENSWARM.md", "CANONICAL-PROJECT")
+        _touch(canonical, "JIUWENSWARM.local.md", "CANONICAL-LOCAL")
+        _touch(worktree, "JIUWENSWARM.md", "WORKTREE-PROJECT")
 
         monkeypatch.setattr(
             _files_mod,
@@ -553,9 +554,9 @@ async def test_nested_worktree_skips_canonical_project_but_keeps_local(monkeypat
         rail = ProjectMemoryRail(workspace=str(worktree), language="en")
         agent = _make_agent_with_builder()
         rail.init(agent)
-        await rail.before_model_call(ctx=MagicMock())
+        await rail.before_model_call(ctx=_make_ctx(agent))
 
-        body = agent.system_prompt_builder.added_sections[-1].content["en"]
+        body = await _project_memory_body(agent, "en")
         assert "WORKTREE-PROJECT" in body
         assert "CANONICAL-LOCAL" in body
         assert "CANONICAL-PROJECT" not in body
@@ -587,3 +588,94 @@ def test_resolve_workspace_path_falls_back_when_workspace_missing():
 
 def test_module_exports_project_memory_rail():
     assert hasattr(_rail_mod, "ProjectMemoryRail")
+
+
+@pytest.mark.asyncio
+async def test_pm1_defect_a_no_marker_skips_project_layer(monkeypatch):
+    """find_project_root 返回 None 时 project 层零扫描。
+
+    files.py:242 ``if project_root is not None:`` 整块跳过，workspace 自身的
+    JIUWENSWARM.md 永远不进 _scan_relative_files。修后 fallback 到
+    workspace_key，walk 退化为单层，文件能被发现。
+    """
+    monkeypatch.setattr(_files_mod, "find_project_root", lambda *_args, **_kw: None)
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _touch(root, "JIUWENSWARM.md", "NO-MARKER-RULE\n")
+
+        rail = ProjectMemoryRail(workspace=str(root), language="en")
+        agent = _make_agent_with_builder()
+        rail.init(agent)
+        await rail.before_model_call(ctx=_make_ctx(agent))
+
+        body = await _project_memory_body(agent, "en")
+        assert "NO-MARKER-RULE" in body, (
+            "find_project_root 返回 None 时 workspace 自身的 JIUWENSWARM.md "
+            "仍应被加载（PM-1 缺陷 A，files.py fallback 后转绿）"
+        )
+
+
+@pytest.mark.asyncio
+async def test_pm1_defect_a_no_marker_skips_rules_glob_and_local(monkeypatch):
+    """不只丢 JIUWENSWARM.md：.jiuwen/rules/*.md 与 JIUWENSWARM.local.md
+    同在 files.py:242 的 if 块内，project_root is None 时一并静默丢失。
+    修复后 fallback 走 _scan_relative_globs / LOCAL_MEMORY_FILES，应一并加载。
+    """
+    monkeypatch.setattr(_files_mod, "find_project_root", lambda *_args, **_kw: None)
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _touch(root, ".jiuwen/rules/01_style.md", "STYLE-NO-MARKER\n")
+        _touch(root, ".jiuwen/rules/02_test.md", "TEST-NO-MARKER\n")
+        _touch(root, "JIUWENSWARM.local.md", "LOCAL-NO-MARKER\n")
+
+        rail = ProjectMemoryRail(workspace=str(root), language="en")
+        agent = _make_agent_with_builder()
+        rail.init(agent)
+        await rail.before_model_call(ctx=_make_ctx(agent))
+
+        body = await _project_memory_body(agent, "en")
+        assert "STYLE-NO-MARKER" in body, (
+            ".jiuwen/rules/*.md 在 find_project_root=None 时应仍被加载（PM-1 缺陷 A）"
+        )
+        assert "TEST-NO-MARKER" in body
+        assert "LOCAL-NO-MARKER" in body, (
+            "JIUWENSWARM.local.md 在 find_project_root=None 时应仍被加载（PM-1 缺陷 A）"
+        )
+
+
+@pytest.mark.asyncio
+async def test_pm1_defect_a_plus_b_cache_misses_newly_added_md(monkeypatch):
+    """
+    find_project_root 强制 None：
+      - 首次空目录：project 层整块跳过 → files=[]，且 watch_paths 不含
+        workspace（files.py:267 的 watch_paths.add 在 if 块内）→ 缓存空结果
+        且 snapshot 为空。
+      - 新增 JIUWENSWARM.md 后再调用：命中缓存，snapshot 比对为空视为未变
+        → 直接返回缓存的空 files，永不重扫。
+    修后 fallback 使 workspace 进 watch_paths，新增文件触发父目录 mtime 变化，
+    缓存正常失效，下一轮读到。
+    """
+    monkeypatch.setattr(_files_mod, "find_project_root", lambda *_args, **_kw: None)
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        rail = ProjectMemoryRail(workspace=str(root), language="en")
+        agent = _make_agent_with_builder()
+        rail.init(agent)
+
+        # 首次：空目录，写空缓存
+        await rail.before_model_call(ctx=_make_ctx(agent))
+        assert await _project_memory_section(agent) is None
+
+        # 用户在启动目录手动新增 JIUWENSWARM.md
+        _touch(root, "JIUWENSWARM.md", "LATE-ADDED-RULE\n")
+
+        # 下一轮：缓存应失效（或 project 层被扫到），读到新增文件
+        await rail.before_model_call(ctx=_make_ctx(agent))
+        body = await _project_memory_body(agent, "en")
+        assert "LATE-ADDED-RULE" in body, (
+            "无 marker 目录新增 JIUWENSWARM.md 后，下一轮 before_model_call 应能读到"
+            "（PM-1 缺陷 A+B，files.py fallback + watch_paths 含 workspace 后转绿）"
+        )

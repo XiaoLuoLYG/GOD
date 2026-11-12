@@ -1,0 +1,483 @@
+from __future__ import annotations
+
+import pytest
+
+from jiuwenswarm.server.runtime.skill.skill_manager import SkillManager
+
+
+def _skillnet_item(name: str, rank_marker: str) -> dict:
+    return {
+        "skill_name": name,
+        "skill_description": f"SkillNet {rank_marker}",
+        "skill_url": f"https://github.com/example/{name}",
+        "author": "example",
+        "stars": 12,
+        "category": "document",
+    }
+
+
+def _clawhub_item(name: str, rank_marker: str, owner_handle: str = "") -> dict:
+    return {
+        "slug": name,
+        "display_name": name,
+        "summary": f"ClawHub {rank_marker}",
+        "version": "1.0.0",
+        "updated_at": 1_750_000_000_000,
+        "owner_handle": owner_handle,
+    }
+
+
+def _teamskillshub_item(name: str, rank_marker: str, *, is_team_skill: bool) -> dict:
+    return {
+        "asset_id": f"asset-{name}",
+        "name": name,
+        "display_name": f"{name} display",
+        "summary": f"TeamSkillsHub {rank_marker}",
+        "version": "1.0.0",
+        "author": "example",
+        "plugin_type": "swarmskill" if is_team_skill else "skill",
+        "is_team_skill": is_team_skill,
+    }
+
+
+@pytest.mark.asyncio
+async def test_online_search_queries_all_available_sources_without_skillnet(tmp_path, monkeypatch):
+    manager = SkillManager(workspace_dir=str(tmp_path))
+    manager._set_clawhub_token("test-token")
+
+    async def _clawhub_search(params: dict) -> dict:
+        assert params["q"] == "pdf"
+        assert params["limit"] == 10
+        return {
+            "success": True,
+            "skills": [_clawhub_item("clawhub-pdf", "first")],
+        }
+
+    async def _team_skills_hub_search(params: dict) -> dict:
+        assert params["q"] == "pdf"
+        assert params["limit"] == 10
+        return {
+            "success": True,
+            "skills": [_teamskillshub_item("team-pdf", "first", is_team_skill=True)],
+        }
+
+    async def _unexpected_skillnet_search(params: dict) -> dict:
+        raise AssertionError("SkillNet must not participate in Skills online search")
+
+    monkeypatch.setattr(manager, "handle_skills_skillnet_search", _unexpected_skillnet_search)
+    monkeypatch.setattr(manager, "handle_skills_clawhub_search", _clawhub_search)
+    monkeypatch.setattr(manager, "handle_skills_team_skills_hub_search", _team_skills_hub_search)
+
+    payload = await manager.handle_skills_online_search({"query": "pdf", "limit": 10})
+
+    assert payload["success"] is True
+    assert payload["partial"] is False
+    assert [item["source"] for item in payload["items"]] == ["teamskillshub", "clawhub"]
+    assert [item["is_team_skill"] for item in payload["items"]] == [True, False]
+    assert payload["items"][0]["display_name"] == "team-pdf display"
+    assert payload["items"][1]["updated_at"] == 1_750_000_000_000
+    assert payload["sources"] == [
+        {"source": "teamskillshub", "status": "success", "count": 1},
+        {"source": "clawhub", "status": "success", "count": 1},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_online_search_skips_clawhub_without_token(tmp_path, monkeypatch):
+    manager = SkillManager(workspace_dir=str(tmp_path))
+
+    async def _unexpected_skillnet_search(params: dict) -> dict:
+        raise AssertionError("SkillNet must not participate in Skills online search")
+
+    async def _unexpected_clawhub_search(params: dict) -> dict:
+        raise AssertionError("ClawHub must not be queried without a token")
+
+    async def _team_skills_hub_search(params: dict) -> dict:
+        return {"success": True, "skills": []}
+
+    monkeypatch.setattr(manager, "handle_skills_skillnet_search", _unexpected_skillnet_search)
+    monkeypatch.setattr(manager, "handle_skills_clawhub_search", _unexpected_clawhub_search)
+    monkeypatch.setattr(manager, "handle_skills_team_skills_hub_search", _team_skills_hub_search)
+
+    payload = await manager.handle_skills_online_search({"q": "pdf"})
+
+    assert payload["success"] is True
+    assert payload["partial"] is False
+    assert payload["sources"] == [
+        {"source": "teamskillshub", "status": "success", "count": 0},
+        {
+            "source": "clawhub",
+            "status": "skipped",
+            "count": 0,
+            "detail_key": "skills.clawhub.errors.tokenNotConfigured",
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_online_search_returns_partial_results_when_clawhub_fails(tmp_path, monkeypatch):
+    manager = SkillManager(workspace_dir=str(tmp_path))
+    manager._set_clawhub_token("test-token")
+
+    async def _unexpected_skillnet_search(params: dict) -> dict:
+        raise AssertionError("SkillNet must not participate in Skills online search")
+
+    async def _clawhub_search(params: dict) -> dict:
+        return {"success": False, "detail": "remote unavailable"}
+
+    async def _team_skills_hub_search(params: dict) -> dict:
+        return {
+            "success": True,
+            "skills": [_teamskillshub_item("pdf", "first", is_team_skill=False)],
+        }
+
+    monkeypatch.setattr(manager, "handle_skills_skillnet_search", _unexpected_skillnet_search)
+    monkeypatch.setattr(manager, "handle_skills_clawhub_search", _clawhub_search)
+    monkeypatch.setattr(manager, "handle_skills_team_skills_hub_search", _team_skills_hub_search)
+
+    payload = await manager.handle_skills_online_search({"q": "pdf"})
+
+    assert payload["success"] is True
+    assert payload["partial"] is True
+    assert [item["source"] for item in payload["items"]] == ["teamskillshub"]
+    assert payload["items"][0]["is_team_skill"] is False
+    assert payload["sources"][1]["status"] == "error"
+    assert payload["sources"][1]["detail"] == "remote unavailable"
+
+
+def test_online_search_rrf_is_stable_and_exact_match_wins():
+    items = SkillManager._aggregate_online_search_results(
+        "target",
+        {
+            "skillnet": [
+                _skillnet_item("other", "first"),
+                _skillnet_item("target", "second"),
+            ],
+            "clawhub": [
+                _clawhub_item("another", "first"),
+                _clawhub_item("more", "second"),
+            ],
+        },
+        10,
+    )
+
+    assert items[0]["name"] == "target"
+    assert items[0]["exact_match"] is True
+    assert [(item["source"], item["source_rank"]) for item in items[1:]] == [
+        ("skillnet", 1),
+        ("clawhub", 1),
+        ("clawhub", 2),
+    ]
+
+
+def test_online_search_native_score_preserves_zero_and_falls_back_for_none():
+    zero_score = SkillManager._normalize_online_search_item(
+        "skillnet",
+        {"skill_name": "zero", "score": 0, "stars": 12},
+        1,
+    )
+    missing_score = SkillManager._normalize_online_search_item(
+        "skillnet",
+        {"skill_name": "fallback", "score": None, "stars": 12},
+        1,
+    )
+
+    assert zero_score["native_score"] == 0
+    assert missing_score["native_score"] == 12
+
+
+def test_online_search_preserves_clawhub_owner_handle():
+    item = SkillManager._normalize_online_search_item(
+        "clawhub",
+        _clawhub_item("weather", "first", owner_handle="openclaw"),
+        1,
+    )
+
+    assert item["identifier"] == "weather"
+    assert item["owner_handle"] == "openclaw"
+    assert item["author"] == "openclaw"
+    assert item["matched_sources"][0]["owner_handle"] == "openclaw"
+    assert item["is_team_skill"] is False
+
+
+def test_online_search_classifies_team_skills_hub_items():
+    team_item = SkillManager._normalize_online_search_item(
+        "teamskillshub",
+        _teamskillshub_item("research-team", "first", is_team_skill=True),
+        1,
+    )
+    regular_item = SkillManager._normalize_online_search_item(
+        "teamskillshub",
+        _teamskillshub_item("research", "second", is_team_skill=False),
+        2,
+    )
+
+    assert team_item["is_team_skill"] is True
+    assert regular_item["is_team_skill"] is False
+    assert team_item["name"] == "research-team"
+    assert team_item["display_name"] == "research-team display"
+
+
+def test_online_search_collapses_ambiguous_clawhub_slugs():
+    items = SkillManager._aggregate_online_search_results(
+        "weather",
+        {
+            "skillnet": [],
+            "clawhub": [
+                _clawhub_item("weather", "first", owner_handle="owner-a"),
+                _clawhub_item("weather", "second", owner_handle="owner-b"),
+            ],
+        },
+        10,
+    )
+
+    assert len(items) == 1
+    item = items[0]
+    assert item["identifier"] == "weather"
+    assert item["owner_handle"] == "owner-a"
+    assert item["description"] == "ClawHub first"
+    assert len(item["matched_sources"]) == 2
+    assert {entry.get("owner_handle") for entry in item["matched_sources"]} == {
+        "owner-a",
+        "owner-b",
+    }
+
+
+def test_online_search_collapses_clawhub_slug_prefers_better_rank():
+    items = SkillManager._aggregate_online_search_results(
+        "weather",
+        {
+            "skillnet": [],
+            "clawhub": [
+                {**_clawhub_item("weather", "worse", owner_handle="owner-b"), "score": 1},
+                {**_clawhub_item("weather", "better", owner_handle="owner-a"), "score": 99},
+            ],
+        },
+        10,
+    )
+
+    # Enumerate assigns source_rank 1 then 2; lower rank wins regardless of native_score.
+    assert len(items) == 1
+    assert items[0]["owner_handle"] == "owner-b"
+    assert items[0]["description"] == "ClawHub worse"
+
+
+def test_online_search_collapses_clawhub_slug_prefers_higher_native_score_on_rank_tie():
+    first = SkillManager._normalize_online_search_item(
+        "clawhub",
+        {**_clawhub_item("weather", "low", owner_handle="owner-low"), "score": 1},
+        1,
+    )
+    second = SkillManager._normalize_online_search_item(
+        "clawhub",
+        {**_clawhub_item("weather", "high", owner_handle="owner-high"), "score": 50},
+        1,
+    )
+    assert SkillManager._online_search_item_preferred(second, first) is True
+    assert SkillManager._online_search_item_preferred(first, second) is False
+
+
+def test_online_search_collapses_same_presentation_across_slugs():
+    shared_summary = "Get current weather and forecasts (no API key required)."
+    items = SkillManager._aggregate_online_search_results(
+        "weather",
+        {
+            "skillnet": [],
+            "clawhub": [
+                {
+                    "slug": "weather",
+                    "display_name": "Weather",
+                    "summary": shared_summary,
+                    "version": "1.0.0",
+                    "updated_at": 1,
+                    "owner_handle": "steipete",
+                },
+                {
+                    "slug": "weather-fork",
+                    "display_name": "Weather",
+                    "summary": shared_summary,
+                    "version": "1.0.0",
+                    "updated_at": 1,
+                    "owner_handle": "other-owner",
+                },
+            ],
+        },
+        10,
+    )
+
+    assert len(items) == 1
+    assert items[0]["identifier"] == "weather"
+    assert items[0]["owner_handle"] == "steipete"
+    assert items[0]["display_name"] == "Weather"
+    assert items[0]["description"] == shared_summary
+    assert {entry.get("identifier") for entry in items[0]["matched_sources"]} == {
+        "weather",
+        "weather-fork",
+    }
+
+
+def test_online_search_keeps_same_title_when_descriptions_differ():
+    items = SkillManager._aggregate_online_search_results(
+        "weather",
+        {
+            "skillnet": [],
+            "clawhub": [
+                {
+                    "slug": "weather",
+                    "display_name": "Weather",
+                    "summary": "Get current weather and forecasts (no API key required).",
+                    "version": "1.0.0",
+                    "updated_at": 1,
+                    "owner_handle": "steipete",
+                },
+                {
+                    "slug": "weather-pro",
+                    "display_name": "Weather",
+                    "summary": "Premium weather alerts with radar.",
+                    "version": "1.0.0",
+                    "updated_at": 1,
+                    "owner_handle": "other-owner",
+                },
+            ],
+        },
+        10,
+    )
+
+    assert len(items) == 2
+    assert {item["identifier"] for item in items} == {"weather", "weather-pro"}
+
+
+def test_online_search_merges_identical_normalized_urls():
+    items = SkillManager._aggregate_online_search_results(
+        "shared",
+        {
+            "skillnet": [
+                {
+                    "skill_name": "shared",
+                    "skill_url": "http://github.com/example/shared/",
+                },
+                {
+                    "skill_name": "shared-duplicate",
+                    "skill_url": "https://github.com/example/shared",
+                },
+            ],
+            "clawhub": [],
+        },
+        10,
+    )
+
+    assert len(items) == 1
+    assert items[0]["identifier"] == "http://github.com/example/shared/"
+    assert len(items[0]["matched_sources"]) == 2
+    assert items[0]["fusion_score"] == pytest.approx(1 / 61 + 1 / 62)
+
+
+@pytest.mark.asyncio
+async def test_online_search_rejects_invalid_input(tmp_path):
+    manager = SkillManager(workspace_dir=str(tmp_path))
+
+    missing_query = await manager.handle_skills_online_search({"query": ""})
+    invalid_limit = await manager.handle_skills_online_search({"query": "pdf", "limit": "many"})
+
+    assert missing_query["success"] is False
+    assert missing_query["detail"] == "缺少参数: query"
+    assert invalid_limit["success"] is False
+    assert invalid_limit["detail"] == "参数 limit 必须是整数"
+
+
+@pytest.mark.asyncio
+async def test_online_search_install_dispatches_teamskillshub(tmp_path, monkeypatch):
+    manager = SkillManager(workspace_dir=str(tmp_path))
+    seen: dict[str, object] = {}
+
+    async def _install(params: dict) -> dict:
+        seen.update(params)
+        return {"success": True, "skill": {"name": "demo"}}
+
+    monkeypatch.setattr(manager, "handle_skills_team_skills_hub_install", _install)
+
+    payload = await manager.handle_skills_online_search_install(
+        {
+            "identifier": "asset-demo",
+            "force": True,
+            "display_name": "演示技能",
+        }
+    )
+
+    assert payload["success"] is True
+    assert seen == {
+        "asset_id": "asset-demo",
+        "force": True,
+        "display_name": "演示技能",
+    }
+
+
+@pytest.mark.asyncio
+async def test_online_search_install_dispatches_clawhub(tmp_path, monkeypatch):
+    manager = SkillManager(workspace_dir=str(tmp_path))
+    seen: dict[str, object] = {}
+
+    async def _download(params: dict) -> dict:
+        seen.update(params)
+        return {"success": True, "skill": {"name": "ppt-generator"}}
+
+    monkeypatch.setattr(manager, "handle_skills_clawhub_download", _download)
+
+    payload = await manager.handle_skills_online_search_install(
+        {
+            "source": "clawhub",
+            "identifier": "ppt-generator",
+            "owner_handle": "alice",
+            "display_name": "PPT Generator",
+            "force": False,
+        }
+    )
+
+    assert payload["success"] is True
+    assert seen == {
+        "slug": "ppt-generator",
+        "force": False,
+        "owner_handle": "alice",
+        "display_name": "PPT Generator",
+    }
+
+
+@pytest.mark.asyncio
+async def test_online_search_install_dispatches_skillnet(tmp_path, monkeypatch):
+    manager = SkillManager(workspace_dir=str(tmp_path))
+    seen: dict[str, object] = {}
+
+    async def _install(params: dict) -> dict:
+        seen.update(params)
+        return {"success": True, "pending": True, "install_id": "abc"}
+
+    monkeypatch.setattr(manager, "handle_skills_skillnet_install", _install)
+
+    payload = await manager.handle_skills_online_search_install(
+        {"source": "skillnet", "identifier": "https://github.com/example/skill"}
+    )
+
+    assert payload["pending"] is True
+    assert seen == {"url": "https://github.com/example/skill", "force": False}
+
+
+@pytest.mark.asyncio
+async def test_online_search_install_rejects_missing_identifier_and_unknown_source(tmp_path):
+    manager = SkillManager(workspace_dir=str(tmp_path))
+
+    missing = await manager.handle_skills_online_search_install({"source": "clawhub"})
+    unknown = await manager.handle_skills_online_search_install(
+        {"source": "otherhub", "identifier": "x"}
+    )
+
+    assert missing["success"] is False
+    assert missing["detail"] == "缺少参数: identifier"
+    assert unknown["success"] is False
+    assert "不支持的 source" in unknown["detail"]
+    assert unknown["detail_key"] == "skills.onlineSearch.unsupportedSource"
+
+
+def test_req_method_online_search_install_registered() -> None:
+    from jiuwenswarm.common.schema.message import ReqMethod
+
+    assert ReqMethod.SKILLS_ONLINE_SEARCH_INSTALL.value == "skills.online_search.install"

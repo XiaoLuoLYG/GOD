@@ -23,15 +23,20 @@ from openjiuwen.core.single_agent.interrupt.response import (
 )
 from openjiuwen.harness.rails.interrupt.ask_user_rail import AskUserPayload
 
-from jiuwenclaw.agents.harness.common.rails.ask_user_rail import (
+from jiuwenswarm.agents.harness.common.rails.ask_user_rail import (
     EXTENDED_INPUT_PARAMS_CN,
     EXTENDED_INPUT_PARAMS_EN,
+    MAX_STRUCTURED_QUESTIONS,
     StructuredAskUserRail,
     StructuredAskUserTool,
 )
-from jiuwenclaw.agents.harness.common.rails.interrupt.interrupt_helpers import (
+from jiuwenswarm.agents.harness.common.rails.interrupt.interrupt_helpers import (
     _extract_questions_from_value,
     convert_interactions_to_ask_user_question,
+    extract_question_from_interaction,
+)
+from jiuwenswarm.agents.harness.code.rails.code_confirm_interrupt_rail import (
+    build_confirm_interrupt_message,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.system]
@@ -108,12 +113,25 @@ class TestStructuredAskUserToolSchema:
         assert EXTENDED_INPUT_PARAMS_CN["required"] == ["query"]
 
     @staticmethod
+    def test_questions_schema_limits_each_call_to_four():
+        """English and Chinese schemas must enforce the same question limit."""
+        assert MAX_STRUCTURED_QUESTIONS == 4
+        assert (
+            EXTENDED_INPUT_PARAMS_EN["properties"]["questions"]["maxItems"]
+            == MAX_STRUCTURED_QUESTIONS
+        )
+        assert (
+            EXTENDED_INPUT_PARAMS_CN["properties"]["questions"]["maxItems"]
+            == MAX_STRUCTURED_QUESTIONS
+        )
+
+    @staticmethod
     def test_questions_item_schema_structure():
         """Each question item must have `question` (required) and optional
         `header`, `options`, `multi_select`.
         """
 
-        from jiuwenclaw.agents.harness.common.rails.ask_user_rail import (
+        from jiuwenswarm.agents.harness.common.rails.ask_user_rail import (
             _QUESTIONS_ITEM_SCHEMA,
         )
         props = _QUESTIONS_ITEM_SCHEMA["properties"]
@@ -122,6 +140,24 @@ class TestStructuredAskUserToolSchema:
         assert "options" in props
         assert "multi_select" in props
         assert _QUESTIONS_ITEM_SCHEMA["required"] == ["question"]
+        assert props["question"]["minLength"] == 1
+        options_schema = props["options"]
+        # Moonshot/Kimi requires type within each anyOf branch. Gemini also
+        # requires each array branch to declare items rather than inheriting it
+        # from the parent schema.
+        assert "type" not in options_schema
+        assert "items" not in options_schema
+        branches = options_schema["anyOf"]
+        assert len(branches) == 2
+        assert branches[0]["type"] == "array"
+        assert branches[0]["maxItems"] == 0
+        assert branches[1]["type"] == "array"
+        assert branches[1]["minItems"] == 2
+        assert branches[1]["maxItems"] == 4
+        for branch in branches:
+            option_schema = branch["items"]
+            assert option_schema["required"] == ["label"]
+            assert option_schema["properties"]["label"]["minLength"] == 1
 
     @staticmethod
     def test_tool_card_name_is_ask_user():
@@ -158,8 +194,8 @@ class TestStructuredAskUserRailLifecycle:
         with patch("openjiuwen.harness.rails.interrupt.ask_user_rail.resolve_language", return_value="en"):
             rail.init(agent)
 
-        agent.ability_manager.add.assert_called_once()
-        added_card = agent.ability_manager.add.call_args[0][0]
+        agent.ability_manager.add_ability.assert_called_once()
+        added_card = agent.ability_manager.add_ability.call_args[0][0]
         assert added_card.name == "ask_user"
 
     @staticmethod
@@ -172,7 +208,7 @@ class TestStructuredAskUserRailLifecycle:
             rail.init(agent)
             rail.uninit(agent)
 
-        agent.ability_manager.remove.assert_called_once_with("ask_user")
+        agent.ability_manager.remove_ability.assert_called_once_with("ask_user")
 
     @staticmethod
     def test_init_uninit_clears_structured_tools():
@@ -379,8 +415,8 @@ class TestConvertInteractionsToAskUserQuestion:
         assert q["options"][2]["label"] == "Other"
 
     @staticmethod
-    def test_plain_query_produce_permission_interrupt():
-        """Plain query (no questions) should produce source=permission_interrupt."""
+    def test_plain_query_produce_ask_user_interrupt():
+        """Plain query (no questions) should produce source=ask_user_interrupt."""
         tcir = _make_tcir(tool_args={"query": "What is your role?"})
 
         interaction = MagicMock()
@@ -389,13 +425,34 @@ class TestConvertInteractionsToAskUserQuestion:
 
         result = convert_interactions_to_ask_user_question([interaction])
         assert result is not None
-        assert result["source"] == "permission_interrupt"
+        assert result["source"] == "ask_user_interrupt"
+        assert result["questions"][0]["question"] == "What is your role?"
+        assert result["questions"][0]["options"] == []
 
     @staticmethod
     def test_empty_state_outputs_returns_none():
         """Empty state_outputs should return None."""
         result = convert_interactions_to_ask_user_question([])
         assert result is None
+
+    @staticmethod
+    def test_ask_user_request_without_tool_args_uses_query_from_tool_args():
+        """AskUserRequest shells should still resolve as ask_user_interrupt."""
+        result = convert_interactions_to_ask_user_question([
+            {
+                "id": "req_004",
+                "value": {
+                    "tool_name": "ask_user",
+                    "tool_args": {"query": "Choose a language"},
+                    "message": "Choose a language",
+                    "questions": [],
+                    "payload_schema": {},
+                },
+            }
+        ])
+        assert result is not None
+        assert result["source"] == "ask_user_interrupt"
+        assert result["questions"][0]["question"] == "Choose a language"
 
     @staticmethod
     def test_dict_interaction_with_questions_in_value():
@@ -415,6 +472,123 @@ class TestConvertInteractionsToAskUserQuestion:
 
 
 # =====================================================================
+# 5b. Confirm vs permission interrupt classification
+# =====================================================================
+
+class TestConfirmAndPermissionInterrupts:
+    @staticmethod
+    def test_confirm_interrupt_message_is_classified():
+        message = build_confirm_interrupt_message("switch_mode", {"mode": "plan"})
+        result = convert_interactions_to_ask_user_question([
+            {
+                "id": "req_confirm",
+                "value": {
+                    "tool_name": "switch_mode",
+                    "message": message,
+                    "tool_args": {"mode": "plan"},
+                },
+            }
+        ])
+        assert result is not None
+        assert result["source"] == "confirm_interrupt"
+        assert "switch_mode" in result["questions"][0]["question"]
+        assert result["questions"][0]["header"].startswith("操作确认")
+
+    @staticmethod
+    def test_permission_interrupt_message_is_classified():
+        message = "**工具 `write_file` 需要授权才能执行**\n\n请确认是否允许该操作。"
+        result = convert_interactions_to_ask_user_question([
+            {
+                "id": "req_perm",
+                "value": {
+                    "tool_name": "write_file",
+                    "message": message,
+                    "tool_args": {"file_path": "foo.py"},
+                },
+            }
+        ])
+        assert result is not None
+        assert result["source"] == "permission_interrupt"
+        assert "write_file" in result["questions"][0]["question"]
+        assert result["questions"][0]["header"].startswith("权限审批")
+
+    @staticmethod
+    def test_query_tool_permission_interrupt_is_not_ask_user():
+        """A query argument does not make a non-ask_user tool an ask-user interrupt."""
+        message = "**工具 `memory_search` 需要授权才能执行**\n\n请确认是否允许该操作。"
+        result = convert_interactions_to_ask_user_question([
+            {
+                "id": "req_memory_search",
+                "value": {
+                    "tool_name": "memory_search",
+                    "message": message,
+                    "tool_args": {"query": "篮球"},
+                },
+            }
+        ])
+        assert result is not None
+        assert result["source"] == "permission_interrupt"
+        assert "memory_search" in result["questions"][0]["question"]
+        assert result["questions"][0]["header"].startswith("权限审批")
+
+    @staticmethod
+    def test_extract_question_falls_back_for_generic_confirm_copy():
+        question = extract_question_from_interaction({
+            "id": "req_generic",
+            "value": {
+                "tool_name": "switch_mode",
+                "message": "Please approve or reject?",
+                "tool_args": {"mode": "normal"},
+            },
+        })
+        assert question is not None
+        assert "switch_mode" in question["question"]
+        assert question["header"] == "操作确认: switch_mode"
+
+    @staticmethod
+    def test_exit_plan_mode_interrupt_uses_confirm_interrupt():
+        result = convert_interactions_to_ask_user_question([
+            {
+                "id": "req_plan_exit",
+                "value": {
+                    "tool_name": "exit_plan_mode",
+                    "message": "Please approve or reject?",
+                    "tool_args": {},
+                },
+            }
+        ])
+        assert result is not None
+        assert result["source"] == "confirm_interrupt"
+
+    @staticmethod
+    def test_plan_approval_message_falls_back_to_approve_reject_options():
+        result = convert_interactions_to_ask_user_question([
+            {
+                "id": "req_plan_approval",
+                "value": {
+                    "tool_name": "exit_plan_mode",
+                    "message": "**计划审批**\n\nAgent 已完成计划制定，等待你审批：\n\n计划内容",
+                    "tool_args": {},
+                },
+            }
+        ])
+
+        assert result is not None
+        assert result["source"] == "confirm_interrupt"
+        assert result["plan_approval_kind"] == "plan_approval"
+        assert result["plan_content"] == "计划内容"
+        assert result["plan_language"] == "cn"
+        assert result["questions"][0]["header"] == "Exit Plan and Execute"
+        assert "请选择：" not in result["questions"][0]["question"]
+        assert "- **批准**" not in result["questions"][0]["question"]
+        assert result["questions"][0]["question"].endswith("计划内容")
+        assert [option["label"] for option in result["questions"][0]["options"]] == [
+            "批准",
+            "拒绝",
+        ]
+
+
+# =====================================================================
 # 6. StructuredAskUserRail resolve_interrupt Tests
 # =====================================================================
 
@@ -429,13 +603,268 @@ class TestStructuredAskUserRailResolveInterrupt:
         tc = _make_tool_call(arguments={
             "query": "Update?",
             "questions": [{"question": "Apply?", "header": "Upd",
-                          "options": [{"label": "Apply"}]}],
+                          "options": [{"label": "Apply"}, {"label": "Skip"}]}],
         })
         ctx = MagicMock()
 
         decision = await rail.resolve_interrupt(ctx, tc, None)
 
         # Should be an InterruptResult
+        from openjiuwen.harness.rails.interrupt.interrupt_base import InterruptResult
+        assert isinstance(decision, InterruptResult)
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_four_questions_are_allowed():
+        """The maximum supported batch should still produce an interrupt."""
+        rail = StructuredAskUserRail()
+        tc = _make_tool_call(arguments={
+            "query": "Setup info",
+            "questions": [
+                {"question": f"Question {index}?", "header": f"Q{index}"}
+                for index in range(1, MAX_STRUCTURED_QUESTIONS + 1)
+            ],
+        })
+
+        decision = await rail.resolve_interrupt(MagicMock(), tc, None)
+
+        from openjiuwen.harness.rails.interrupt.interrupt_base import InterruptResult
+        assert isinstance(decision, InterruptResult)
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_more_than_four_questions_are_rejected():
+        """An oversized batch should return an argument error without prompting."""
+        rail = StructuredAskUserRail()
+        tc = _make_tool_call(arguments={
+            "query": "Setup info",
+            "questions": [
+                {"question": f"Question {index}?", "header": f"Q{index}"}
+                for index in range(1, MAX_STRUCTURED_QUESTIONS + 2)
+            ],
+        })
+
+        decision = await rail.resolve_interrupt(MagicMock(), tc, None)
+
+        from openjiuwen.harness.rails.interrupt.interrupt_base import RejectResult
+        assert isinstance(decision, RejectResult)
+        assert "at most 4 questions" in decision.tool_result
+
+    @staticmethod
+    @pytest.mark.parametrize(
+        "option",
+        [
+            {"description": "missing label"},
+            {"label": ""},
+            {"label": "   "},
+            {"label": 123},
+            {"value": "must not replace label"},
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_invalid_option_labels_are_rejected(option):
+        """Every selectable option must provide a non-empty string label."""
+        rail = StructuredAskUserRail()
+        tc = _make_tool_call(arguments={
+            "query": "Choose",
+            "questions": [{
+                "question": "Which option?",
+                "header": "Choice",
+                "options": [option],
+            }],
+        })
+
+        decision = await rail.resolve_interrupt(MagicMock(), tc, None)
+
+        from openjiuwen.harness.rails.interrupt.interrupt_base import RejectResult
+        assert isinstance(decision, RejectResult)
+        assert "questions[0].options[0].label" in decision.tool_result
+
+    @staticmethod
+    @pytest.mark.parametrize("question", [None, "not an object", 123, []])
+    @pytest.mark.asyncio
+    async def test_non_object_questions_are_rejected(question):
+        """Every questions item must be an object."""
+        rail = StructuredAskUserRail()
+        tc = _make_tool_call(arguments={
+            "query": "Choose",
+            "questions": [question],
+        })
+
+        decision = await rail.resolve_interrupt(MagicMock(), tc, None)
+
+        from openjiuwen.harness.rails.interrupt.interrupt_base import RejectResult
+        assert isinstance(decision, RejectResult)
+        assert "questions[0] must be an object" in decision.tool_result
+
+    @staticmethod
+    @pytest.mark.parametrize("questions", [None, {}, "not an array", 123])
+    @pytest.mark.asyncio
+    async def test_non_array_questions_are_rejected(questions):
+        """An explicitly provided questions value must be an array."""
+        rail = StructuredAskUserRail()
+        tc = _make_tool_call(arguments={
+            "query": "Choose",
+            "questions": questions,
+        })
+
+        decision = await rail.resolve_interrupt(MagicMock(), tc, None)
+
+        from openjiuwen.harness.rails.interrupt.interrupt_base import RejectResult
+        assert isinstance(decision, RejectResult)
+        assert "questions must be an array" in decision.tool_result
+
+    @staticmethod
+    @pytest.mark.parametrize(
+        "question",
+        [
+            {"header": "Choice"},
+            {"question": "", "header": "Choice"},
+            {"question": "   ", "header": "Choice"},
+            {"question": 123, "header": "Choice"},
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_invalid_question_text_is_rejected(question):
+        """Question text must be a non-empty string."""
+        rail = StructuredAskUserRail()
+        tc = _make_tool_call(arguments={
+            "query": "Choose",
+            "questions": [question],
+        })
+
+        decision = await rail.resolve_interrupt(MagicMock(), tc, None)
+
+        from openjiuwen.harness.rails.interrupt.interrupt_base import RejectResult
+        assert isinstance(decision, RejectResult)
+        assert "questions[0].question" in decision.tool_result
+
+    @staticmethod
+    @pytest.mark.parametrize("header", [None, {}, 123])
+    @pytest.mark.asyncio
+    async def test_non_string_header_is_rejected(header):
+        """An explicitly provided header must be a string."""
+        rail = StructuredAskUserRail()
+        tc = _make_tool_call(arguments={
+            "query": "Choose",
+            "questions": [{
+                "question": "Which option?",
+                "header": header,
+            }],
+        })
+
+        decision = await rail.resolve_interrupt(MagicMock(), tc, None)
+
+        from openjiuwen.harness.rails.interrupt.interrupt_base import RejectResult
+        assert isinstance(decision, RejectResult)
+        assert "questions[0].header must be a string" in decision.tool_result
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_missing_header_uses_default():
+        """An omitted header should be normalized to the frontend default."""
+        rail = StructuredAskUserRail()
+        tc = _make_tool_call(arguments={
+            "query": "Choose",
+            "questions": [{"question": "Which option?"}],
+        })
+
+        decision = await rail.resolve_interrupt(MagicMock(), tc, None)
+
+        from openjiuwen.harness.rails.interrupt.interrupt_base import InterruptResult
+        assert isinstance(decision, InterruptResult)
+
+        interaction = MagicMock()
+        interaction.id = "req_missing_header"
+        interaction.value = decision.request
+        payload = convert_interactions_to_ask_user_question([interaction])
+        assert payload is not None
+        assert payload["questions"][0]["header"] == "Question"
+
+    @staticmethod
+    @pytest.mark.parametrize("options", [None, {}, "not an array", "a,b", 123])
+    @pytest.mark.asyncio
+    async def test_non_array_options_are_rejected(options):
+        """An explicitly provided options value must be an array (#2331)."""
+        rail = StructuredAskUserRail()
+        tc = _make_tool_call(arguments={
+            "query": "Choose",
+            "questions": [{
+                "question": "Which option?",
+                "header": "Choice",
+                "options": options,
+            }],
+        })
+
+        decision = await rail.resolve_interrupt(MagicMock(), tc, None)
+
+        from openjiuwen.harness.rails.interrupt.interrupt_base import RejectResult
+        assert isinstance(decision, RejectResult)
+        assert "questions[0].options must be an array" in decision.tool_result
+
+    @staticmethod
+    @pytest.mark.asyncio
+    async def test_empty_options_array_is_allowed():
+        """An empty options array represents a free-input question."""
+        rail = StructuredAskUserRail()
+        tc = _make_tool_call(arguments={
+            "query": "Describe your preference",
+            "questions": [{
+                "question": "What do you prefer?",
+                "header": "Preference",
+                "options": [],
+            }],
+        })
+
+        decision = await rail.resolve_interrupt(MagicMock(), tc, None)
+
+        from openjiuwen.harness.rails.interrupt.interrupt_base import InterruptResult
+        assert isinstance(decision, InterruptResult)
+
+    @staticmethod
+    @pytest.mark.parametrize("option_count", [1, 5])
+    @pytest.mark.asyncio
+    async def test_invalid_option_counts_are_rejected(option_count):
+        """Non-empty options arrays must contain between two and four items."""
+        rail = StructuredAskUserRail()
+        tc = _make_tool_call(arguments={
+            "query": "Choose",
+            "questions": [{
+                "question": "Which option?",
+                "header": "Choice",
+                "options": [
+                    {"label": f"Option {index}"}
+                    for index in range(option_count)
+                ],
+            }],
+        })
+
+        decision = await rail.resolve_interrupt(MagicMock(), tc, None)
+
+        from openjiuwen.harness.rails.interrupt.interrupt_base import RejectResult
+        assert isinstance(decision, RejectResult)
+        assert "must contain either 0 or 2-4 items" in decision.tool_result
+
+    @staticmethod
+    @pytest.mark.parametrize("option_count", [2, 4])
+    @pytest.mark.asyncio
+    async def test_valid_option_counts_are_allowed(option_count):
+        """Two and four options should both remain valid."""
+        rail = StructuredAskUserRail()
+        tc = _make_tool_call(arguments={
+            "query": "Choose",
+            "questions": [{
+                "question": "Which option?",
+                "header": "Choice",
+                "options": [
+                    {"label": f"Option {index}"}
+                    for index in range(option_count)
+                ],
+            }],
+        })
+
+        decision = await rail.resolve_interrupt(MagicMock(), tc, None)
+
         from openjiuwen.harness.rails.interrupt.interrupt_base import InterruptResult
         assert isinstance(decision, InterruptResult)
 
@@ -532,7 +961,7 @@ class TestStructuredAskUserRailResolveInterrupt:
 
 _INIT_PROMPTS_TS_PATH = (
     Path(__file__).parent.parent.parent
-    / "jiuwenclaw"
+    / "jiuwenswarm"
     / "cli"
     / "src"
     / "core"

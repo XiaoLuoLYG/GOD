@@ -1,0 +1,2222 @@
+/** Session-scoped transport host for the migrated trajectory explorer. */
+
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
+import { useTranslation } from 'react-i18next';
+import { webClient } from '../../services/webClient';
+import { saveBlobWithResult } from '../../utils/desktopSave';
+import { TrajectoryExplorer, type TrajectoryViewState } from './client/TrajectoryExplorer';
+import { IconQuestionOutline14 } from './primitives/icons';
+import { JsonTree } from './primitives/JsonTree';
+import { projectOtelTrajectory } from './projector/otel-trajectory-projector';
+import { createTrajectoryV2Reducer } from './projector/trajectory-v2-reducer';
+import type { OtlpExportTraceServiceRequest } from './shared/otlp';
+import type { TrajectoryDiagnostic, TrajectoryUsage } from './trajectory/model';
+import type { TrajectoryTimeRange } from './trajectory/timeline';
+import {
+  EMPTY_TRAJECTORY_CHECKPOINTS,
+  resolveTrajectoryCheckpoints,
+  type TrajectoryRetentionCheckpoints,
+} from './trajectoryCheckpoints';
+import {
+  getTrajectoryCheckpoints,
+  getTrajectoryRawRecord,
+  getTrajectoryArchive,
+  getTrajectorySequences,
+  getTrajectorySessionUsage,
+  getTrajectoryStreamFrames,
+  getTrajectorySubjectRecords,
+  listTrajectorySubjects,
+  MAX_SEQUENCE_REQUEST,
+  TrajectoryApiError,
+  type TrajectoryDetailRecord,
+  type TrajectorySubjectSummary,
+} from './trajectoryClient';
+import {
+  applyStreamFrames,
+  forgetStreamFrames,
+  withStreamFrames,
+} from './trajectoryFrames';
+import {
+  absorbSequencePage,
+  createSequenceCache,
+  rebuildRecord,
+  unresolvedAttributesByRecordId,
+  unresolvedHeadsOf,
+} from './trajectorySequences';
+import {
+  exitTrajectoryReplay,
+  isTrajectoryArchiveFormatError,
+  isTrajectoryArchiveLimitError,
+  readTrajectoryArchive,
+  shouldCatchUpTrajectory,
+  trajectoryReplayTeamMode,
+  type TrajectoryArchiveProgress,
+  type TrajectoryArchiveReplay,
+} from './trajectoryArchive';
+import {
+  changedTrajectoryUsageTraceIds,
+  collectSubjectRefreshWindow,
+  createTrajectoryOperationCoordinator,
+  createTrajectoryTraceHintCoordinator,
+  createTrajectoryWindowState,
+  detailRecordIdentity,
+  resetTrajectoryWindowState,
+  sameTrajectoryUsageMap,
+  selectSummariesNeedingLoad,
+  shouldCatchUpAfterTrajectoryTerminalEvent,
+  shouldCatchUpStreamFrames,
+  spansOf,
+  stageTrajectoryChainPages,
+  trajectoryContentMode,
+  type StagedTrajectoryChain,
+  type StreamFrameRefresh,
+  type TrajectoryTerminalEventName,
+} from './trajectoryWindow';
+import {
+  RAW_INSPECTOR_DEFAULT_HEIGHT,
+  clampRawInspectorHeight,
+  rawInspectorHeightBounds,
+  rawInspectorKeyboardHeight,
+} from './trajectoryLayout';
+import {
+  createTrajectorySubjectViewCache,
+  groupTrajectorySubjects,
+  MAIN_TRAJECTORY_SUBJECT_ID,
+  subjectAppearsOnTeamLanes,
+} from './trajectorySubjects';
+import {
+  countTurns,
+  unrecordedTurnRanges,
+  type TrajectoryTurnRange,
+} from './trajectoryTurnGaps';
+import { TeamTrajectoryWorkspace } from './TeamTrajectoryWorkspace';
+import { SharedTimeAxis } from './diagnosis/SharedTimeAxis';
+import {
+  EMPTY_DIAGNOSIS_SELECTION,
+  isAgentFullySelected,
+  isAgentIncluded,
+  laneRangeOf,
+  selectOnAxis,
+  selectOnLane,
+  shouldShowIncludeToggle,
+  toggleAgent,
+  toggleSelectAllOnLane,
+  unionWallRange,
+  type DiagnosisSelectionState,
+  type WallRange,
+} from './diagnosis/diagnosisSelection';
+import { mainAgentLastNode, rawOtelSpanIntervals } from './diagnosis/diagnosisTimeSelection';
+import { useSharedTimeAxis } from './diagnosis/useSharedTimeAxis';
+import css from './TrajectoryPanel.module.css';
+import './client/theme.css';
+
+const DETAIL_LIMIT = 1000;
+const DETAIL_CONCURRENCY = 6;
+const LIVE_HINT_PULL_INTERVAL_MS = 80;
+// A reader returning after a long disconnect walks forward a page at a time.
+// The cap bounds one refresh; whatever is left is picked up by the next.
+const MAX_FRAME_CATCH_UP_PAGES = 20;
+// Retention between reading the checkpoints and listing the subjects shows as
+// two epochs; reading both again settles it unless retention keeps running.
+const MAX_CHECKPOINT_READ_ATTEMPTS = 3;
+
+/** Upstream project the trajectory renderer is adapted from (MIT; see NOTICE.md). */
+const DSH_PROJECT_URL = 'https://github.com/deepseek-ai/deepseek-harness';
+const DSH_LICENSE_URL = `${DSH_PROJECT_URL}/blob/main/LICENSE`;
+
+interface TraceUpdatedPayload {
+  session_id?: unknown;
+  trace_id?: unknown;
+  revision?: unknown;
+  frame_seq?: unknown;
+  store_epoch?: unknown;
+  lifecycle?: unknown;
+}
+
+interface RawInspectorResizeDrag {
+  pointerId: number;
+  startHeight: number;
+  startY: number;
+}
+
+export interface TrajectoryPanelProps {
+  active: boolean;
+  mode?: string;
+  sessionId: string;
+  /**
+   * Draw every agent as a swimlane (Team or single-Agent) against one shared,
+   * idle-compressed time axis under the toolbar. Off by default, which keeps
+   * the single-Agent tab view and the Team lanes of the conversation page.
+   */
+  sharedTimeAxis?: boolean;
+  /**
+   * Turn the lanes and the axis into a picker for what to diagnose. Needs
+   * `sharedTimeAxis`; without it the lanes only show.
+   */
+  selection?: TrajectoryPanelSelection;
+  /**
+   * Whole-trajectory pick: paint every lane and the axis as fully selected.
+   * Drawing or toggling a lane leaves this mode via `onFullScopeChange(false)`.
+   */
+  fullScopeSelection?: boolean;
+  onFullScopeChange?: (value: boolean) => void;
+  /** Reports whether any lane has timing, i.e. whether there is something to pick from. */
+  onTimelineAvailableChange?: (available: boolean) => void;
+  /** Reports the session's agent lanes (id and display name) whenever they change. */
+  onSubjectsChange?: (subjects: ReadonlyArray<TrajectoryPanelSubject>) => void;
+  /**
+   * The main agent's last timed node, or the team leader's when there is no
+   * main agent. `null` when that lane has no timed node.
+   */
+  onMainAgentLastNodeChange?: (node: TrajectoryMainAgentLastNode | null) => void;
+  /** Timed nodes on each lane, used to tell when a pick is too large to run. */
+  onDiagnosisNodesChange?: (lanes: ReadonlyArray<TrajectoryDiagnosisLaneNodes>) => void;
+  /** Steps to emphasise on every lane, as `stepRefKey` values. */
+  highlightStepKeys?: ReadonlySet<string>;
+  /**
+   * Analysis-page scale. `time` shares one wall clock and shows the axis.
+   * `duration` sizes each lane by recorded length with idle gaps removed, the
+   * same projection as the conversation page's duration control.
+   * `tokens` and `equal` size each lane on its own and hide the axis.
+   */
+  laneScale?: TrajectoryLaneScale;
+  /** Fold every turn in an expanded lane. Analysis page only. */
+  turnsCollapsed?: boolean;
+  /** Fold every tool call in an expanded lane. Analysis page only. */
+  callsCollapsed?: boolean;
+  /** One query applied to every analysis-page lane. */
+  searchQuery?: string;
+  /** Trace and span totals for the analysis-page header. */
+  onSummaryChange?: (summary: TrajectoryPanelSummary) => void;
+  /**
+   * Analysis-page stand-in for the conversation trajectory header: import,
+   * export, replay exit, and the attribution toggle. The panel keeps the
+   * archive and still draws progress, errors, and the attribution footer.
+   */
+  onArchiveActionsReady?: (actions: TrajectoryArchiveActions) => void;
+}
+
+/** Controls the analysis toolbar uses in place of the conversation header. */
+export interface TrajectoryArchiveActions {
+  importing: boolean;
+  exporting: boolean;
+  exportDisabled: boolean;
+  attributionOpen: boolean;
+  replayActive: boolean;
+  /** Shown while an imported archive is open; null when live. */
+  replayLabel: string | null;
+  importLabel: string;
+  exportLabel: string;
+  attributionLabel: string;
+  exitReplayLabel: string;
+  requestImport: () => void;
+  requestExport: () => void;
+  toggleAttribution: () => void;
+  exitReplay: () => void;
+}
+
+export interface TrajectoryPanelSelection {
+  state: DiagnosisSelectionState;
+  /** Applies a change on top of the latest state, so quick successive picks do not overwrite each other. */
+  onChange: (update: (current: DiagnosisSelectionState) => DiagnosisSelectionState) => void;
+}
+
+export interface TrajectoryPanelSubject {
+  id: string;
+  label: string;
+}
+
+/** Wall-clock span of the primary agent's last timed node. */
+export interface TrajectoryMainAgentLastNode {
+  subjectId: string;
+  startMs: number;
+  endMs: number;
+}
+
+/** Timed nodes of one lane, in snapshot order. */
+export interface TrajectoryDiagnosisLaneNodes {
+  subjectId: string;
+  intervals: readonly { startMs: number; endMs: number }[];
+}
+
+/** How analysis-page lanes size their blocks. Time is the shared wall clock. */
+export type TrajectoryLaneScale = 'time' | 'equal' | 'tokens' | 'duration';
+
+export interface TrajectoryPanelSummary {
+  /** Subject lanes on the page (same set diagnosis can pick from). */
+  agents: number;
+  /**
+   * Selectable OTel spans on the swimlanes (`rawOtelSpanIntervals`).
+   * Matches `selectedNodeCount(..., fullScope: true)` so the header and the
+   * "select all" summary stay in sync.
+   */
+  spans: number;
+}
+
+function ignoreTimelineRange(): void {}
+
+interface InitialLoadProgress {
+  /** Timed OTel spans loaded so far (same rule as the analysis header). */
+  loaded: number;
+  /**
+   * Timed spans known so far plus remaining raw records not yet fetched.
+   * Shrinks toward the final header count as untimed records are discovered.
+   */
+  total: number;
+}
+
+/** How many raw detail records carry a selectable OTel span. */
+function timedRawSpanCount(
+  buckets: Iterable<{ rawRecords: ReadonlyMap<string, TrajectoryDetailRecord> }>,
+): number {
+  let count = 0;
+  for (const bucket of buckets) {
+    count += rawOtelSpanIntervals([...bucket.rawRecords.values()]).length;
+  }
+  return count;
+}
+
+function recordLabel(record: OtlpExportTraceServiceRequest): string {
+  const span = spansOf(record)[0];
+  if (span === undefined) return 'OTLP record';
+  return `${span.name} · ${span.traceId.slice(0, 8)}/${span.spanId.slice(0, 8)}`;
+}
+
+function aggregateDiagnostics(
+  diagnostics: readonly TrajectoryDiagnostic[],
+): readonly { code: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const diagnostic of diagnostics) {
+    counts.set(diagnostic.code, (counts.get(diagnostic.code) ?? 0) + 1);
+  }
+  return [...counts].map(([code, count]) => ({ code, count }));
+}
+
+function detailRecordLabel(record: TrajectoryDetailRecord): string {
+  if (record.otlp !== null) return recordLabel(record.otlp);
+  const identity = detailRecordIdentity(record);
+  const shortIdentity = identity === null
+    ? `record #${record.ingest_seq}`
+    : `${identity.slice(0, 8)}/${identity.slice(33, 41)}`;
+  const size = record.raw_size_bytes === undefined
+    ? ''
+    : ` · ${record.raw_size_bytes.toLocaleString()} B`;
+  return `Raw ${shortIdentity}${size}`;
+}
+
+function formatTurnRanges(ranges: readonly TrajectoryTurnRange[], separator: string): string {
+  return ranges
+    .map(range => (range.first === range.last ? `${range.first}` : `${range.first}–${range.last}`))
+    .join(separator);
+}
+
+function errorMessage(error: unknown, chinese: boolean): string {
+  if (error instanceof TrajectoryApiError && error.code === 'TRAJECTORY_DISABLED') {
+    return chinese ? '轨迹观测当前未启用。' : 'Trajectory observability is disabled.';
+  }
+  if (error instanceof TrajectoryApiError && error.code === 'UNSUPPORTED_SESSION_MODE') {
+    return chinese ? '当前会话暂时无法加载轨迹。' : 'Trajectory is temporarily unavailable for this session.';
+  }
+  if (error instanceof Error && error.message) return error.message;
+  return chinese ? '轨迹数据加载失败。' : 'Failed to load trajectory data.';
+}
+
+interface PublishedTrajectoryWindow {
+  readonly records: OtlpExportTraceServiceRequest[];
+  readonly rawRecords: TrajectoryDetailRecord[];
+  readonly lifecycleByRecordId: ReadonlyMap<string, 'running' | 'completed' | 'error'>;
+  readonly sessionCumulativeUsageByRequestIdentity: ReadonlyMap<string, TrajectoryUsage>;
+  readonly checkpoints: TrajectoryRetentionCheckpoints;
+}
+
+const EMPTY_PUBLISHED_WINDOW: PublishedTrajectoryWindow = {
+  records: [],
+  rawRecords: [],
+  lifecycleByRecordId: new Map(),
+  sessionCumulativeUsageByRequestIdentity: new Map(),
+  checkpoints: EMPTY_TRAJECTORY_CHECKPOINTS,
+};
+
+/**
+ * Tool-panel visibility and other App chrome state must not rebuild the
+ * session projection. The panel owns its own transport updates; parent-only
+ * layout changes should only resize the already rendered surface.
+ */
+export const TrajectoryPanel = memo(function TrajectoryPanel({
+  active,
+  mode = 'agent',
+  sessionId,
+  sharedTimeAxis = false,
+  onSubjectsChange,
+  onMainAgentLastNodeChange,
+  onDiagnosisNodesChange,
+  highlightStepKeys,
+  selection,
+  fullScopeSelection = false,
+  onFullScopeChange,
+  onTimelineAvailableChange,
+  laneScale = 'time',
+  turnsCollapsed = false,
+  callsCollapsed = false,
+  searchQuery = '',
+  onSummaryChange,
+  onArchiveActionsReady,
+}: TrajectoryPanelProps) {
+  const { i18n } = useTranslation();
+  const chinese = (i18n.resolvedLanguage ?? i18n.language).toLowerCase().startsWith('zh');
+  const sessionTeamMode = mode === 'team';
+  // The panel is not remounted when the session or its mode changes, so the
+  // stable callbacks below read the mode through a ref instead of closing
+  // over the value they were first created with.
+  const sessionTeamModeRef = useRef(sessionTeamMode);
+  sessionTeamModeRef.current = sessionTeamMode;
+  const windowStateRef = useRef(createTrajectoryWindowState());
+  const operationCoordinatorRef = useRef(createTrajectoryOperationCoordinator());
+  const loadedSessionRef = useRef<string | null>(null);
+  const requestControllerRef = useRef<AbortController | null>(null);
+  const refreshPromiseRef = useRef<Promise<void> | null>(null);
+  const terminalCatchUpPromiseRef = useRef<Promise<void> | null>(null);
+  const terminalCatchUpAgainRef = useRef(false);
+  const terminalSettleTimerRef = useRef<number | null>(null);
+  const rebuildPromiseRef = useRef<Promise<boolean> | null>(null);
+  const hintFlushScheduledRef = useRef(false);
+  const hintCoordinatorRef = useRef(createTrajectoryTraceHintCoordinator());
+  const activeRef = useRef(active);
+  const deferredPublishRef = useRef(false);
+  const initialLoadProgressRef = useRef<({
+    generation: number;
+    /** Raw records the subject list promised for header-visible subjects. */
+    recordTotal: number;
+    /** Subjects whose raw rows feed the analysis header OTel Span count. */
+    headerSubjectIds: ReadonlySet<string>;
+  } & InitialLoadProgress) | null>(null);
+  activeRef.current = active;
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const rawResizeDragRef = useRef<RawInspectorResizeDrag | null>(null);
+  const rawContentId = useId();
+  const archiveInputRef = useRef<HTMLInputElement>(null);
+  const rawSelectionBySubjectRef = useRef(new Map<string, string>());
+  // Content is addressed by the hash of itself, so a cached element can never
+  // go stale and is reusable for the life of the session.
+  const sequenceCacheRef = useRef(createSequenceCache());
+  const subjectViewCacheRef = useRef(
+    createTrajectorySubjectViewCache<ReturnType<typeof projectOtelTrajectory>>(),
+  );
+  const trajectoryV2ReducerRef = useRef(createTrajectoryV2Reducer());
+  // Replay projects through a reducer of its own. The live reducer keeps the
+  // session's events across publishes, and feeding it an archive's events
+  // would corrupt the live view and the replay alike.
+  const replayV2ReducerRef = useRef(createTrajectoryV2Reducer());
+  const sessionCumulativeUsageRef = useRef(new Map<string, TrajectoryUsage>());
+  // What retention left for the session's removed turns, read before any of
+  // its records so every view starts from it.
+  const checkpointsRef = useRef<TrajectoryRetentionCheckpoints>(EMPTY_TRAJECTORY_CHECKPOINTS);
+  // Highest frame watermark any trace hint has stated for this session.
+  const hintedFrameSeqRef = useRef(0);
+  const [publishedWindow, setPublishedWindow] = useState<PublishedTrajectoryWindow>(
+    EMPTY_PUBLISHED_WINDOW,
+  );
+  // Team mode: `null` collapses every lane (only the swimlane grid is shown);
+  // a subject id expands that member's trajectory drawer.
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(
+    sessionTeamMode ? null : MAIN_TRAJECTORY_SUBJECT_ID,
+  );
+  // Expanded lane of a non-Team session on the analysis page.
+  const [laneExpandedId, setLaneExpandedId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [initialLoadProgress, setInitialLoadProgress] = useState<InitialLoadProgress | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [replayArchive, setReplayArchive] = useState<TrajectoryArchiveReplay | null>(null);
+  // A replay renders in the mode its archive was exported from, not the mode
+  // of the session hosting it.
+  const teamMode = replayArchive === null
+    ? sessionTeamMode
+    : trajectoryReplayTeamMode(replayArchive.mode, sessionTeamMode);
+  // The file as imported. Exporting a replay saves these bytes: the replayed
+  // view has its references resolved, and restating them would undo what
+  // makes the addressed file small.
+  const replayArchiveFileRef = useRef<Blob | null>(null);
+  const [importProgress, setImportProgress] = useState<TrajectoryArchiveProgress | null>(null);
+  // A newer import supersedes one still reading; only the latest may publish.
+  const importGenerationRef = useRef(0);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [archiveNotice, setArchiveNotice] = useState<string | null>(null);
+  const [invalidRecordSeen, setInvalidRecordSeen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [rawSelection, setRawSelection] = useState('');
+  const [fetchedRaw, setFetchedRaw] = useState<{ identity: string; data: unknown } | null>(null);
+  const [rawLoading, setRawLoading] = useState(false);
+  const [rawError, setRawError] = useState<string | null>(null);
+  // The raw OTel records are a debugging aid, not the reading surface, so the
+  // inspector opens as its summary row and the ledger keeps the height.
+  const [rawExpanded, setRawExpanded] = useState(false);
+  // MIT attribution for the migrated DeepSeek Harness sources. It is reachable
+  // from the header rather than standing permanently at the bottom, where it
+  // took reading space from every session.
+  const [attributionOpen, setAttributionOpen] = useState(false);
+  const [rawHeight, setRawHeight] = useState(RAW_INSPECTOR_DEFAULT_HEIGHT);
+  const [rawContainerHeightPx, setRawContainerHeightPx] = useState(600);
+
+  const copy = useMemo(() => chinese ? {
+    loading: '正在加载轨迹…',
+    loadingProgress: (loaded: number, total: number) => `正在加载轨迹 ${loaded} / ${total} 个 OTel Span`,
+    emptyTitle: '暂无轨迹',
+    emptyText: teamMode
+      ? '运行一次集群对话后，这里会并行展示 Leader 与各 Teammate 成员的操作泳道。'
+      : '运行一次单 Agent 对话后，这里会展示模型、推理和工具调用轨迹。',
+    newTitle: '尚未创建会话',
+    newText: '发送第一条消息后可查看轨迹。',
+    retry: '重试',
+    importArchive: '导入',
+    importingArchive: '导入中…',
+    importProgress: (percent: number, spans: number) => `正在导入轨迹 ${percent}% · ${spans} 个 OTel Span`,
+    exportArchive: '导出',
+    exportingArchive: '导出中…',
+    exitReplay: '退出复现',
+    replay: (sourceSession: string) => `只读复现 · ${sourceSession}`,
+    archiveTooLarge: '轨迹归档超出浏览器导入上限，无法导入。',
+    archiveInvalid: (detail: string) => (
+      `无法导入：所选文件不是有效的轨迹归档（.trajectory.jsonl / .trajectory.zip）。详情：${detail}`
+    ),
+    replayModeMismatch: (replayTeamMode: boolean) => (replayTeamMode
+      ? '该轨迹导出自集群模式会话，与当前单 Agent 会话模式不同，已按集群模式复现。'
+      : '该轨迹导出自单 Agent 模式会话，与当前集群会话模式不同，已按单 Agent 模式复现。'),
+    exportBrowserStarted: '轨迹归档下载已开始；请在浏览器下载列表确认文件。',
+    exportBrowserSaved: '轨迹归档已保存到本地。',
+    exportDesktopSaved: '轨迹归档已保存到本地。',
+    exportCancelled: '已取消轨迹导出。',
+    exportFailed: '轨迹导出失败，请检查浏览器下载权限，或等待桌面保存桥接就绪后重试。',
+    subjectTabs: '执行主体',
+    subjectParent: (parentId: string) => `父主体 ${parentId}`,
+    subjectSession: (subjectSessionId: string) => `执行会话 ${subjectSessionId}`,
+    summary: (traces: number, spans: number) => `${traces} 条 trace · ${spans} 个 OTel Span`,
+    invalid: '· 存在无法投影的原始记录',
+    diagnostic: (code: string) => `轨迹数据不完整（${code}），已保留最近一次有效视图。`,
+    unrecordedTurns: (ranges: readonly TrajectoryTurnRange[]) => (
+      `第 ${formatTurnRanges(ranges, '、')} 轮对话没有轨迹记录（共 ${countTurns(ranges)} 轮），`
+      + '通常是因为当时轨迹开关尚未开启。'
+    ),
+    raw: (count: number) => `原始 OTel 记录 (${count})`,
+    rawLabel: '选择原始 OTel 记录',
+    rawLoad: '按需加载原始记录',
+    rawLoading: '正在加载原始记录…',
+    rawTooLarge: '该 Span 超过详情投影预算，未自动载入；可按需读取原始数据。',
+    rawInvalid: '该记录无法按 OTLP JSON 投影；可按需查看原始内容。',
+    rawOnly: '当前 trace 只有未投影的原始记录，可在下方按需查看。',
+    rawCollapse: '收起原始 OTel 面板',
+    rawExpand: '展开原始 OTel 面板',
+    rawResize: '调整原始 OTel 面板高度',
+    toolbar: {
+      'toolbar.aria': '轨迹工具栏',
+      'toolbar.duration': '时长',
+      'toolbar.useActualDuration': '使用实际时长',
+      'toolbar.useEqualWidth': '使用等宽操作',
+      'toolbar.actualTime': '实际时间',
+      'toolbar.tokens': 'Tokens',
+      'toolbar.useTokenCost': '按 token 开销显示',
+      'toolbar.turns': '轮次',
+      'toolbar.expandTurns': '展开所有轮次',
+      'toolbar.collapseTurns': '折叠所有轮次',
+      'toolbar.calls': '调用',
+      'toolbar.expandCalls': '展开所有调用',
+      'toolbar.collapseCalls': '折叠所有调用',
+      'toolbar.search': '搜索轨迹',
+      'toolbar.searchPlaceholder': '搜索',
+    },
+    attributionLabel: '开源声明',
+    attributionBasis: '本产品轨迹 UI 基于开源项目',
+    attributionLicense: '的轨迹组件开发构建，原项目遵循',
+    attributionLicenseSuffix: '。',
+    attributionCopyright: '原项目 Copyright © 2026 DeepSeek · 修改部分 © 2026 Huawei Technologies Co., Ltd.',
+  } : {
+    loading: 'Loading trajectory…',
+    loadingProgress: (loaded: number, total: number) => `Loading trajectory ${loaded} / ${total} OTel spans`,
+    emptyTitle: 'No trajectory yet',
+    emptyText: teamMode
+      ? 'Run a cluster conversation to see Leader and Teammate member lanes side by side.'
+      : 'Run a single-Agent conversation to see model, reasoning, and tool traces here.',
+    newTitle: 'No conversation yet',
+    newText: 'Send the first message to view its trajectory.',
+    retry: 'Retry',
+    importArchive: 'Import',
+    importingArchive: 'Importing…',
+    importProgress: (percent: number, spans: number) => `Importing trajectory ${percent}% · ${spans} OTel spans`,
+    exportArchive: 'Export',
+    exportingArchive: 'Exporting…',
+    exitReplay: 'Exit replay',
+    replay: (sourceSession: string) => `Read-only replay · ${sourceSession}`,
+    archiveTooLarge: 'The trajectory archive exceeds the browser import limits.',
+    archiveInvalid: (detail: string) => (
+      'Cannot import: the selected file is not a valid trajectory archive '
+      + `(.trajectory.jsonl / .trajectory.zip). Details: ${detail}`
+    ),
+    replayModeMismatch: (replayTeamMode: boolean) => (replayTeamMode
+      ? 'This trajectory was exported from a Team session, unlike the current single-Agent session; '
+        + 'it is replayed as a Team.'
+      : 'This trajectory was exported from a single-Agent session, unlike the current Team session; '
+        + 'it is replayed as a single Agent.'),
+    exportBrowserStarted: 'Trajectory archive download started; confirm it in the browser downloads list.',
+    exportBrowserSaved: 'Trajectory archive saved locally.',
+    exportDesktopSaved: 'Trajectory archive saved locally.',
+    exportCancelled: 'Trajectory export was cancelled.',
+    exportFailed: 'Trajectory export failed. Check browser download permissions or retry after the desktop save bridge is ready.',
+    subjectTabs: 'Execution subjects',
+    subjectParent: (parentId: string) => `Parent ${parentId}`,
+    subjectSession: (subjectSessionId: string) => `Execution session ${subjectSessionId}`,
+    summary: (traces: number, spans: number) => `${traces} traces · ${spans} OTel spans`,
+    invalid: '· Some raw records could not be projected',
+    diagnostic: (code: string) => `Trajectory data is incomplete (${code}); the last valid view was retained.`,
+    unrecordedTurns: (ranges: readonly TrajectoryTurnRange[]) => {
+      const total = countTurns(ranges);
+      return `${total === 1 ? 'Turn' : 'Turns'} ${formatTurnRanges(ranges, ', ')} `
+        + `${total === 1 ? 'has' : 'have'} no trajectory records, `
+        + 'usually because the trajectory switch was off at the time.';
+    },
+    raw: (count: number) => `Raw OTel records (${count})`,
+    rawLabel: 'Select a raw OTel record',
+    rawLoad: 'Load raw record on demand',
+    rawLoading: 'Loading raw record…',
+    rawTooLarge: 'This Span exceeds the detail projection budget and was not loaded automatically.',
+    rawInvalid: 'This record could not be projected as OTLP JSON. Its raw content remains available.',
+    rawOnly: 'This trace currently contains only unprojected raw records.',
+    rawCollapse: 'Collapse raw OTel panel',
+    rawExpand: 'Expand raw OTel panel',
+    rawResize: 'Resize raw OTel panel height',
+    toolbar: undefined,
+    attributionLabel: 'Open-source attribution',
+    attributionBasis: 'The trajectory UI in this product is developed and built on the trajectory components of the open-source project',
+    attributionLicense: ', which is licensed under the',
+    attributionLicenseSuffix: '.',
+    attributionCopyright: 'Original project Copyright © 2026 DeepSeek · Modifications © 2026 Huawei Technologies Co., Ltd.',
+  }, [chinese, teamMode]);
+
+  const publish = useCallback((generation: number) => {
+    if (!operationCoordinatorRef.current.isCurrent(generation)) return;
+    if (!activeRef.current) {
+      deferredPublishRef.current = true;
+      return;
+    }
+    deferredPublishRef.current = false;
+    // A span still writing its answer states nothing about it yet, so the
+    // frames it has produced stand in until its own record supersedes them.
+    const nextRecords = withStreamFrames(
+      [...windowStateRef.current.buckets.values()].flatMap(bucket => (
+        [...bucket.records.values()]
+      )),
+      windowStateRef.current.frames,
+    ) as OtlpExportTraceServiceRequest[];
+    const nextRawRecords = [...windowStateRef.current.buckets.values()].flatMap(bucket => (
+      [...bucket.rawRecords.values()]
+    ));
+    setPublishedWindow({
+      records: nextRecords,
+      rawRecords: nextRawRecords,
+      lifecycleByRecordId: new Map(
+        [...windowStateRef.current.buckets.values()].flatMap(bucket => (
+          [...(bucket.versions ?? [])].map(([identity, version]) => (
+            [identity, version.lifecycle] as const
+          ))
+        )),
+      ),
+      sessionCumulativeUsageByRequestIdentity: new Map(sessionCumulativeUsageRef.current),
+      checkpoints: checkpointsRef.current,
+    });
+  }, []);
+
+  const refreshSessionUsage = useCallback(async (
+    signal: AbortSignal,
+    generation: number,
+  ) => {
+    const usage = await getTrajectorySessionUsage(sessionId, { signal });
+    if (signal.aborted || !operationCoordinatorRef.current.isCurrent(generation)) return;
+    const expectedEpoch = windowStateRef.current.storeEpoch;
+    if (expectedEpoch !== null && usage.store_epoch !== expectedEpoch) return;
+    const nextUsage = new Map(usage.items.map(item => (
+      [`${item.trace_id}\u0000${item.inference_id}`, item.cumulative_usage]
+    )));
+    if (sameTrajectoryUsageMap(sessionCumulativeUsageRef.current, nextUsage)) return;
+    const changedTraceIds = changedTrajectoryUsageTraceIds(
+      sessionCumulativeUsageRef.current,
+      nextUsage,
+    );
+    sessionCumulativeUsageRef.current = nextUsage;
+    // The view cache does not compare usage, so it would keep a stale figure;
+    // only subjects with a record in a changed trace need projecting again.
+    subjectViewCacheRef.current.invalidate(group => group.records.some(record => (
+      spansOf(record).some(span => changedTraceIds.has(span.traceId))
+    )));
+    publish(generation);
+  }, [publish, sessionId]);
+
+  const catchUpStreamFrames = useCallback(async (
+    signal: AbortSignal,
+    generation: number,
+  ) => {
+    // Walk forward from the cursor this reader holds until it is level with
+    // the store. A reader that was disconnected closes the whole gap here
+    // rather than waiting for the answer to finish.
+    let pagesLeft = MAX_FRAME_CATCH_UP_PAGES;
+    let changed = false;
+    while (pagesLeft > 0) {
+      pagesLeft -= 1;
+      const expectedEpoch = windowStateRef.current.storeEpoch;
+      const page = await getTrajectoryStreamFrames(sessionId, {
+        signal,
+        sinceFrameSeq: windowStateRef.current.frames.frameSeq,
+      });
+      if (signal.aborted
+        || !operationCoordinatorRef.current.isCurrent(generation)
+        || windowStateRef.current.storeEpoch !== expectedEpoch) return;
+      if (page.frames.length === 0 && !page.reset) break;
+      windowStateRef.current.frames = applyStreamFrames(
+        windowStateRef.current.frames,
+        page,
+      );
+      changed = true;
+      if (!page.has_more) break;
+    }
+    if (!changed) return;
+    // No cache reset: overlaying frames replaces only the records of spans
+    // that have them, and the view cache compares records by identity, so it
+    // re-projects just the subjects that are streaming.
+    publish(generation);
+  }, [publish, sessionId]);
+
+  const clearPublishedWindow = useCallback(() => {
+    resetTrajectoryWindowState(windowStateRef.current);
+    deferredPublishRef.current = false;
+    subjectViewCacheRef.current.clear();
+    trajectoryV2ReducerRef.current.clear();
+    checkpointsRef.current = EMPTY_TRAJECTORY_CHECKPOINTS;
+    sessionCumulativeUsageRef.current.clear();
+    hintedFrameSeqRef.current = 0;
+    setPublishedWindow(EMPTY_PUBLISHED_WINDOW);
+    initialLoadProgressRef.current = null;
+    setInitialLoadProgress(null);
+    setSelectedSubjectId(sessionTeamModeRef.current ? null : MAIN_TRAJECTORY_SUBJECT_ID);
+    setLaneExpandedId(null);
+    setInvalidRecordSeen(false);
+    setError(null);
+    setRawSelection('');
+    rawSelectionBySubjectRef.current.clear();
+    setFetchedRaw(null);
+    setRawLoading(false);
+    setRawError(null);
+  }, []);
+
+  useEffect(() => {
+    if (!active || !deferredPublishRef.current) return;
+    publish(operationCoordinatorRef.current.currentGeneration());
+  }, [active, publish]);
+
+  const recoverSequences = useCallback(async (
+    heads: readonly string[],
+    signal: AbortSignal,
+  ) => {
+    for (let offset = 0; offset < heads.length; offset += MAX_SEQUENCE_REQUEST) {
+      const batch = heads.slice(offset, offset + MAX_SEQUENCE_REQUEST);
+      try {
+        const page = await getTrajectorySequences(sessionId, batch, { signal });
+        absorbSequencePage(sequenceCacheRef.current, page);
+      } catch (recoveryError) {
+        // Recovering content must not cost the reader the page that needed
+        // it. What could not be rebuilt stays marked on its record, and the
+        // next page that states the same chain asks again.
+        if (signal.aborted) return;
+        void recoveryError;
+        return;
+      }
+    }
+  }, [sessionId]);
+
+  const loadChain = useCallback(async (
+    subjectId: string,
+    targetRevision: number,
+    signal: AbortSignal,
+    generation: number,
+  ) => {
+    if (!operationCoordinatorRef.current.isCurrent(generation)) return;
+    const current = windowStateRef.current.buckets.get(subjectId);
+    if (current !== undefined && current.revision >= targetRevision) return;
+    const publishPage = (staged: StagedTrajectoryChain) => {
+      if (signal.aborted || !operationCoordinatorRef.current.isCurrent(generation)) return;
+      // A finished span is final whichever page carries it, so its frames go
+      // even when a newer concurrent page already holds the bucket.
+      windowStateRef.current.frames = forgetStreamFrames(
+        windowStateRef.current.frames,
+        staged.finishedSpanKeys,
+      );
+      const latest = windowStateRef.current.buckets.get(subjectId);
+      // A consumed revision uniquely identifies the trace state visible to
+      // this coalesced detail feed. Equal or older concurrent pages cannot add
+      // facts and would only trigger another full presentation publish.
+      if (latest !== undefined && latest.revision >= staged.bucket.revision) return;
+      windowStateRef.current.buckets.set(subjectId, staged.bucket);
+      if (staged.invalidRecordSeen) setInvalidRecordSeen(true);
+      const loadProgress = initialLoadProgressRef.current;
+      if (loadProgress !== null && loadProgress.generation === generation) {
+        const buckets = [...windowStateRef.current.buckets.entries()]
+          .filter(([subjectId]) => loadProgress.headerSubjectIds.has(subjectId))
+          .map(([, bucket]) => bucket);
+        const rawLoaded = buckets.reduce((count, bucket) => count + bucket.rawRecords.size, 0);
+        const loaded = timedRawSpanCount(buckets);
+        // Untimed raw rows never become header spans; drop them from the total
+        // as soon as they are seen so the fraction ends on the OTel Span count.
+        const total = loaded + Math.max(0, loadProgress.recordTotal - rawLoaded);
+        if (loaded !== loadProgress.loaded || total !== loadProgress.total) {
+          const nextProgress = { ...loadProgress, loaded, total };
+          initialLoadProgressRef.current = nextProgress;
+          setInitialLoadProgress({ loaded, total });
+        }
+      }
+      publish(generation);
+    };
+    const staged = await stageTrajectoryChainPages(
+      current,
+      signal,
+      async (sinceRevision, pageSignal) => {
+        const page = await getTrajectorySubjectRecords(sessionId, subjectId, {
+          signal: pageSignal,
+          sinceRevision,
+          limit: DETAIL_LIMIT,
+        });
+        // Records state their restated attributes by reference. Take in what
+        // this page delivered, then rebuild them from what is now held: the
+        // server sends content only when it was not assumed to be cached.
+        absorbSequencePage(sequenceCacheRef.current, page);
+        let rebuilt = page.records.map(
+          record => rebuildRecord(record, sequenceCacheRef.current),
+        );
+        // That assumption can be wrong -- a reload, a second device, an entry
+        // the browser dropped. Ask for what is still missing by hash, which
+        // makes the answer conclusive: content absent after this is content
+        // the store no longer has, not content still on its way.
+        const unresolved = unresolvedHeadsOf(rebuilt);
+        if (unresolved.length > 0) {
+          await recoverSequences(unresolved, pageSignal);
+          rebuilt = page.records.map(
+            record => rebuildRecord(record, sequenceCacheRef.current),
+          );
+        }
+        return { ...page, records: rebuilt };
+      },
+      publishPage,
+    );
+    if (staged === null
+      || signal.aborted
+      || !operationCoordinatorRef.current.isCurrent(generation)) return;
+    setError(null);
+  }, [publish, recoverSequences, sessionId]);
+
+  const loadSummaries = useCallback(async (
+    summaries: readonly TrajectorySubjectSummary[],
+    signal: AbortSignal,
+    generation: number,
+  ) => {
+    for (let offset = 0; offset < summaries.length; offset += DETAIL_CONCURRENCY) {
+      const batch = summaries.slice(offset, offset + DETAIL_CONCURRENCY);
+      await Promise.all(batch.map(summary => loadChain(
+        summary.subject_id,
+        summary.revision,
+        signal,
+        generation,
+      )));
+      if (signal.aborted
+        || !operationCoordinatorRef.current.isCurrent(generation)) return;
+    }
+  }, [loadChain]);
+
+  const loadCheckpoints = useCallback(async (signal: AbortSignal) => {
+    const response = await getTrajectoryCheckpoints(sessionId, { signal });
+    absorbSequencePage(sequenceCacheRef.current, response);
+    return {
+      storeEpoch: response.store_epoch,
+      checkpoints: resolveTrajectoryCheckpoints(response.checkpoints, sequenceCacheRef.current),
+    };
+  }, [sessionId]);
+
+  const rebuildFromHead = useCallback((signal: AbortSignal): Promise<boolean> => {
+    if (rebuildPromiseRef.current !== null) return rebuildPromiseRef.current;
+    const coordinator = operationCoordinatorRef.current;
+    const generation = coordinator.invalidate();
+    clearPublishedWindow();
+    setLoading(true);
+    const operation = (async () => {
+      try {
+        // Checkpoints and listing must describe one store epoch: records
+        // listed after a retention pass need the checkpoints it wrote.
+        let seeded = await loadCheckpoints(signal);
+        let page = await listTrajectorySubjects(sessionId, { signal });
+        for (
+          let attempt = 1;
+          page.store_epoch !== seeded.storeEpoch && attempt < MAX_CHECKPOINT_READ_ATTEMPTS;
+          attempt += 1
+        ) {
+          if (signal.aborted || !coordinator.isCurrent(generation)) return false;
+          seeded = await loadCheckpoints(signal);
+          page = await listTrajectorySubjects(sessionId, { signal });
+        }
+        if (signal.aborted || !coordinator.isCurrent(generation)) return false;
+        if (page.store_epoch !== seeded.storeEpoch) {
+          throw new Error(chinese
+            ? '轨迹保留清理正在进行，请稍后重试。'
+            : 'Trajectory retention is running; retry shortly.');
+        }
+        checkpointsRef.current = seeded.checkpoints;
+        trajectoryV2ReducerRef.current.seed(seeded.checkpoints.v2Seeds);
+        // Match the analysis header: team swimlanes omit main/unassigned rows.
+        const countForHeader = sessionTeamModeRef.current;
+        const headerItems = page.items.filter(summary => (
+          !countForHeader || subjectAppearsOnTeamLanes(summary.kind)
+        ));
+        const headerSubjectIds = new Set(headerItems.map(summary => summary.subject_id));
+        const recordTotal = headerItems.reduce((count, summary) => count + summary.record_count, 0);
+        initialLoadProgressRef.current = {
+          generation,
+          loaded: 0,
+          total: recordTotal,
+          recordTotal,
+          headerSubjectIds,
+        };
+        setInitialLoadProgress({ loaded: 0, total: recordTotal });
+        await loadSummaries(page.items, signal, generation);
+        if (signal.aborted || !coordinator.isCurrent(generation)) return false;
+        const windowState = windowStateRef.current;
+        windowState.storeEpoch = page.store_epoch;
+        windowState.watermark = page.watermark;
+        windowState.listWindowInitialized = true;
+        // Resetting the window zeroed the frame cursor, so a page opened while
+        // an answer streams must page the frames too, or its running spans wait
+        // for the next hint before showing any text.
+        await Promise.all([
+          refreshSessionUsage(signal, generation),
+          catchUpStreamFrames(signal, generation),
+        ]);
+        if (signal.aborted || !coordinator.isCurrent(generation)) return false;
+        setError(null);
+        return true;
+      } catch (rebuildError) {
+        if (!signal.aborted && coordinator.isCurrent(generation)) {
+          setError(errorMessage(rebuildError, chinese));
+        }
+        return false;
+      } finally {
+        if (coordinator.isCurrent(generation)) {
+          initialLoadProgressRef.current = null;
+          setInitialLoadProgress(null);
+          setLoading(false);
+        }
+      }
+    })();
+    rebuildPromiseRef.current = operation;
+    void operation.finally(() => {
+      if (rebuildPromiseRef.current === operation) rebuildPromiseRef.current = null;
+    });
+    return operation;
+  }, [
+    catchUpStreamFrames,
+    chinese,
+    clearPublishedWindow,
+    loadCheckpoints,
+    loadSummaries,
+    refreshSessionUsage,
+    sessionId,
+  ]);
+
+  const refreshLatest = useCallback(async (frames: StreamFrameRefresh = 'always') => {
+    if (sessionId === 'new' || requestControllerRef.current?.signal.aborted) return;
+    if (refreshPromiseRef.current !== null) return refreshPromiseRef.current;
+    const signal = requestControllerRef.current?.signal;
+    if (signal === undefined) return;
+    const operation = (async () => {
+      try {
+        const coordinator = operationCoordinatorRef.current;
+        const generation = coordinator.currentGeneration();
+        if (signal.aborted || !coordinator.isCurrent(generation)) return;
+        const expectedStoreEpoch = windowStateRef.current.storeEpoch;
+        if (expectedStoreEpoch === null) {
+          await rebuildFromHead(signal);
+          return;
+        }
+        const loadedRevisions = new Map<string, number>(
+          [...windowStateRef.current.buckets]
+            .map(([subjectId, bucket]): [string, number] => [subjectId, bucket.revision]),
+        );
+        // One listing covers both the head and the incremental feed: the
+        // watermark is the floor, and a rotated epoch means restart.
+        const subjectWindow = await collectSubjectRefreshWindow(
+          windowStateRef.current.watermark,
+          expectedStoreEpoch,
+          signal,
+          (afterRevision, pageSignal) => listTrajectorySubjects(sessionId, {
+            signal: pageSignal,
+            afterRevision,
+          }),
+        );
+        if (subjectWindow === null
+          || signal.aborted
+          || !coordinator.isCurrent(generation)) return;
+        if (subjectWindow.reset) {
+          await rebuildFromHead(signal);
+          return;
+        }
+        const summaries = selectSummariesNeedingLoad(
+          loadedRevisions,
+          subjectWindow.summaries,
+        );
+        // Detail, usage and frames answer three questions of their own and
+        // resume from three cursors of their own, so they travel together
+        // instead of one round trip after another. Frames are what a reader
+        // watches in real time; they no longer wait behind the other two.
+        await Promise.all([
+          (async () => {
+            await loadSummaries(summaries, signal, generation);
+            if (signal.aborted
+              || !coordinator.isCurrent(generation)
+              || windowStateRef.current.storeEpoch !== expectedStoreEpoch) return;
+            // The listing watermark advances only once the detail behind it
+            // is held: a subject skipped here is one the next listing would
+            // not name again.
+            windowStateRef.current.listWindowInitialized = true;
+            windowStateRef.current.watermark = subjectWindow.watermark;
+          })(),
+          refreshSessionUsage(signal, generation),
+          shouldCatchUpStreamFrames(
+            frames,
+            windowStateRef.current.frames.frameSeq,
+            hintedFrameSeqRef.current,
+          )
+            ? catchUpStreamFrames(signal, generation)
+            : undefined,
+        ]);
+        if (signal.aborted || !coordinator.isCurrent(generation)) return;
+        setError(null);
+      } catch (refreshError) {
+        if (!signal.aborted) setError(errorMessage(refreshError, chinese));
+      }
+    })();
+    refreshPromiseRef.current = operation;
+    try {
+      await operation;
+    } finally {
+      if (refreshPromiseRef.current === operation) {
+        refreshPromiseRef.current = null;
+      }
+    }
+  }, [
+    catchUpStreamFrames,
+    chinese,
+    loadSummaries,
+    rebuildFromHead,
+    refreshSessionUsage,
+    sessionId,
+  ]);
+
+  const catchUpAfterTerminalEvent = useCallback((): Promise<void> => {
+    terminalCatchUpAgainRef.current = true;
+    if (terminalCatchUpPromiseRef.current !== null) {
+      return terminalCatchUpPromiseRef.current;
+    }
+    const operation = (async () => {
+      while (terminalCatchUpAgainRef.current) {
+        terminalCatchUpAgainRef.current = false;
+        const inFlight = refreshPromiseRef.current;
+        if (inFlight !== null) await inFlight;
+        await refreshLatest();
+      }
+    })();
+    terminalCatchUpPromiseRef.current = operation;
+    void operation.finally(() => {
+      if (terminalCatchUpPromiseRef.current === operation) {
+        terminalCatchUpPromiseRef.current = null;
+      }
+    });
+    return operation;
+  }, [refreshLatest]);
+
+  const flushTraceHints = useCallback(async () => {
+    const signal = requestControllerRef.current?.signal;
+    if (signal === undefined || signal.aborted) return;
+    await hintCoordinatorRef.current.drain(async () => {
+      // A hint names a trace, which no longer maps onto one chain: a trace can
+      // carry records for several subjects. It is enough as a signal that
+      // something advanced - the listing decides which chains to reload. The
+      // refresh already pulls usage; frames only when a hint is ahead of them.
+      await refreshLatest('ifBehind');
+    }, () => new Promise<void>((resolve) => {
+      window.setTimeout(resolve, LIVE_HINT_PULL_INTERVAL_MS);
+    }));
+  }, [refreshLatest]);
+
+  useEffect(() => {
+    requestControllerRef.current?.abort();
+    refreshPromiseRef.current = null;
+    terminalCatchUpPromiseRef.current = null;
+    terminalCatchUpAgainRef.current = false;
+    if (terminalSettleTimerRef.current !== null) {
+      window.clearTimeout(terminalSettleTimerRef.current);
+      terminalSettleTimerRef.current = null;
+    }
+    rebuildPromiseRef.current = null;
+    operationCoordinatorRef.current.invalidate();
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
+    setRawLoading(false);
+    hintCoordinatorRef.current = createTrajectoryTraceHintCoordinator();
+    hintFlushScheduledRef.current = false;
+    const sessionChanged = loadedSessionRef.current !== sessionId;
+    if (sessionChanged) {
+      loadedSessionRef.current = sessionId;
+      clearPublishedWindow();
+      // Content hashes stay valid across epochs of one session, but another
+      // session's content is only memory this reader will not use again.
+      sequenceCacheRef.current = createSequenceCache();
+    }
+    if (sessionId === 'new') {
+      setLoading(false);
+      return () => controller.abort();
+    }
+    if (!sessionChanged && windowStateRef.current.storeEpoch !== null) {
+      setLoading(false);
+      void refreshLatest();
+      return () => controller.abort();
+    }
+    const operation = rebuildFromHead(controller.signal).then(() => undefined);
+    refreshPromiseRef.current = operation;
+    void operation.finally(() => {
+      if (refreshPromiseRef.current === operation) refreshPromiseRef.current = null;
+    });
+    return () => controller.abort();
+  }, [clearPublishedWindow, rebuildFromHead, refreshLatest, sessionId]);
+
+  useEffect(() => {
+    if (sessionId === 'new' || replayArchive !== null) return undefined;
+    const unsubscribe = webClient.on<TraceUpdatedPayload>('trace.updated', (event) => {
+      if (event.payload.session_id !== sessionId) return;
+      const traceId = event.payload.trace_id;
+      const frameSeq = event.payload.frame_seq;
+      if (typeof frameSeq === 'number'
+        && Number.isSafeInteger(frameSeq)
+        && frameSeq > hintedFrameSeqRef.current) {
+        hintedFrameSeqRef.current = frameSeq;
+      }
+      const revisionValue = event.payload.revision;
+      const revision = typeof revisionValue === 'number'
+        ? revisionValue
+        : typeof revisionValue === 'string' && /^\d+$/.test(revisionValue)
+          ? Number(revisionValue)
+          : Number.NaN;
+      const eventEpoch = event.payload.store_epoch;
+      const currentEpoch = windowStateRef.current.storeEpoch;
+      if (typeof eventEpoch === 'string'
+        && currentEpoch !== null
+        && eventEpoch !== currentEpoch) {
+        const signal = requestControllerRef.current?.signal;
+        if (signal !== undefined && !signal.aborted) void rebuildFromHead(signal);
+        return;
+      }
+      if (typeof traceId !== 'string'
+        || !/^[0-9a-f]{32}$/.test(traceId)
+        || !Number.isSafeInteger(revision)
+        || revision < 0) {
+        void refreshLatest();
+        return;
+      }
+      hintCoordinatorRef.current.enqueue(traceId, revision);
+      if (hintFlushScheduledRef.current) return;
+      hintFlushScheduledRef.current = true;
+      queueMicrotask(() => {
+        hintFlushScheduledRef.current = false;
+        void flushTraceHints().catch(() => {
+          // Detail hints are only watermarks. A transient detail fetch must not
+          // strand the highest revision; the coordinator requeues it and the
+          // revision feed repairs the view without waiting for chat completion.
+          void refreshLatest();
+        });
+      });
+    });
+    let previousConnectionState = webClient.getState();
+    const unsubscribeState = webClient.onStateChange((nextConnectionState) => {
+      if (shouldCatchUpTrajectory(previousConnectionState, nextConnectionState)) {
+        void refreshLatest();
+      }
+      previousConnectionState = nextConnectionState;
+    });
+    const terminalEventNames: TrajectoryTerminalEventName[] = [
+      'chat.final',
+      'chat.processing_status',
+      'chat.error',
+      'execution.error',
+      'harness.session_finished',
+    ];
+    const unsubscribeTerminalEvents = terminalEventNames.map(eventName => (
+      webClient.on<Record<string, unknown>>(eventName, (event) => {
+        if (!shouldCatchUpAfterTrajectoryTerminalEvent(
+          eventName,
+          event.payload,
+          sessionId,
+        )) return;
+        if (terminalSettleTimerRef.current !== null) {
+          window.clearTimeout(terminalSettleTimerRef.current);
+        }
+        terminalSettleTimerRef.current = window.setTimeout(() => {
+          terminalSettleTimerRef.current = null;
+          void catchUpAfterTerminalEvent();
+        }, 300);
+      })
+    ));
+    return () => {
+      unsubscribe();
+      unsubscribeState();
+      unsubscribeTerminalEvents.forEach(unsubscribeTerminal => unsubscribeTerminal());
+      if (terminalSettleTimerRef.current !== null) {
+        window.clearTimeout(terminalSettleTimerRef.current);
+        terminalSettleTimerRef.current = null;
+      }
+      hintFlushScheduledRef.current = false;
+    };
+  }, [catchUpAfterTerminalEvent, flushTraceHints, rebuildFromHead, refreshLatest, replayArchive, sessionId]);
+
+  const replayView = replayArchive?.view ?? null;
+  const allDisplayedRecords = replayView?.records ?? publishedWindow.records;
+  const allDisplayedRawRecords = replayView?.rawRecords ?? publishedWindow.rawRecords;
+  const allDisplayedLifecycle = replayView?.lifecycleByRecordId
+    ?? publishedWindow.lifecycleByRecordId;
+  const displayedCheckpoints = replayArchive?.checkpoints ?? publishedWindow.checkpoints;
+  const displayedInvalidRecordSeen = replayView?.invalidRecordSeen ?? invalidRecordSeen;
+  const subjectView = useMemo(() => subjectViewCacheRef.current.update(
+    groupTrajectorySubjects(
+      allDisplayedRecords,
+      allDisplayedRawRecords,
+      allDisplayedLifecycle,
+      replayArchive?.header.session_id ?? sessionId,
+      { teamMode, retiredSubjects: displayedCheckpoints.retiredSubjects },
+    ),
+    // Replay projects exactly as the live view does, from what the archive
+    // carries: its own usage lines, its checkpoints and a reducer of its own.
+    group => projectOtelTrajectory(group.records, {
+      checkpoint: displayedCheckpoints.projections.get(group.subject.id),
+      lifecycleByRecordId: group.lifecycleByRecordId,
+      sessionCumulativeUsageByRequestIdentity:
+        replayArchive === null
+          ? publishedWindow.sessionCumulativeUsageByRequestIdentity
+          : replayArchive.sessionCumulativeUsageByRequestIdentity,
+      unresolvedAttributesByRecordId: unresolvedAttributesByRecordId(group.rawRecords),
+      v2Reducer: replayArchive === null
+        ? trajectoryV2ReducerRef.current
+        : replayV2ReducerRef.current,
+    }),
+  ), [
+    allDisplayedLifecycle,
+    allDisplayedRawRecords,
+    allDisplayedRecords,
+    displayedCheckpoints,
+    publishedWindow.sessionCumulativeUsageByRequestIdentity,
+    replayArchive,
+    sessionId,
+    teamMode,
+  ]);
+  const subjectGroups = subjectView.groups;
+  const selectedSubjectGroup = selectedSubjectId === null
+    ? undefined
+    : (subjectGroups.byId.get(selectedSubjectId)
+      ?? subjectGroups.groups[0]);
+  const displayedRecords = selectedSubjectGroup?.records ?? [];
+  const displayedRawRecords = selectedSubjectGroup?.rawRecords ?? [];
+  const displayedTraceCount = selectedSubjectGroup?.traceCount ?? 0;
+  const subjectSnapshots = subjectView.snapshots;
+  const timeAxis = useSharedTimeAxis(sharedTimeAxis, sessionId, subjectSnapshots);
+  const shareClock = sharedTimeAxis && laneScale === 'time';
+  const analysisViewState = useMemo<TrajectoryViewState | undefined>(() => (
+    sharedTimeAxis
+      ? {
+        actualDuration: laneScale === 'time' || laneScale === 'duration',
+        actualTime: laneScale === 'time',
+        tokenView: laneScale === 'tokens',
+        turnsCollapsed,
+        callsCollapsed,
+      }
+      : undefined
+  ), [callsCollapsed, laneScale, sharedTimeAxis, turnsCollapsed]);
+  const onSubjectsChangeRef = useRef(onSubjectsChange);
+  onSubjectsChangeRef.current = onSubjectsChange;
+  const subjectsSignature = JSON.stringify(subjectGroups.groups.map(group => [group.subject.id, group.label]));
+  useEffect(() => {
+    const entries = JSON.parse(subjectsSignature) as Array<[string, string]>;
+    onSubjectsChangeRef.current?.(entries.map(([id, label]) => ({ id, label })));
+  }, [subjectsSignature]);
+  const onMainAgentLastNodeChangeRef = useRef(onMainAgentLastNodeChange);
+  onMainAgentLastNodeChangeRef.current = onMainAgentLastNodeChange;
+  const mainAgentLastNodeKey = JSON.stringify(mainAgentLastNode(
+    subjectGroups.groups.map(group => ({
+      subjectId: group.subject.id,
+      kind: group.subject.kind,
+      turns: subjectSnapshots.get(group.subject.id)?.turns ?? [],
+    })),
+  ));
+  useEffect(() => {
+    onMainAgentLastNodeChangeRef.current?.(
+      JSON.parse(mainAgentLastNodeKey) as TrajectoryMainAgentLastNode | null,
+    );
+  }, [mainAgentLastNodeKey]);
+  const onDiagnosisNodesChangeRef = useRef(onDiagnosisNodesChange);
+  onDiagnosisNodesChangeRef.current = onDiagnosisNodesChange;
+  const diagnosisNodesKey = JSON.stringify(subjectGroups.groups.map(group => ({
+    subjectId: group.subject.id,
+    intervals: rawOtelSpanIntervals(group.rawRecords),
+  })));
+  useEffect(() => {
+    onDiagnosisNodesChangeRef.current?.(
+      JSON.parse(diagnosisNodesKey) as TrajectoryDiagnosisLaneNodes[],
+    );
+  }, [diagnosisNodesKey]);
+  const onTimelineAvailableChangeRef = useRef(onTimelineAvailableChange);
+  onTimelineAvailableChangeRef.current = onTimelineAvailableChange;
+  const timelineAvailable = timeAxis.domain !== null;
+  useEffect(() => {
+    onTimelineAvailableChangeRef.current?.(timelineAvailable);
+  }, [timelineAvailable]);
+  const onSummaryChangeRef = useRef(onSummaryChange);
+  onSummaryChangeRef.current = onSummaryChange;
+  useEffect(() => {
+    if (!sharedTimeAxis) return;
+    const lanes = JSON.parse(diagnosisNodesKey) as TrajectoryDiagnosisLaneNodes[];
+    onSummaryChangeRef.current?.({
+      agents: lanes.length,
+      spans: lanes.reduce((sum, lane) => sum + lane.intervals.length, 0),
+    });
+  }, [diagnosisNodesKey, sharedTimeAxis]);
+  const exportArchiveRef = useRef<() => void>(() => {});
+  const exitReplayRef = useRef<() => void>(() => {});
+  const onArchiveActionsReadyRef = useRef(onArchiveActionsReady);
+  onArchiveActionsReadyRef.current = onArchiveActionsReady;
+  const selectedSubjectSnapshot = selectedSubjectGroup === undefined
+    ? undefined
+    : subjectSnapshots.get(selectedSubjectGroup.subject.id);
+  // Only the main Agent's numbers follow the session's turn counter; other
+  // subjects and Team lanes number turns their own way, so a gap there says
+  // nothing about recording.
+  const mainTurnSnapshot = teamMode ? undefined : subjectSnapshots.get(MAIN_TRAJECTORY_SUBJECT_ID);
+  const unrecordedTurns = useMemo(() => (mainTurnSnapshot === undefined
+    ? []
+    : unrecordedTurnRanges(
+      mainTurnSnapshot.turns.map(turn => turn.turn),
+      displayedCheckpoints.projections.get(MAIN_TRAJECTORY_SUBJECT_ID)?.turns.maxNumber ?? 0,
+    )), [displayedCheckpoints, mainTurnSnapshot]);
+
+  const selectSubject = useCallback((subjectId: string | null) => {
+    if (subjectId === null) {
+      setSelectedSubjectId(null);
+      return;
+    }
+    rawSelectionBySubjectRef.current.set(selectedSubjectId ?? '', rawSelection);
+    setSelectedSubjectId(subjectId);
+    setRawSelection(rawSelectionBySubjectRef.current.get(subjectId) ?? '');
+  }, [rawSelection, selectedSubjectId]);
+
+  // A session's mode can resolve after the panel opened it ('agent' until the
+  // runtime reports 'team'). The single-agent default selection is 'main',
+  // which is also a valid Team leader lane id, so the repair below would keep
+  // it; reset to the mode's own default instead.
+  const selectionModeRef = useRef(teamMode);
+  useEffect(() => {
+    if (selectionModeRef.current === teamMode) return;
+    selectionModeRef.current = teamMode;
+    setSelectedSubjectId(teamMode ? null : MAIN_TRAJECTORY_SUBJECT_ID);
+  }, [teamMode]);
+
+  useEffect(() => {
+    if (!teamMode) {
+      if (!subjectGroups.byId.has(selectedSubjectId ?? '')) {
+        selectSubject(MAIN_TRAJECTORY_SUBJECT_ID);
+      }
+      return;
+    }
+    // Team mode: keep the collapsed state by default; only repair an expired
+    // expansion to the first record-bearing lane.
+    if (selectedSubjectId === null) return;
+    if (subjectGroups.byId.has(selectedSubjectId)) return;
+    const fallback = subjectGroups.groups.find(group => (
+      group.records.length > 0 || group.rawRecords.length > 0
+    ))?.subject.id ?? null;
+    selectSubject(fallback);
+  }, [selectSubject, selectedSubjectId, subjectGroups, teamMode]);
+
+  // The analysis page draws every session, Team or not, as swimlanes on the
+  // shared axis. A single-Agent session keeps its raw view pinned to the main
+  // Agent, so lane expansion is tracked apart from `selectedSubjectId`.
+  const laneLayout = teamMode || sharedTimeAxis;
+  const laneSelectedId = teamMode ? selectedSubjectId : laneExpandedId;
+  const selectLane = useCallback((subjectId: string | null) => {
+    if (teamMode) {
+      selectSubject(subjectId);
+      return;
+    }
+    setLaneExpandedId(subjectId);
+    if (subjectId !== null) selectSubject(subjectId);
+  }, [selectSubject, teamMode]);
+  const selecting = sharedTimeAxis && selection !== undefined;
+  const toAxisRange = (range: WallRange | null): TrajectoryTimeRange | null => {
+    if (range === null || timeAxis.mapSharedTime === undefined) return null;
+    return { start: timeAxis.mapSharedTime(range.startMs), end: timeAxis.mapSharedTime(range.endMs) };
+  };
+  const toWallRange = (range: TrajectoryTimeRange | null): WallRange | null => {
+    if (range === null || timeAxis.toWall === undefined) return null;
+    const startMs = timeAxis.toWall(range.start);
+    const endMs = timeAxis.toWall(range.end);
+    return endMs < startMs ? null : { startMs, endMs };
+  };
+  const fullWallRange = (): WallRange | null => {
+    if (timeAxis.domain === null || timeAxis.toWall === undefined) return null;
+    return toWallRange({ start: timeAxis.domain.startMs, end: timeAxis.domain.endMs });
+  };
+  const leaveFullScope = () => {
+    if (fullScopeSelection) onFullScopeChange?.(false);
+  };
+  const axisVisualRange = !selecting
+    ? null
+    : fullScopeSelection
+      ? timeAxis.sharedTimeDomain
+      : selection.state.mode === 'axis'
+        ? toAxisRange(selection.state.axisRange)
+        : null;
+  const selectOnAxisRange = (range: TrajectoryTimeRange | null) => {
+    if (selection === undefined) return;
+    leaveFullScope();
+    const wall = toWallRange(range);
+    selection.onChange(current => selectOnAxis(current, wall));
+  };
+  const laneVisualRange = (subjectId: string): TrajectoryTimeRange | null => {
+    if (selection === undefined) return null;
+    if (fullScopeSelection) return timeAxis.sharedTimeDomain;
+    return toAxisRange(laneRangeOf(selection.state, subjectId));
+  };
+  const selectOnLaneRange = (subjectId: string, range: TrajectoryTimeRange | null) => {
+    if (selection === undefined) return;
+    leaveFullScope();
+    const wall = toWallRange(range);
+    selection.onChange(current => selectOnLane(current, subjectId, wall));
+  };
+
+  useEffect(() => {
+    if (selectedSubjectId === null) {
+      windowStateRef.current.rawSelection = '';
+      setRawSelection('');
+      return;
+    }
+    if (displayedRawRecords.length === 0) {
+      windowStateRef.current.rawSelection = '';
+      setRawSelection('');
+      return;
+    }
+    const identities = displayedRawRecords
+      .map(detailRecordIdentity)
+      .filter((value): value is string => value !== null);
+    if (!identities.includes(rawSelection)) {
+      const nextSelection = identities[0] ?? '';
+      windowStateRef.current.rawSelection = nextSelection;
+      rawSelectionBySubjectRef.current.set(selectedSubjectId, nextSelection);
+      setRawSelection(nextSelection);
+    }
+  }, [displayedRawRecords, rawSelection, selectedSubjectId]);
+
+  useEffect(() => {
+    setFetchedRaw(null);
+    setRawError(null);
+    setRawLoading(false);
+  }, [rawSelection, replayArchive, sessionId]);
+
+  const rawRecord = useMemo(
+    () => displayedRawRecords.find(record => detailRecordIdentity(record) === rawSelection),
+    [displayedRawRecords, rawSelection],
+  );
+  const rawData = replayView === null
+    ? rawRecord?.otlp ?? (fetchedRaw?.identity === rawSelection ? fetchedRaw.data : undefined)
+    : rawRecord?.otlp ?? replayView.rawDataByRecordId.get(rawSelection);
+
+  const loadSelectedRaw = useCallback(async () => {
+    if (replayArchive !== null) return;
+    if (rawRecord?.trace_id === undefined || rawRecord.span_id === undefined) return;
+    const signal = requestControllerRef.current?.signal;
+    if (signal === undefined || signal.aborted) return;
+    const generation = operationCoordinatorRef.current.currentGeneration();
+    setRawLoading(true);
+    setRawError(null);
+    try {
+      const data = await getTrajectoryRawRecord(
+        sessionId,
+        rawRecord.trace_id,
+        rawRecord.span_id,
+        { signal },
+      );
+      if (!signal.aborted
+        && operationCoordinatorRef.current.isCurrent(generation)) {
+        setFetchedRaw({ identity: rawSelection, data });
+      }
+    } catch (loadError) {
+      if (!signal.aborted
+        && operationCoordinatorRef.current.isCurrent(generation)) {
+        setRawError(errorMessage(loadError, chinese));
+      }
+    } finally {
+      if (!signal.aborted
+        && operationCoordinatorRef.current.isCurrent(generation)) {
+        setRawLoading(false);
+      }
+    }
+  }, [chinese, rawRecord, rawSelection, replayArchive, sessionId]);
+
+  const exportArchive = useCallback(async () => {
+    if (exporting || (replayArchive === null && sessionId === 'new')) return;
+    const signal = requestControllerRef.current?.signal;
+    if (replayArchive === null && (signal === undefined || signal.aborted)) return;
+    setExporting(true);
+    setArchiveError(null);
+    setArchiveNotice(null);
+    try {
+      // The server's zip and an imported file are both saved as they are:
+      // neither is parsed here, so a large archive costs one copy of itself.
+      const blob = replayArchive === null
+        ? await getTrajectoryArchive(sessionId, { signal })
+        : replayArchiveFileRef.current;
+      if (blob === null) throw new Error(copy.exportFailed);
+      const sourceSession = replayArchive?.header.session_id ?? sessionId;
+      const safeSession = sourceSession.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80) || 'session';
+      const extension = replayArchive?.container === 'jsonl' ? 'jsonl' : 'zip';
+      // Desktop blob-save whitelist keys off mime + suffix. Server zip archives
+      // are application/zip; replay File blobs may have an empty/wrong type.
+      const mimeType = extension === 'jsonl' ? 'application/jsonl' : 'application/zip';
+      const exportBlob = blob.type.split(';', 1)[0] === mimeType
+        ? blob
+        : new Blob([blob], { type: mimeType });
+      const result = await saveBlobWithResult(
+        exportBlob,
+        `trajectory-${safeSession}.trajectory.${extension}`,
+      );
+      if (result.outcome === 'failed') throw new Error(copy.exportFailed);
+      setArchiveNotice(result.outcome === 'cancelled'
+        ? copy.exportCancelled
+        : result.transport === 'desktop'
+          ? copy.exportDesktopSaved
+          : result.transport === 'browser-file-picker'
+            ? copy.exportBrowserSaved
+            : copy.exportBrowserStarted);
+    } catch (exportError) {
+      if (!(exportError instanceof DOMException && exportError.name === 'AbortError')) {
+        setArchiveError(errorMessage(exportError, chinese));
+      }
+    } finally {
+      setExporting(false);
+    }
+  }, [chinese, copy, exporting, replayArchive, sessionId]);
+  exportArchiveRef.current = exportArchive;
+
+  const importArchive = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (file === undefined) return;
+    importGenerationRef.current += 1;
+    const generation = importGenerationRef.current;
+    setArchiveError(null);
+    setArchiveNotice(null);
+    setImportProgress({ bytesRead: 0, totalBytes: file.size, spans: 0 });
+    try {
+      const archive = await readTrajectoryArchive(file, (progress) => {
+        if (importGenerationRef.current === generation) setImportProgress(progress);
+      });
+      if (importGenerationRef.current !== generation) return;
+      replayArchiveFileRef.current = file;
+      replayV2ReducerRef.current = createTrajectoryV2Reducer();
+      replayV2ReducerRef.current.seed(archive.checkpoints.v2Seeds);
+      const replayTeamMode = trajectoryReplayTeamMode(archive.mode, sessionTeamModeRef.current);
+      setReplayArchive(archive);
+      setSelectedSubjectId(replayTeamMode ? null : MAIN_TRAJECTORY_SUBJECT_ID);
+      if (replayTeamMode !== sessionTeamModeRef.current) {
+        setArchiveNotice(copy.replayModeMismatch(replayTeamMode));
+      }
+      setRawSelection('');
+      setFetchedRaw(null);
+      setRawError(null);
+    } catch (importError) {
+      if (importGenerationRef.current !== generation) return;
+      if (isTrajectoryArchiveLimitError(importError)) {
+        setArchiveError(copy.archiveTooLarge);
+      } else if (isTrajectoryArchiveFormatError(importError)) {
+        setArchiveError(copy.archiveInvalid(importError.message));
+      } else {
+        setArchiveError(errorMessage(importError, chinese));
+      }
+    } finally {
+      if (importGenerationRef.current === generation) setImportProgress(null);
+    }
+  }, [chinese, copy]);
+
+  const exitReplay = useCallback(() => {
+    const transition = exitTrajectoryReplay(replayArchive);
+    replayArchiveFileRef.current = null;
+    replayV2ReducerRef.current.clear();
+    setReplayArchive(transition.archive);
+    setSelectedSubjectId(sessionTeamModeRef.current ? null : MAIN_TRAJECTORY_SUBJECT_ID);
+    setArchiveError(null);
+    setArchiveNotice(null);
+    setRawSelection('');
+    if (transition.catchUpLiveRevision) void refreshLatest();
+  }, [refreshLatest, replayArchive]);
+  exitReplayRef.current = exitReplay;
+  const importingArchive = importProgress !== null;
+  const exportDisabled = exporting || (replayArchive === null && sessionId === 'new');
+  const replayActive = replayArchive !== null;
+  const replayLabel = replayArchive === null
+    ? null
+    : copy.replay(replayArchive.header.session_id);
+  const importLabel = importingArchive ? copy.importingArchive : copy.importArchive;
+  const exportLabel = exporting ? copy.exportingArchive : copy.exportArchive;
+  useEffect(() => {
+    if (!sharedTimeAxis) return;
+    onArchiveActionsReadyRef.current?.({
+      importing: importingArchive,
+      exporting,
+      exportDisabled,
+      attributionOpen,
+      replayActive,
+      replayLabel,
+      importLabel,
+      exportLabel,
+      attributionLabel: copy.attributionLabel,
+      exitReplayLabel: copy.exitReplay,
+      requestImport: () => { archiveInputRef.current?.click(); },
+      requestExport: () => { void exportArchiveRef.current(); },
+      toggleAttribution: () => { setAttributionOpen(open => !open); },
+      exitReplay: () => { exitReplayRef.current(); },
+    });
+  }, [
+    attributionOpen,
+    copy.attributionLabel,
+    copy.exitReplay,
+    exportDisabled,
+    exportLabel,
+    exporting,
+    importLabel,
+    importingArchive,
+    replayActive,
+    replayLabel,
+    sharedTimeAxis,
+  ]);
+
+  const rawContainerHeight = useCallback(() => (
+    bodyRef.current?.getBoundingClientRect().height ?? 600
+  ), []);
+
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (body === null || typeof ResizeObserver === 'undefined') return undefined;
+    const syncHeight = () => {
+      const nextContainerHeight = body.getBoundingClientRect().height;
+      if (nextContainerHeight <= 0) return;
+      setRawContainerHeightPx(nextContainerHeight);
+      setRawHeight(current => clampRawInspectorHeight(current, nextContainerHeight));
+    };
+    syncHeight();
+    const observer = new ResizeObserver(syncHeight);
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, []);
+
+  const handleRawResizePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || rawResizeDragRef.current !== null) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    document.body.classList.add('trajectory-raw-resize-active');
+    rawResizeDragRef.current = {
+      pointerId: event.pointerId,
+      startHeight: rawHeight,
+      startY: event.clientY,
+    };
+  }, [rawHeight]);
+
+  const handleRawResizePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = rawResizeDragRef.current;
+    if (drag === null || drag.pointerId !== event.pointerId) return;
+    const nextHeight = drag.startHeight + drag.startY - event.clientY;
+    setRawHeight(clampRawInspectorHeight(nextHeight, rawContainerHeight()));
+  }, [rawContainerHeight]);
+
+  const clearRawResize = useCallback((pointerId?: number) => {
+    if (pointerId !== undefined && rawResizeDragRef.current?.pointerId !== pointerId) return;
+    rawResizeDragRef.current = null;
+    document.body.classList.remove('trajectory-raw-resize-active');
+  }, []);
+
+  const finishRawResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    clearRawResize(event.pointerId);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, [clearRawResize]);
+
+  const handleRawResizeKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const nextHeight = rawInspectorKeyboardHeight(
+      rawHeight,
+      event.key,
+      rawContainerHeight(),
+    );
+    if (nextHeight === null) return;
+    event.preventDefault();
+    setRawHeight(nextHeight);
+  }, [rawContainerHeight, rawHeight]);
+
+  useEffect(() => () => {
+    document.body.classList.remove('trajectory-raw-resize-active');
+  }, []);
+
+  const rawHeightBounds = rawInspectorHeightBounds(rawContainerHeightPx);
+  const importPercent = importProgress === null || importProgress.totalBytes === 0
+    ? 100
+    : Math.min(100, Math.floor((importProgress.bytesRead / importProgress.totalBytes) * 100));
+
+  const rawInspector = displayedRawRecords.length === 0 ? null : (
+    <section
+      className={`${css.rawInspector} ${rawExpanded ? css.rawInspectorExpanded : ''} jiuwenTrajectoryTheme`}
+      data-trajectory-theme="light"
+      data-testid="trajectory-raw-inspector"
+      // The migrated theme gives every `.jiuwenTrajectoryTheme` root
+      // `height: 100%`. Override it in both states so a collapsed inspector is
+      // only its summary row instead of filling the trajectory body.
+      style={{ height: rawExpanded ? `${rawHeight}px` : 'auto' }}
+    >
+      {rawExpanded ? (
+        <div
+          className={css.rawResizeHandle}
+          role="separator"
+          aria-label={copy.rawResize}
+          aria-orientation="horizontal"
+          aria-valuemin={rawHeightBounds.min}
+          aria-valuemax={rawHeightBounds.max}
+          aria-valuenow={rawHeight}
+          tabIndex={0}
+          onKeyDown={handleRawResizeKeyDown}
+          onPointerDown={handleRawResizePointerDown}
+          onPointerMove={handleRawResizePointerMove}
+          onPointerUp={finishRawResize}
+          onPointerCancel={finishRawResize}
+          onLostPointerCapture={(event) => clearRawResize(event.pointerId)}
+          data-testid="trajectory-raw-resize-handle"
+        />
+      ) : null}
+      <button
+        type="button"
+        className={css.rawSummary}
+        aria-controls={rawContentId}
+        aria-expanded={rawExpanded}
+        title={rawExpanded ? copy.rawCollapse : copy.rawExpand}
+        onClick={() => setRawExpanded(expanded => !expanded)}
+        data-testid="trajectory-raw-toggle"
+      >
+        <span>{copy.raw(displayedRawRecords.length)}</span>
+        <span aria-hidden="true">{rawExpanded ? '▾' : '▴'}</span>
+      </button>
+      {rawExpanded ? (
+        <div id={rawContentId} className={css.rawContent}>
+          <div className={css.rawControls}>
+            <select
+              className={css.rawSelect}
+              aria-label={copy.rawLabel}
+              value={rawSelection}
+              onChange={(event) => {
+                const nextSelection = event.currentTarget.value;
+                windowStateRef.current.rawSelection = nextSelection;
+                if (selectedSubjectId !== null) {
+                  rawSelectionBySubjectRef.current.set(selectedSubjectId, nextSelection);
+                }
+                setRawSelection(nextSelection);
+              }}
+            >
+              {displayedRawRecords.map((record) => {
+                const identity = detailRecordIdentity(record);
+                return identity === null ? null : (
+                  <option key={identity} value={identity}>{detailRecordLabel(record)}</option>
+                );
+              })}
+            </select>
+          </div>
+          {rawRecord?.projection_omitted === 'record_too_large' ? (
+            <p className={css.rawNotice}>{copy.rawTooLarge}</p>
+          ) : rawRecord?.raw_valid === false ? (
+            <p className={css.rawNotice}>{copy.rawInvalid}</p>
+          ) : null}
+          {rawData === undefined && rawRecord !== undefined && replayArchive === null ? (
+            <button
+              className={css.rawLoad}
+              type="button"
+              disabled={rawLoading}
+              onClick={() => { void loadSelectedRaw(); }}
+            >
+              {rawLoading ? copy.rawLoading : copy.rawLoad}
+            </button>
+          ) : null}
+          {rawError === null ? null : <p className={`${css.rawNotice} ${css.errorText}`}>{rawError}</p>}
+          {rawData === undefined ? null : (
+            <JsonTree
+              data={typeof rawData === 'object' && rawData !== null ? rawData : { raw: rawData }}
+              className={css.rawTree}
+              label={copy.rawLabel}
+              expandTopLevel={false}
+            />
+          )}
+        </div>
+      ) : null}
+    </section>
+  );
+
+  const contentMode = trajectoryContentMode({
+    sessionId: replayArchive?.header.session_id ?? sessionId,
+    loading: replayArchive === null ? loading : false,
+    error: replayArchive === null ? error : null,
+    projectedCount: laneLayout ? allDisplayedRecords.length : displayedRecords.length,
+    rawCount: laneLayout ? allDisplayedRawRecords.length : displayedRawRecords.length,
+  });
+  const teamContent = laneLayout && contentMode !== 'new'
+    && contentMode !== 'loading' && contentMode !== 'blocking-error'
+    && contentMode !== 'empty'
+    ? (
+      <TeamTrajectoryWorkspace
+        active={active}
+        groups={subjectGroups}
+        messages={copy.toolbar}
+        selectedSubjectId={laneSelectedId}
+        onSelectSubject={selectLane}
+        hideToolbar={sharedTimeAxis}
+        {...(analysisViewState === undefined ? {} : { externalViewState: analysisViewState })}
+        {...(sharedTimeAxis
+          ? {
+            showScaleControls: false,
+            ...(shareClock
+              ? {
+                toolbarTrailing: (
+                  <SharedTimeAxis
+                    domain={timeAxis.domain}
+                    viewport={timeAxis.viewport}
+                    toWall={timeAxis.toWall}
+                    range={axisVisualRange}
+                    onRangeChange={selectOnAxisRange}
+                    selectable={selecting}
+                  />
+                ),
+              }
+              : {}),
+            ...(selection === undefined
+              ? {}
+              : {
+                agentSelection: {
+                  isIncluded: (subjectId: string) => (
+                    fullScopeSelection || isAgentIncluded(selection.state, subjectId)
+                  ),
+                  // Show while a shared brush is active, or this lane already
+                  // has a window (uncheck clears it). Hidden for full-trajectory
+                  // picks and when nothing is selected.
+                  showIncludeToggle: (subjectId) => (
+                    shouldShowIncludeToggle(selection.state, fullScopeSelection, subjectId)
+                  ),
+                  onToggle: (subjectId: string) => {
+                    if (fullScopeSelection) {
+                      leaveFullScope();
+                      const full = fullWallRange();
+                      if (full === null) {
+                        selection.onChange(() => EMPTY_DIAGNOSIS_SELECTION);
+                        return;
+                      }
+                      selection.onChange(() => toggleAgent(selectOnAxis(EMPTY_DIAGNOSIS_SELECTION, full), subjectId));
+                      return;
+                    }
+                    selection.onChange(current => toggleAgent(current, subjectId));
+                  },
+                  canSelectAll: (subjectId: string) => (
+                    unionWallRange(rawOtelSpanIntervals(
+                      subjectGroups.byId.get(subjectId)?.rawRecords ?? [],
+                    )) !== null
+                  ),
+                  isSelectAllActive: (subjectId: string) => {
+                    // Full-trajectory pick does not flip lane "select all" to
+                    // "clear" — those buttons stay available to narrow the pick
+                    // to one agent's whole span.
+                    if (fullScopeSelection) return false;
+                    const intervals = rawOtelSpanIntervals(
+                      subjectGroups.byId.get(subjectId)?.rawRecords ?? [],
+                    );
+                    return isAgentFullySelected(selection.state, subjectId, intervals);
+                  },
+                  onSelectAll: (subjectId: string) => {
+                    const intervals = rawOtelSpanIntervals(
+                      subjectGroups.byId.get(subjectId)?.rawRecords ?? [],
+                    );
+                    if (fullScopeSelection) {
+                      leaveFullScope();
+                      // Replace the whole-trajectory pick with this lane only.
+                      selection.onChange(() => (
+                        toggleSelectAllOnLane(EMPTY_DIAGNOSIS_SELECTION, subjectId, intervals)
+                      ));
+                      return;
+                    }
+                    selection.onChange(current => toggleSelectAllOnLane(current, subjectId, intervals));
+                  },
+                  isHighlighted: (subjectId: string) => (
+                    fullScopeSelection || laneRangeOf(selection.state, subjectId) !== null
+                  ),
+                },
+              }),
+          }
+          : {})}
+        memberView={(subjectId, {
+          expanded,
+          viewState: memberViewState,
+          toolbarAddon,
+          onOverviewActivate,
+        }) => {
+          const viewState = memberViewState;
+          const group = subjectGroups.byId.get(subjectId);
+          const groupSnapshot = group === undefined
+            ? undefined
+            : subjectSnapshots.get(group.subject.id);
+          const records = group?.records ?? [];
+          const rawRecords = group?.rawRecords ?? [];
+          const diagnosticError = aggregateDiagnostics(groupSnapshot?.diagnostics ?? [])
+            .map(diagnostic => (
+              `${copy.diagnostic(diagnostic.code)}${diagnostic.count > 1 ? ` × ${diagnostic.count}` : ''}`
+            ))
+            .join(' · ');
+          const memberError = [
+            diagnosticError,
+            expanded && replayArchive === null ? error : null,
+          ].filter((message): message is string => (
+            typeof message === 'string' && message !== ''
+          )).join(' · ');
+          const expandedError = memberError !== ''
+            ? memberError
+            : records.length === 0 ? copy.rawOnly : null;
+          return (
+            <>
+              <TrajectoryExplorer
+                active={active}
+                snapshot={groupSnapshot ?? { turns: [] }}
+                loading={expanded && replayArchive === null ? loading : false}
+                error={expanded ? expandedError : null}
+                messages={copy.toolbar}
+                colorMode="light"
+                displayMode={expanded ? 'full' : 'overview'}
+                showToolbarViewControls={false}
+                showSearch={!sharedTimeAxis}
+                {...(sharedTimeAxis ? { searchQuery } : {})}
+                toolbarAddon={toolbarAddon}
+                viewState={viewState}
+                onOverviewActivate={onOverviewActivate}
+                {...(highlightStepKeys === undefined ? {} : { highlightStepKeys })}
+                {...(sharedTimeAxis && !selecting ? { clickSelectsRecord: true } : {})}
+                className={expanded ? css.explorer : undefined}
+                {...(shareClock
+                  ? {
+                    sharedTimeDomain: timeAxis.sharedTimeDomain,
+                    ...(timeAxis.mapSharedTime === undefined ? {} : { mapSharedTime: timeAxis.mapSharedTime }),
+                    timelineRange: selecting ? laneVisualRange(subjectId) : null,
+                    timelineRangeAppearance: 'region',
+                    onTimelineRangeChange: selecting
+                      ? (range: TrajectoryTimeRange | null) => selectOnLaneRange(subjectId, range)
+                      : ignoreTimelineRange,
+                    spanSelectsRange: selecting,
+                    lockTimelineViewport: true,
+                    sharedViewport: timeAxis.viewport,
+                    onSharedViewportChange: timeAxis.updateViewport,
+                    sharedViewportRef: timeAxis.viewportRef,
+                  }
+                  : {})}
+              />
+              {expanded && rawRecords.length > 0 ? rawInspector : null}
+            </>
+          );
+        }}
+      />
+    )
+    : null;
+  let content;
+  if (teamContent !== null) {
+    content = teamContent;
+  } else if (contentMode === 'new') {
+    content = (
+      <div className={css.state}>
+        <div className={css.stateContent}>
+          <h2 className={css.stateTitle}>{copy.newTitle}</h2>
+          <p className={css.stateText}>{copy.newText}</p>
+        </div>
+      </div>
+    );
+  } else if (contentMode === 'loading') {
+    content = <div className={css.state}><p className={css.stateText}>{copy.loading}</p></div>;
+  } else if (contentMode === 'blocking-error') {
+    content = (
+      <div className={css.state}>
+        <div className={css.stateContent}>
+          <h2 className={css.stateTitle}>{copy.emptyTitle}</h2>
+          <p className={`${css.stateText} ${css.errorText}`}>{error}</p>
+          <button className={css.retry} type="button" onClick={() => { void refreshLatest(); }}>
+            {copy.retry}
+          </button>
+        </div>
+      </div>
+    );
+  } else if (contentMode === 'empty') {
+    content = (
+      <div className={css.state}>
+        <div className={css.stateContent}>
+          <h2 className={css.stateTitle}>{copy.emptyTitle}</h2>
+          <p className={css.stateText}>{copy.emptyText}</p>
+        </div>
+      </div>
+    );
+  } else {
+    content = (
+      <>
+        {aggregateDiagnostics(selectedSubjectSnapshot?.diagnostics ?? []).map((diagnostic) => (
+          <p
+            className={`${css.rawNotice} ${css.errorText}`}
+            key={diagnostic.code}
+          >
+            {copy.diagnostic(diagnostic.code)}{diagnostic.count > 1 ? ` × ${diagnostic.count}` : ''}
+          </p>
+        ))}
+        {selectedSubjectGroup?.subject.id === MAIN_TRAJECTORY_SUBJECT_ID && unrecordedTurns.length > 0 ? (
+          <p className={css.rawNotice} role="status" data-testid="trajectory-unrecorded-turns">
+            {copy.unrecordedTurns(unrecordedTurns)}
+          </p>
+        ) : null}
+        {error !== null && replayArchive === null && displayedRecords.length === 0 ? (
+          <p className={`${css.rawNotice} ${css.errorText}`}>{error}</p>
+        ) : null}
+        {displayedRecords.length === 0 ? (
+          <div className={css.state}><p className={css.stateText}>{copy.rawOnly}</p></div>
+        ) : null}
+        <div className={`${css.subjectExplorers} ${
+          displayedRecords.length === 0 ? css.subjectExplorersHidden : ''
+        }`}>
+          {subjectGroups.groups.map((group) => {
+            const selected = group.subject.id === selectedSubjectGroup?.subject.id;
+            const subjectSnapshot = subjectSnapshots.get(group.subject.id);
+            if (subjectSnapshot === undefined || group.records.length === 0) return null;
+            return (
+              <div
+                key={group.subject.id}
+                className={`${css.subjectExplorer} ${selected ? '' : css.subjectExplorerHidden}`}
+                aria-hidden={!selected}
+                data-trajectory-subject-explorer={group.subject.id}
+              >
+                <TrajectoryExplorer
+                  active={active && selected}
+                  snapshot={subjectSnapshot}
+                  loading={selected && replayArchive === null ? loading : false}
+                  error={selected && replayArchive === null ? error : null}
+                  messages={copy.toolbar}
+                  colorMode="light"
+                  {...(highlightStepKeys === undefined ? {} : { highlightStepKeys })}
+                  className={css.explorer}
+                />
+              </div>
+            );
+          })}
+        </div>
+        {rawInspector}
+      </>
+    );
+  }
+
+  return (
+    <section
+      className={css.root}
+      aria-label={chinese ? '轨迹' : 'Trajectory'}
+      data-active={active ? 'true' : 'false'}
+    >
+      <input
+        ref={archiveInputRef}
+        className={css.archiveInput}
+        type="file"
+        accept=".zip,.jsonl,application/zip"
+        onChange={(event) => { void importArchive(event); }}
+        data-testid="trajectory-archive-input"
+      />
+      {sharedTimeAxis ? null : <header className={css.header}>
+        <div className={css.summary}>
+          {replayArchive === null
+            ? copy.summary(displayedTraceCount, displayedRawRecords.length || displayedRecords.length)
+            : copy.replay(replayArchive.header.session_id)}
+          {displayedInvalidRecordSeen ? <span className={css.warning}> {copy.invalid}</span> : null}
+        </div>
+        <div className={css.archiveActions}>
+          <button
+            type="button"
+            className={css.archiveAction}
+            disabled={importProgress !== null}
+            onClick={() => archiveInputRef.current?.click()}
+            data-testid="trajectory-archive-import"
+          >
+            {importProgress === null ? copy.importArchive : copy.importingArchive}
+          </button>
+          <button
+            type="button"
+            className={css.archiveAction}
+            disabled={exporting || (replayArchive === null && sessionId === 'new')}
+            onClick={() => { void exportArchive(); }}
+            data-testid="trajectory-archive-export"
+          >
+            {exporting ? copy.exportingArchive : copy.exportArchive}
+          </button>
+          {replayArchive === null ? null : (
+            <button
+              type="button"
+              className={css.archiveAction}
+              onClick={exitReplay}
+              data-testid="trajectory-archive-exit"
+            >
+              {copy.exitReplay}
+            </button>
+          )}
+          <button
+            type="button"
+            className={`${css.attributionToggle} ${attributionOpen ? css.attributionToggleActive : ''}`}
+            aria-expanded={attributionOpen}
+            aria-label={copy.attributionLabel}
+            title={copy.attributionLabel}
+            onClick={() => setAttributionOpen(open => !open)}
+            data-testid="trajectory-attribution-toggle"
+          >
+            <IconQuestionOutline14 />
+          </button>
+        </div>
+      </header>}
+      {archiveError === null ? null : (
+        <p className={`${css.archiveError} ${css.errorText}`} role="alert">{archiveError}</p>
+      )}
+      {archiveNotice === null ? null : (
+        <p className={css.archiveNotice} role="status">{archiveNotice}</p>
+      )}
+      {importProgress === null ? null : (
+        <div className={css.loadProgress} role="status" aria-live="polite">
+          <div className={css.loadProgressLabel}>
+            {copy.importProgress(importPercent, importProgress.spans)}
+          </div>
+          <div
+            className={css.loadProgressTrack}
+            role="progressbar"
+            aria-label={copy.importingArchive}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={importPercent}
+          >
+            <span className={css.loadProgressFill} style={{ width: `${importPercent}%` }} />
+          </div>
+        </div>
+      )}
+      {replayArchive === null && loading ? (
+        <div className={css.loadProgress} role="status" aria-live="polite">
+          <div className={css.loadProgressLabel}>
+            {initialLoadProgress === null
+              ? copy.loading
+              : copy.loadingProgress(initialLoadProgress.loaded, initialLoadProgress.total)}
+          </div>
+          <div
+            className={css.loadProgressTrack}
+            role="progressbar"
+            aria-label={copy.loading}
+            {...(initialLoadProgress === null
+              ? {}
+              : {
+                  'aria-valuemin': 0,
+                  'aria-valuemax': initialLoadProgress.total,
+                  'aria-valuenow': initialLoadProgress.loaded,
+                })}
+          >
+            <span
+              className={`${css.loadProgressFill} ${
+                initialLoadProgress === null ? css.loadProgressFillIndeterminate : ''
+              }`}
+              style={initialLoadProgress === null
+                ? undefined
+                : {
+                    width: `${initialLoadProgress.total === 0
+                      ? 100
+                      : Math.min(100, (initialLoadProgress.loaded / initialLoadProgress.total) * 100)}%`,
+                  }}
+            />
+          </div>
+        </div>
+      ) : null}
+      {teamContent === null && !teamMode && subjectGroups.groups.length > 1 ? (
+        <div className={css.subjectBar}>
+          <div className={css.subjectTabs} role="tablist" aria-label={copy.subjectTabs}>
+            {subjectGroups.groups.map(group => (
+              <button
+                key={group.subject.id}
+                type="button"
+                role="tab"
+                aria-selected={group.subject.id === selectedSubjectGroup?.subject.id}
+                className={`${css.subjectTab} ${
+                  group.subject.id === selectedSubjectGroup?.subject.id ? css.subjectTabActive : ''
+                }`}
+                title={group.subject.id}
+                onClick={() => selectSubject(group.subject.id)}
+                data-subject-id={group.subject.id}
+              >
+                {group.label}
+              </button>
+            ))}
+          </div>
+          {selectedSubjectGroup?.subject.kind === 'subagent' ? (
+            <div className={css.subjectMeta}>
+              {selectedSubjectGroup.subject.parentId === null
+                ? null
+                : <span>{copy.subjectParent(selectedSubjectGroup.subject.parentId)}</span>}
+              {selectedSubjectGroup.subject.sessionId === null
+                ? null
+                : <span>{copy.subjectSession(selectedSubjectGroup.subject.sessionId)}</span>}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      <div ref={bodyRef} className={css.body}>{content}</div>
+      {attributionOpen ? (
+      <footer className={css.footer}>
+        <p className={css.footerText}>
+          {copy.attributionBasis}{' '}
+          <a
+            className={css.footerLink}
+            href={DSH_PROJECT_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            DeepSeek Harness
+          </a>
+          {copy.attributionLicense}{' '}
+          <a
+            className={css.footerLink}
+            href={DSH_LICENSE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            MIT License
+          </a>
+          {copy.attributionLicenseSuffix}
+          <br />
+          {copy.attributionCopyright}
+        </p>
+      </footer>
+      ) : null}
+    </section>
+  );
+});

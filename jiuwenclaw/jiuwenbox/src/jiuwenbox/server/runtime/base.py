@@ -8,7 +8,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from jiuwenbox.models.sandbox import BackgroundExecResult, ExecResult
+from jiuwenbox.models.sandbox import (
+    BackgroundExecResult,
+    BackgroundJobStatus,
+    BackgroundJobSummary,
+    ExecResult,
+    KillBackgroundJobResult,
+)
 
 
 @dataclass(frozen=True)
@@ -18,6 +24,15 @@ class RuntimeExecRequest:
     env: dict[str, str] | None = None
     stdin_data: bytes | None = None
     timeout: float | None = None
+
+
+@dataclass(frozen=True)
+class RuntimeBackgroundExecRequest:
+    command: list[str]
+    job_id: str
+    workdir: str | None = None
+    env: dict[str, str] | None = None
+    stdin_data: bytes | None = None
 
 
 @dataclass(frozen=True)
@@ -47,9 +62,8 @@ class RuntimeAdapter(abc.ABC):
         self,
         sandbox_id: str,
         policy_path: Path,
-        workdir: str | None = None,
         env: dict[str, str] | None = None,
-    ) -> int:
+    ) -> int | None:
         """Create and start a sandboxed process.  Returns the OS pid."""
         ...
 
@@ -76,15 +90,49 @@ class RuntimeAdapter(abc.ABC):
     async def exec_background(
         self,
         sandbox_id: str,
-        request: RuntimeExecRequest,
+        request: RuntimeBackgroundExecRequest,
     ) -> BackgroundExecResult:
         """Start a background command inside a running sandbox."""
+        ...
+
+    @abc.abstractmethod
+    async def get_background_job(
+        self,
+        sandbox_id: str,
+        job_id: str,
+    ) -> BackgroundJobStatus:
+        ...
+
+    @abc.abstractmethod
+    async def list_background_jobs(
+        self,
+        sandbox_id: str,
+        *,
+        running_only: bool = False,
+    ) -> list[BackgroundJobSummary]:
+        ...
+
+    @abc.abstractmethod
+    async def kill_background_job(
+        self,
+        sandbox_id: str,
+        job_id: str,
+        signum: int = 15,
+    ) -> KillBackgroundJobResult:
         ...
 
     @abc.abstractmethod
     async def cleanup(self, sandbox_id: str) -> None:
         """Release all resources for a sandbox."""
         ...
+
+    async def get_sandbox_ip_address(self, sandbox_id: str) -> str | None:
+        """Return the sandbox IPv4 address if the runtime can resolve it.
+
+        Optional backend capability. Default returns ``None`` so future
+        adapters are not forced to implement IP discovery.
+        """
+        return None
 
     async def write_file(
         self,
@@ -135,4 +183,19 @@ class RuntimeAdapter(abc.ABC):
             ok=False,
             error="unsupported",
             detail="runtime adapter does not implement list_dir fast path",
+        )
+
+    async def search_files(
+        self,
+        sandbox_id: str,
+        sandbox_path: str,
+        patterns: list[str],
+        *,
+        exclude_patterns: list[str] | None = None,
+    ) -> RuntimeFileOpResult:
+        """Search files under ``sandbox_path``. Default is unsupported."""
+        return RuntimeFileOpResult(
+            ok=False,
+            error="unsupported",
+            detail="runtime adapter does not implement search_files fast path",
         )

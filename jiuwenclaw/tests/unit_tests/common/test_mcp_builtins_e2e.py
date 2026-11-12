@@ -1,0 +1,123 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
+"""E2E-ish: 真实 seed zip + prepare_workspace 的 mcp_builtins 接入点.
+
+跑在临时工作区, 不碰用户 ~/.jiuwenswarm. 验证:
+1. prepare_workspace 调用链会把 seed zip 解到 mcp_builtins 目录
+2. list_marketplace_mcps 能读到解出来的包(华为云/鸿蒙置顶排序)
+3. 二次调用版本一致时跳过(不重复解压)
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from jiuwenswarm.common.utils import prepare_workspace
+from jiuwenswarm.server.runtime.mcp.package_manifest import load_mcp_package
+
+
+@pytest.fixture()
+def temp_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """临时 ~/.jiuwenswarm 等价目录; 隔离 get_user_workspace_dir."""
+    ws = tmp_path / "jiuwenswarm_home"
+    # Pre-create the config/ subdir so _resolve_paths() (called the first time
+    # anyone hits get_workspace_dir() / get_config_dir()) takes the
+    # "already-initialized user workspace" branch and pins _workspace_dir to
+    # <tmp>/agent/workspace — NOT the package's bundled resources/agent/workspace.
+    # Without this, a clean CI box (no ~/.jiuwenswarm yet) would fall through to
+    # the resources branch, and list_marketplace_mcps / _packages_dir() would
+    # read the package's bundled mcp_builtins (empty / not extracted) instead of
+    # the tmp workspace prepare_workspace just populated — yielding 0 packages
+    # locally-but-not-on-CI (local boxes have a ~/.jiuwenswarm/config that
+    # accidentally satisfies the branch).
+    (ws / "config").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        "jiuwenswarm.common.utils.get_user_workspace_dir", lambda: ws
+    )
+    # reset cached path resolver so get_workspace_dir picks up the new root.
+    import jiuwenswarm.common.utils as u
+    monkeypatch.setattr(u, "_initialized", False)
+    monkeypatch.setattr(u, "_config_dir", None)
+    monkeypatch.setattr(u, "_workspace_dir", None)
+    monkeypatch.setattr(u, "_root_dir", None)
+    # non-interactive language prompt.
+    monkeypatch.setattr(u, "_is_interactive", lambda: False)
+    monkeypatch.setattr(u, "prompt_preferred_language", lambda: "zh")
+    return ws
+
+
+def test_prepare_workspace_extracts_mcp_builtins(temp_workspace: Path) -> None:
+    """prepare_workspace 跑完后, mcp_builtins 应从 seed zip 解压就位.
+
+    种子里当前零内置包, 因此只断言目录/版本标记就位与「目录名 == 包 id」的
+    一致性; 包内容由 test_ensure_mcp_builtins 的合成种子覆盖.
+    """
+    prepare_workspace(overwrite=True, preferred_language="zh", workspace_dir=temp_workspace)
+
+    mcp_builtins = temp_workspace / "agent" / "workspace" / "mcp" / "mcp_builtins"
+    assert mcp_builtins.is_dir(), "mcp_builtins 未解压"
+    assert not (mcp_builtins / "index.json").exists()
+    assert not (mcp_builtins / "manifest.json").exists()
+    assert (mcp_builtins / ".mcp_builtins_version").read_text(encoding="utf-8").strip()
+    pkg_dirs = [p for p in mcp_builtins.iterdir() if p.is_dir() and not p.name.startswith(".")]
+    packages = [load_mcp_package(package) for package in pkg_dirs]
+    assert {package.package_id for package in packages} == {p.name for p in pkg_dirs}
+    assert not any(
+        path.name in {"index.json", "connector-meta.json"}
+        for path in mcp_builtins.rglob("*")
+    )
+
+
+def test_list_marketplace_loads_extracted_packages(temp_workspace: Path) -> None:
+    """marketplace 的 builtin 列表应恰好来自解压出来的内置包目录."""
+    prepare_workspace(overwrite=True, preferred_language="zh", workspace_dir=temp_workspace)
+    # 重置 registry 缓存路径指向临时工作区.
+    import jiuwenswarm.server.runtime.mcp.registry as reg
+    # registry 的 _packages_dir 依赖 get_workspace_dir, 已被 fixture 重定向.
+    items = reg.list_marketplace_mcps("builtin")
+    names = [item["name"] for item in items]
+    installed = {
+        path.name
+        for path in (
+            temp_workspace / "agent" / "workspace" / "mcp" / "mcp_builtins"
+        ).iterdir()
+        if path.is_dir() and not path.name.startswith(".")
+    }
+    assert set(names) == installed
+    assert all(item["source"] == "built_in" for item in items)
+    details = [reg.get_mcp(name) for name in names]
+    assert all(detail is not None for detail in details)
+    assert all(detail["display_name"] for detail in details if detail is not None)
+    assert all(detail["examples"] for detail in details if detail is not None)
+
+
+def test_second_prepare_skips_when_version_matches(temp_workspace: Path) -> None:
+    """版本一致时二次调用不应破坏用户在包目录里加的脏文件."""
+    prepare_workspace(overwrite=True, preferred_language="zh", workspace_dir=temp_workspace)
+    mcp_builtins = temp_workspace / "agent" / "workspace" / "mcp" / "mcp_builtins"
+    dirty = mcp_builtins / "dirty-survives.txt"
+    dirty.write_text("keep", encoding="utf-8")
+
+    # 第二次: overwrite=False, 版本一致 -> 跳过解压, 脏文件保留.
+    prepare_workspace(overwrite=False, preferred_language="zh", workspace_dir=temp_workspace)
+    assert dirty.read_text(encoding="utf-8") == "keep"
+
+
+def test_prepare_workspace_leaves_no_seed_zip_leftover(temp_workspace: Path) -> None:
+    """种子 zip 必须留在 resources 包内原地址解压, 不拷到用户工作区根.
+
+    拷贝 template workspace 时 ignore 掉 mcp_builtins*.zip —— 该 zip 是
+    _ensure_mcp_builtins 的种子, 直接从 template 原地址读并解压到
+    mcp/mcp_builtins/, 不应在用户工作区根留一份 4MB 无用途拋留。
+    """
+    prepare_workspace(overwrite=True, preferred_language="zh", workspace_dir=temp_workspace)
+
+    ws_root = temp_workspace / "agent" / "workspace"
+    leftovers = list(ws_root.glob("mcp_builtins*.zip"))
+    assert not leftovers, f"seed zip leaked to workspace root: {leftovers}"
+    # 解压目录仍在。
+    mcp_builtins = ws_root / "mcp" / "mcp_builtins"
+    assert mcp_builtins.is_dir()
+    assert not (mcp_builtins / "index.json").exists()

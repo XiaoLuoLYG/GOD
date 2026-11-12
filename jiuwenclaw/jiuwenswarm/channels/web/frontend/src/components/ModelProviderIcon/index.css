@@ -1,0 +1,12 @@
+.model-provider-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  vertical-align: middle;
+  transform: translateZ(0);
+}
+
+.model-provider-icon--img {
+  object-fit: contain;
+}

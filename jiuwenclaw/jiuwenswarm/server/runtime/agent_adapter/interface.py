@@ -1,0 +1,5646 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
+"""JiuWenSwarm Facade - 统一入口与 SDK 适配层.
+
+此模块提供：
+- 统一的 JiuWenSwarm 公开 API
+- SDK 工厂路由（通过环境变量选择）
+- 公共编排逻辑（session 队列、Skills 路由、heartbeat、流式包装）
+"""
+
+from __future__ import annotations
+
+import asyncio
+from contextlib import aclosing
+from copy import deepcopy
+from dataclasses import replace
+import inspect
+import logging
+import re
+import shutil
+import tempfile
+import time
+from pathlib import Path
+from typing import Any, AsyncIterator, Callable, Tuple
+
+from jiuwenswarm.dotenv_early import load_dotenv_runtime
+from jiuwenswarm.common.session_message import (
+    SESSION_MESSAGE_INTERNAL_KEY,
+    with_cross_session_history_metadata,
+)
+
+from jiuwenswarm.agents.harness.common.rails.permissions.tool_permission_context import (
+    SKILLS_REBUILD_SILENT,
+)
+from jiuwenswarm.server.runtime.agent_adapter.agent_adapters import (
+    AgentAdapter,
+    create_adapter,
+    resolve_sdk_choice,
+)
+from jiuwenswarm.agents.harness.common.memory.config import get_memory_mode, is_auto_memory_enabled, is_memory_enabled
+from jiuwenswarm.server.runtime.session.history_io import run_history_io as _run_history_io
+from jiuwenswarm.server.runtime.session.session_history import (
+    append_compact_history_records,
+    append_history_record,
+    collapse_file_content_blocks,
+    resolve_final_record_timestamp,
+)
+from jiuwenswarm.server.runtime.agent_adapter.team_member_stream_history import (
+    MEMBER_SEGMENT_BOUNDARY_EVENTS,
+    TeamMemberStreamHistory,
+    team_member_stream_key,
+)
+from jiuwenswarm.server.runtime.agent_adapter.user_turn import TEAM_USER_TURN_KEY, UserTurn
+from jiuwenswarm.server.runtime.agent_adapter.statusline_setup_agent import (
+    STATUSLINE_SETUP_SYSTEM_PROMPT,
+    build_statusline_setup_dispatch,
+)
+from jiuwenswarm.server.runtime.session.session_manager import SessionManager
+from jiuwenswarm.runtime.session.model import (
+    TEAM_ATTACH_ONLY_PARAM,
+    TEAM_EXECUTION_CONTEXT_METADATA_KEY,
+)
+from jiuwenswarm.server.runtime.skill.skill_manager import SkillManager, SkillRpcError
+from jiuwenswarm.server.runtime.session_assets import get_session_asset_manager
+from jiuwenswarm.server.runtime.skill.archive_store import ARCHIVE_DIRNAME
+from jiuwenswarm.server.utils.utils import is_team_params
+from jiuwenswarm.common.config import get_config
+from jiuwenswarm.common.e2a.constants import (
+    E2A_CANCEL_SOURCE_CLIENT_DISCONNECT,
+    E2A_INTERNAL_CANCEL_SOURCE_KEY,
+)
+from jiuwenswarm.agents.harness.code.prompt.plan_approval import (
+    PLAN_EXECUTE_OPTION_VALUES,
+    PLAN_REMINDER_ORIGINAL_QUERY_KEY,
+    PLAN_REVISE_OPTION_VALUES,
+    PLAN_SKIP_OPTION_VALUES,
+    plan_skip_feedback,
+)
+from jiuwenswarm.agents.harness.common.rails.interrupt.permission_options import (
+    ALLOW_ONCE,
+    ALWAYS_ALLOW,
+    REJECT,
+    SESSION_ALLOW,
+    is_keep_planning_value,
+    normalize_option_value,
+    resolve_permission_action,
+)
+from jiuwenswarm.common.mode_matrix import (
+    canonicalize_mode_text,
+    is_code_profile_mode,
+    is_team_mode as is_team_runtime_mode,
+    is_team_plan_mode,
+    is_web_composable_mode,
+    read_request_work_mode,
+)
+from jiuwenswarm.common.context_keys import (
+    JIUWENSWARM_CHANNEL_CONTEXT_KEY,
+    JIUWENSWARM_SKIP_A2UI_CONTEXT_KEY,
+)
+from jiuwenswarm.extensions.registry import ExtensionRegistry
+from jiuwenswarm.common.schema.agent import AgentRequest, AgentResponse, AgentResponseChunk
+from jiuwenswarm.common.chat_final import ensure_final_mode_inplace
+from jiuwenswarm.extensions.hook_event import AgentServerHookEvents
+from jiuwenswarm.extensions.hooks_context import MemoryHookContext
+from jiuwenswarm.common.schema.message import EventType, ReqMethod
+from jiuwenswarm.common.utils import (
+    apply_free_search_runtime_defaults,
+    configure_skill_library,
+    get_agent_home_dir,
+    get_agent_workspace_dir,
+    get_env_file,
+    mask_sensitive,
+    migrate_team_skill_views,
+)
+from jiuwenswarm.server.runtime.a2ui.integration import (
+    TeamA2UIBlockBuffer,
+    finalize_assistant_response_if_a2ui,
+)
+from jiuwenswarm.server.runtime.a2ui.runtime.finalizer import should_finalize_a2ui_content
+from jiuwenswarm.server.runtime import extension_package_manager as package_manager
+from jiuwenswarm.agents.harness.common.auto_memory import (
+    _execute_auto_memory_extraction,
+)
+from jiuwenswarm.agents.harness.common.rails.interrupt.interrupt_helpers import (
+    EVOLUTION_INTERRUPT_METADATA_SOURCES,
+    is_interrupt_resume_payload,
+)
+from jiuwenswarm.agents.harness.common.rails.permissions.root_context import (
+    HOST_USER_ORIGIN_EXTERNAL,
+    HOST_USER_ORIGIN_INTERNAL,
+)
+
+
+def _with_request_runtime_context(
+    run: object,
+    *,
+    channel: str,
+    skip_a2ui: bool,
+) -> dict[str, Any]:
+    """Return a copy of ``run`` carrying JiuwenSwarm request metadata."""
+    run_data = dict(run) if isinstance(run, dict) else {}
+    raw_context = run_data.get("context")
+    context = dict(raw_context) if isinstance(raw_context, dict) else {}
+    raw_extra = context.get("extra")
+    extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
+    extra[JIUWENSWARM_CHANNEL_CONTEXT_KEY] = channel
+    if skip_a2ui:
+        extra[JIUWENSWARM_SKIP_A2UI_CONTEXT_KEY] = True
+    context["extra"] = extra
+    run_data["context"] = context
+    return run_data
+
+
+class _TeamPlanApprovalPayloadError(ValueError):
+    """Raised when a structured team.plan approval payload is malformed."""
+
+
+def compute_chat_send_mcp_needed(params: dict[str, Any] | None) -> list[str]:
+    """``params.mcp`` ∪ connectors from ``agent_template_name`` / ``plugin_names``.
+
+    Always returns a list (never ``None``). ``reconcile_session_mcp`` still
+    filters/strips names. Absent/``[]`` ``mcp`` no longer drops connectors
+    declared by this turn's equipment params.
+    """
+    p = params if isinstance(params, dict) else {}
+    mcp = p.get("mcp")
+    agent_template_id = p.get("agent_template_name")
+    if isinstance(agent_template_id, str) and agent_template_id.strip():
+        try:
+            agent_template_id = package_manager.resolve_equipment_runtime_id(
+                "agent_templates", agent_template_id
+            )
+        except (TypeError, ValueError):
+            pass
+    plugin_ids = p.get("plugin_names")
+    if isinstance(plugin_ids, list):
+        resolved_plugin_ids: list[Any] = []
+        for item in plugin_ids:
+            if isinstance(item, str) and item.strip():
+                try:
+                    item = package_manager.resolve_equipment_runtime_id(
+                        "plugin_packages", item
+                    )
+                except (TypeError, ValueError):
+                    pass
+            resolved_plugin_ids.append(item)
+        plugin_ids = resolved_plugin_ids
+    connectors = package_manager.collect_connectors_for_packages(
+        agent_template_id=agent_template_id,
+        plugin_ids=plugin_ids if isinstance(plugin_ids, list) else None,
+        skip_missing=True,
+    )
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in (mcp if isinstance(mcp, list) else []) + connectors:
+        if not isinstance(item, str):
+            continue
+        name = item.strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+    return out
+
+
+def restore_chat_send_equipment_params(
+    session_id: str | None,
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    """Fill omitted equipment fields from the session's persisted snapshot.
+
+    Explicit empty values are never overwritten: omission means "keep", while
+    ``""`` / ``[]`` mean "clear".
+    """
+    if not session_id:
+        return params
+    mode = str(params.get("mode") or "").strip().lower()
+    if mode == "auto_harness" or is_team_runtime_mode(mode):
+        return params
+    from jiuwenswarm.server.runtime.session.session_metadata import (
+        get_session_equipment,
+    )
+
+    saved = get_session_equipment(session_id)
+    for key in ("agent_template_name", "plugin_names", "mcp"):
+        if key not in params and key in saved:
+            value = saved[key]
+            params[key] = list(value) if isinstance(value, list) else value
+    return params
+
+
+def _permission_card_ids_from_answers(answers: list[dict]) -> list[str]:
+    """Normalize the single opaque permission-card locator."""
+
+    if len(answers) != 1:
+        return []
+    answer = answers[0]
+    if not isinstance(answer, dict):
+        return []
+    raw_card_id = answer.get("card_id")
+    if not isinstance(raw_card_id, str):
+        return []
+    card_id = raw_card_id.strip()
+    if not card_id or len(card_id) > 128:
+        return []
+    return [card_id]
+
+
+def _history_user_content(params: Any, query: Any) -> Any:
+    """返回写入历史记录的用户消息内容.
+
+    追加补充/调整请求时，``query`` 是包装后的提示词模板，会把模型提示词暴露到
+    历史记录里。这里优先使用原始用户输入 ``supplement_input`` 作为展示内容。
+
+    进入 plan 的那一轮同理：``query`` 前面被拼了一段 <system-reminder>，历史里
+    要还原成用户原文，否则重新加载会话会把提示词当成用户提问显示出来。
+
+    Gateway 可能已把 ``@path`` 展开成 ``<file-content>`` 正文；历史只保留 ``@path``，
+    避免 transcript 膨胀，也不影响当轮已发给模型的内联内容。
+    """
+    content: Any
+    if not isinstance(params, dict):
+        content = query
+    elif params.get("is_supplement"):
+        supplement_input = params.get("supplement_input")
+        if isinstance(supplement_input, str) and supplement_input.strip():
+            content = supplement_input
+        else:
+            content = query
+    else:
+        original_query = params.get(PLAN_REMINDER_ORIGINAL_QUERY_KEY)
+        content = original_query if isinstance(original_query, str) else query
+
+    if isinstance(content, str):
+        return collapse_file_content_blocks(content)
+    return content
+
+
+def _warn_unrecognised_approval_option(
+    branch: str,
+    source: Any,
+    request_id: Any,
+    value: Any,
+    outcome: str,
+) -> None:
+    """审批选项没认出来时留一条告警，然后才按拒绝兜底。
+
+    兜底成拒绝是对的：认不出来就不该放行。但在此之前它是静默的——用户点了同意，
+    工具被拒，现场只剩一句用户看不到的 feedback，排查时无从下手。选项文案是跨端
+    约定，任何一端改了字面量都会以"用户拒绝"的形式出现，因此这条告警要带上原始
+    取值和落到哪个分支。
+
+    取值为空是渲染端的"取消"（TUI 无拒绝项时按 Esc 即回传空串），属于正常路径，
+    不是解析失败，不告警。
+    """
+    if not normalize_option_value(value):
+        return
+    logger.warning(
+        "[JiuWenSwarm] %s unrecognised approval option: source=%s request_id=%s "
+        "value=%r outcome=%s. The answer is refused because it could not be decoded, "
+        "not because the user declined; check that the option vocabulary in "
+        "permission_options matches what the channel sends.",
+        branch,
+        source,
+        request_id,
+        value,
+        outcome,
+    )
+
+
+def is_external_user_authored_dispatch(
+    params: Any,
+    *,
+    channel_id: Any = "",
+    request_method: Any = None,
+    metadata: Any = None,
+) -> bool:
+    """Return whether Host ingress proved an external user-authored dispatch."""
+
+    if not isinstance(params, dict):
+        return False
+    # Scheduled Heartbeats reuse the original channel, including web. Inspect
+    # each ingress container separately so merging metadata cannot erase a marker.
+    for container in (params, metadata, params.get("metadata")):
+        if isinstance(container, dict) and isinstance(
+            container.get(SESSION_MESSAGE_INTERNAL_KEY), dict
+        ):
+            return False
+        automation = container.get("automation") if isinstance(container, dict) else None
+        if isinstance(automation, dict) and str(automation.get("kind") or "").strip().lower() == "heartbeat":
+            return False
+    if params.get("log_as_user") is False:
+        return False
+    if params.get("attach_goal") is True:
+        return False
+    if is_interrupt_resume_payload(params):
+        return False
+    if request_method == ReqMethod.COMMAND_GOAL:
+        return False
+    if str(channel_id or "").strip().lower() in {"cron", "heartbeat"}:
+        return False
+    return not str(params.get("source") or "").strip()
+
+
+def _should_record_user_history(params: Any) -> bool:
+    # History visibility is not permission authority: retain Heartbeat turns.
+    if not isinstance(params, dict):
+        return True
+    if params.get("log_as_user") is False:
+        return False
+    # Second-step goal attach is host control traffic, not a user utterance.
+    if params.get("attach_goal") is True:
+        return False
+    # An attach-only subscription submits no input at all; a record here would
+    # leave a dangling user turn that makes the frontend wait forever.
+    if params.get(TEAM_ATTACH_ONLY_PARAM) is True:
+        return False
+    if is_interrupt_resume_payload(params):
+        return False
+    return str(params.get("source") or "") != "proactive_recommendation"
+
+
+def _is_ask_user_answer_resume(params: Any) -> bool:
+    """问题澄清答案 resume：source=ask_user_interrupt 且带非空 answers 数组。
+
+    这类 resume 被 _should_record_user_history 排除（不写 user 消息），但答案需要
+    单独以 chat.ask_user_answer assistant 记录落盘，刷新后才能回显。
+    """
+    if not isinstance(params, dict):
+        return False
+    if str(params.get("source") or "").strip() != "ask_user_interrupt":
+        return False
+    answers = params.get("answers")
+    return isinstance(answers, list) and bool(answers)
+
+
+async def _team_preflight_failure_chunks(
+    request_id: str,
+    channel_id: str | None,
+    session_id: str,
+    exc: Exception,
+) -> AsyncIterator[AgentResponseChunk]:
+    """Report a Team turn rejected before it reached the team runtime.
+
+    The persistent leader stream of an earlier round keeps the Gateway from
+    sending its fallback ``processing=false`` for this request, so when no Team
+    work remains to settle the Session the terminal status is sent here.
+    """
+    from jiuwenswarm.agents.harness.team.team_manager import team_session_has_active_work
+
+    logger.warning(
+        "[JiuWenSwarm] Team turn rejected before dispatch: session_id=%s request_id=%s error=%s",
+        session_id,
+        request_id,
+        exc,
+    )
+    yield AgentResponseChunk(
+        request_id=request_id,
+        channel_id=channel_id,
+        payload={"event_type": "chat.error", "error": mask_sensitive(str(exc))},
+        is_complete=False,
+    )
+    if not team_session_has_active_work(session_id):
+        yield AgentResponseChunk(
+            request_id=request_id,
+            channel_id=channel_id,
+            payload={
+                "event_type": "chat.processing_status",
+                "session_id": session_id,
+                "is_processing": False,
+                "is_complete": True,
+            },
+            is_complete=False,
+        )
+    yield AgentResponseChunk(
+        request_id=request_id,
+        channel_id=channel_id,
+        payload=None,
+        is_complete=True,
+    )
+
+
+async def _persist_ask_user_answer_history(
+    request: AgentRequest,
+    session_id: str,
+    params: dict[str, Any],
+) -> None:
+    """Persist an answered question under the original question request ID."""
+    if not _is_ask_user_answer_resume(params):
+        return
+    answer_request_id = str(params.get("request_id") or "").strip()
+    if not answer_request_id:
+        return
+
+    from .sensitive_answers import redact_sensitive_answers
+
+    await _run_history_io(
+        append_history_record,
+        session_id=session_id,
+        request_id=answer_request_id,
+        channel_id=request.channel_id,
+        role="assistant",
+        event_type="chat.ask_user_answer",
+        content="",
+        timestamp=time.time(),
+        extra={
+            "request_id": answer_request_id,
+            "source": "ask_user_interrupt",
+            "answers": redact_sensitive_answers(params["answers"]),
+        },
+        mode=params.get("mode", "unknown"),
+    )
+
+
+def _history_media_string(item: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _history_media_size(item: dict[str, Any]) -> int | float | None:
+    for key in ("size_bytes", "sizeBytes"):
+        value = item.get(key)
+        if isinstance(value, (int, float)) and value >= 0:
+            return value
+    return None
+
+
+def _history_media_record(value: Any, *, default_type: str = "image") -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+
+    path = _history_media_string(value, "path")
+    url = _history_media_string(value, "url")
+    if not path and not url:
+        return None
+
+    media_type = _history_media_string(value, "type") or default_type
+    filename = _history_media_string(value, "filename", "name") or (
+        Path(path).name if path else "image"
+    )
+    mime_type = _history_media_string(value, "mime_type", "mimeType")
+    size = _history_media_size(value)
+
+    record: dict[str, Any] = {
+        "type": media_type,
+        "filename": filename,
+    }
+    if mime_type:
+        record["mime_type"] = mime_type
+    if path:
+        record["path"] = path
+    if url:
+        record["url"] = url
+    if size is not None:
+        record["size_bytes"] = size
+    return record
+
+
+def _with_heartbeat_history_metadata(
+    extra: dict[str, Any] | None,
+    params: Any,
+) -> dict[str, Any] | None:
+    """Persist the public Heartbeat marker in the same shape Web events use."""
+    result = dict(extra or {})
+    if not isinstance(params, dict):
+        return result or None
+    automation = params.get("automation")
+    if not isinstance(automation, dict) or automation.get("kind") != "heartbeat":
+        return result or None
+
+    # Some event payloads may already contain metadata.  Preserve it while
+    # ensuring restored history exposes ``metadata.automation`` just like the
+    # live Web stream.
+    metadata = (
+        dict(result.get("metadata"))
+        if isinstance(result.get("metadata"), dict)
+        else {}
+    )
+    metadata["automation"] = dict(automation)
+    result["metadata"] = metadata
+    # Do not retain a second top-level copy added by generic parameter merging.
+    result.pop("automation", None)
+    return result
+
+
+def _history_user_extra(params: Any) -> dict[str, Any] | None:
+    """Extract media/files/skills from ``params`` for the history extra.
+
+    Image attachments and uploaded files are scoped to the *current turn* only
+    so they are visible in the UI history but do not leak into later prompt
+    contexts.  Skills, on the other hand, are persisted without a scope.
+    """
+    if not isinstance(params, dict):
+        return None
+
+    extra = with_cross_session_history_metadata(
+        None, _cross_session_marker_from_params(params)
+    ) or {}
+    raw_media_items = params.get("media_items")
+    if isinstance(raw_media_items, list):
+        media_items: list[dict[str, Any]] = []
+        for raw_item in raw_media_items:
+            item = _history_media_record(raw_item)
+            if item is not None:
+                media_items.append(item)
+        if media_items:
+            extra["media_items"] = {
+                "items": media_items,
+                "scope": "current_turn",
+            }
+
+    raw_files = params.get("files")
+    if isinstance(raw_files, dict):
+        files: dict[str, Any] = {}
+        uploaded_images = raw_files.get("uploaded_images")
+        if isinstance(uploaded_images, list):
+            image_items: list[dict[str, Any]] = []
+            for raw_item in uploaded_images:
+                item = _history_media_record(raw_item, default_type="image")
+                if item is not None:
+                    image_items.append(item)
+            if image_items:
+                files["uploaded_images"] = {
+                    "items": image_items,
+                    "scope": "current_turn",
+                }
+        if files:
+            extra["files"] = files
+
+    raw_skills = params.get("skills")
+    if isinstance(raw_skills, list):
+        skills = [s.strip() for s in raw_skills if isinstance(s, str) and s.strip()]
+        if skills:
+            extra["skills"] = skills
+
+    return _with_heartbeat_history_metadata(extra, params)
+
+
+def _cross_session_marker_from_params(params: Any) -> Any:
+    """Extract the internal cross-Session marker from request params."""
+    if not isinstance(params, dict):
+        return None
+    return params.get(SESSION_MESSAGE_INTERNAL_KEY)
+
+
+def _web_agent_template_name(params: Any, channel_id: Any) -> str | None:
+    """Return the explicitly selected Agent id for a Web single-Agent turn."""
+    if str(channel_id or "").strip().lower() != "web":
+        return None
+    if not isinstance(params, dict):
+        return None
+    mode = str(params.get("mode") or "").strip().lower()
+    if mode == "auto_harness" or is_team_params(params):
+        return None
+    value = params.get("agent_template_name")
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _with_web_agent_template_metadata(
+    extra: dict[str, Any] | None,
+    params: Any,
+    channel_id: Any,
+    *,
+    event_type: str | None,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Attach the selected Agent id without changing non-Web event semantics."""
+    result = dict(extra or {})
+    if event_type not in {"chat.delta", "chat.final", "chat.reasoning", "chat.tool_call"}:
+        return result
+    if isinstance(payload, dict) and (
+        payload.get("slash_command")
+        or payload.get("source") in {"proactive_recommendation", "session_task_summary"}
+    ):
+        return result
+    if isinstance(params, dict) and (
+        params.get("slash_command")
+        or params.get("source") in {"proactive_recommendation", "session_task_summary"}
+    ):
+        return result
+    for candidate in (payload, params):
+        if not isinstance(candidate, dict):
+            continue
+        automation = candidate.get("automation")
+        if isinstance(automation, dict) and automation.get("kind") == "heartbeat":
+            return result
+    agent_template_name = _web_agent_template_name(params, channel_id)
+    if agent_template_name:
+        result["agent_template_name"] = agent_template_name
+    return result
+
+
+def _with_web_agent_template_payload(
+    payload: dict[str, Any] | None,
+    params: Any,
+    channel_id: Any,
+    *,
+    event_type: str | None = None,
+) -> dict[str, Any] | None:
+    """Copy a Web assistant payload with its request-scoped Agent identity."""
+    if not isinstance(payload, dict):
+        return payload
+    resolved_event_type = event_type or payload.get("event_type")
+    if not isinstance(resolved_event_type, str):
+        return payload
+    metadata = _with_web_agent_template_metadata(
+        None,
+        params,
+        channel_id,
+        event_type=resolved_event_type,
+        payload=payload,
+    )
+    agent_template_name = metadata.get("agent_template_name")
+    if not agent_template_name:
+        return payload
+    return {**payload, "agent_template_name": agent_template_name}
+
+
+def _compact_stats_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    stats: dict[str, Any] = {}
+    for key in ("status", "phase", "processor", "model", "before", "after", "saved", "duration_ms"):
+        if key in payload:
+            stats[key] = payload.get(key)
+    return stats
+
+
+def _is_successful_compaction_payload(payload: dict[str, Any]) -> bool:
+    if payload.get("error"):
+        return False
+    status = str(payload.get("status") or "").strip().lower()
+    return status not in {"error", "failed", "skipped"}
+
+
+def _append_compact_history_from_payload(
+    *,
+    payload: dict[str, Any],
+    session_id: str,
+    request_id: str,
+    channel_id: str,
+    mode: str,
+) -> None:
+    summary_text = str(payload.get("compact_summary") or "").strip()
+    if not summary_text or not _is_successful_compaction_payload(payload):
+        return
+    append_compact_history_records(
+        session_id=session_id,
+        request_id=request_id,
+        channel_id=channel_id,
+        summary=summary_text,
+        timestamp=time.time(),
+        trigger="auto",
+        stats=_compact_stats_from_payload(payload),
+        mode=mode,
+    )
+
+
+def _contains_a2ui_marker(value: Any) -> bool:
+    return isinstance(value, str) and should_finalize_a2ui_content(value)
+
+
+_A2UI_STREAM_PROBE_WINDOW = 512
+_A2UI_STREAM_PARTIAL_MARKERS = (
+    "<a2ui-json>",
+    "beginRendering",
+    "surfaceUpdate",
+    "dataModelUpdate",
+    "deleteSurface",
+)
+_A2UI_PENDING_RENDER_DELTA = "<a2ui-json>\n"
+
+
+def _make_a2ui_pending_render_chunk(*, request_id: str, channel_id: str) -> AgentResponseChunk:
+    return AgentResponseChunk(
+        request_id=request_id,
+        channel_id=channel_id,
+        payload={"event_type": "chat.delta", "content": _A2UI_PENDING_RENDER_DELTA},
+        is_complete=False,
+    )
+
+
+def _make_a2ui_final_chunk(
+        *,
+        request_id: str,
+        channel_id: str,
+        session_id: str,
+        content: str,
+) -> AgentResponseChunk:
+    return AgentResponseChunk(
+        request_id=request_id,
+        channel_id=channel_id,
+        payload={
+            "event_type": "chat.final",
+            "session_id": session_id,
+            "content": content,
+        },
+        is_complete=False,
+    )
+
+
+def _should_defer_a2ui_processing_status(
+        *,
+        suppress_a2ui_stream: bool,
+        event_type: str,
+        payload: dict[str, Any],
+) -> bool:
+    return (
+        suppress_a2ui_stream
+        and event_type == "chat.processing_status"
+        and payload.get("is_processing") is False
+    )
+
+
+def _normalize_nested_stream_chunk(
+        chunk: AgentResponseChunk,
+) -> AgentResponseChunk | None:
+    """Keep the facade stream open until its post-processing has finished."""
+    if not chunk.is_complete:
+        return chunk
+    payload = chunk.payload
+    if payload is None:
+        return None
+    if isinstance(payload, dict):
+        is_complete = payload.get("is_complete") is True
+        has_event_type = bool(payload.get("event_type"))
+        if is_complete and not has_event_type:
+            return None
+    return replace(chunk, is_complete=False)
+
+
+def _extend_a2ui_stream_probe(previous: str, content: str) -> str:
+    probe = f"{previous}{content}"
+    if len(probe) <= _A2UI_STREAM_PROBE_WINDOW:
+        return probe
+    return probe[-_A2UI_STREAM_PROBE_WINDOW:]
+
+
+def _looks_like_partial_a2ui_marker(value: Any) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    tail = value[-_A2UI_STREAM_PROBE_WINDOW:]
+    recent_lines = tail.splitlines()[-3:] or [tail]
+    for line in recent_lines:
+        candidate = line.strip().lstrip("[{,").strip().lstrip('"')
+        match = re.match(r"<?[A-Za-z][A-Za-z0-9_-]*>?", candidate)
+        if match is None:
+            continue
+        token = match.group(0)
+        if len(token) < 2:
+            continue
+        rest = candidate[len(token):].strip()
+        if rest and not any(marker.startswith(token + rest) for marker in _A2UI_STREAM_PARTIAL_MARKERS):
+            continue
+        if any(marker.startswith(token) and token != marker for marker in _A2UI_STREAM_PARTIAL_MARKERS):
+            return True
+    return False
+
+
+def _stream_probe_has_a2ui_marker(value: Any) -> bool:
+    return _contains_a2ui_marker(value) or _looks_like_partial_a2ui_marker(value)
+
+
+def _should_probe_a2ui_stream(*, is_team_mode: bool) -> bool:
+    """Use request-wide buffering only for streams with a finite boundary."""
+    return not is_team_mode
+
+
+_A2UI_STREAM_PROTOCOL_START_RE = re.compile(
+    r"(?im)^(?P<marker>[ \t]*(?:[\[{,][ \t]*)*\"?"
+    r"(?:beginRendering|surfaceUpdate|dataModelUpdate|deleteSurface)\"?[ \t]*(?::|$))"
+)
+
+
+def _recent_line_offsets(value: str) -> list[tuple[int, str]]:
+    if not value:
+        return []
+    lines = value.splitlines(keepends=True)
+    start = 0
+    offsets: list[tuple[int, str]] = []
+    for line in lines:
+        offsets.append((start, line))
+        start += len(line)
+    if value.endswith("\n"):
+        offsets.append((len(value), ""))
+    return offsets[-3:] or [(0, value)]
+
+
+def _a2ui_marker_start(value: Any) -> int | None:
+    if not isinstance(value, str) or not value:
+        return None
+
+    tag_index = value.find("<a2ui-json")
+    protocol_match = _A2UI_STREAM_PROTOCOL_START_RE.search(value)
+    protocol_index = protocol_match.start("marker") if protocol_match is not None else -1
+    indexes = [index for index in (tag_index, protocol_index) if index >= 0]
+    if indexes:
+        return min(indexes)
+
+    for line_start, line in _recent_line_offsets(value):
+        stripped_line = line.strip()
+        if not stripped_line:
+            continue
+        leading = len(line) - len(line.lstrip())
+        candidate = stripped_line.lstrip("[{,").strip().lstrip('"')
+        match = re.match(r"<?[A-Za-z][A-Za-z0-9_-]*>?", candidate)
+        if match is None:
+            continue
+        token = match.group(0)
+        if len(token) < 2:
+            continue
+        rest = candidate[len(token):].strip()
+        if rest and not any(marker.startswith(token + rest) for marker in _A2UI_STREAM_PARTIAL_MARKERS):
+            continue
+        if any(marker.startswith(token) and token != marker for marker in _A2UI_STREAM_PARTIAL_MARKERS):
+            return line_start + leading
+    return None
+
+
+def _split_a2ui_stream_content(previous_probe: str, content: str) -> tuple[str, str] | None:
+    combined = f"{previous_probe}{content}"
+    marker_start = _a2ui_marker_start(combined)
+    if marker_start is None:
+        return None
+    content_start = len(combined) - len(content)
+    if marker_start <= content_start:
+        return "", content
+    split_index = marker_start - content_start
+    return content[:split_index], content[split_index:]
+
+
+load_dotenv_runtime(dotenv_path=get_env_file(), override=True)
+apply_free_search_runtime_defaults()
+
+
+def _trigger_auto_memory_extraction(
+    adapter: Any,
+    request: AgentRequest,
+    session_id: str,
+    is_stream: bool = False,
+) -> None:
+    """Trigger auto memory extraction after conversation ends.
+
+    Extracted helper to avoid code duplication between process_message and process_message_stream.
+
+    Args:
+        adapter: The AgentAdapter instance (e.g., JiuwenSwarmCodeAdapter).
+        request: The agent request containing project_dir.
+        session_id: The session ID for context retrieval.
+        is_stream: Whether this is from stream mode (for logging).
+    """
+    project_dir = request.params.get("project_dir") if isinstance(request.params, dict) else None
+
+    if not project_dir:
+        return
+
+    messages = None
+
+    # Directly read messages from session history file
+    try:
+        from jiuwenswarm.server.runtime.session.session_history import read_session_history_records
+        history_records = read_session_history_records(session_id)
+
+        # Convert history records to message format for memory extraction
+        # Each history record has: role, content, timestamp, etc.
+        messages = []
+        for record in history_records:
+            role = record.get("role", "unknown")
+            content = record.get("content", "")
+            # Skip empty content
+            if not content or not isinstance(content, str):
+                continue
+            # Create message dict in standard format
+            messages.append({"role": role, "content": content})
+    except Exception as e:
+        logger.warning("[auto_memory] Failed to read session history: %s", e, exc_info=True)
+        messages = None
+
+    # If we successfully got messages, proceed with auto memory extraction
+    if messages is None or len(messages) == 0:
+        return
+
+    # Chat requests run on a session-scoped child adapter.  The root adapter
+    # deliberately has no ``_instance``, while auto-memory needs the live
+    # session adapter for its model, tools, and rails.
+    # Launch auto memory extraction task
+    try:
+        parent_agent = adapter
+        get_session_adapter = getattr(adapter, "_get_cached_session_adapter", None)
+        if callable(get_session_adapter):
+            session_adapter = get_session_adapter(session_id)
+            if session_adapter is not None:
+                parent_agent = session_adapter
+
+        asyncio.create_task(
+            _execute_auto_memory_extraction(
+                session_id=session_id,
+                project_dir=project_dir,
+                messages=messages,
+                parent_agent=parent_agent,  # Pass live adapter for cache sharing
+            )
+        )
+        mode = request.params.get("mode", "unknown") if isinstance(request.params, dict) else "unknown"
+        logger.info("[auto_memory] Extraction task launched successfully for mode=%s", mode)
+    except Exception as e:
+        logger.error("[auto_memory] Failed to launch extraction task: %s", e, exc_info=True)
+
+
+logger = logging.getLogger(__name__)
+
+
+# SkillDev 请求方法集合（统一委托给 SkillDevService）
+_SKILLDEV_METHODS: frozenset[ReqMethod] = frozenset(
+    m for m in ReqMethod if m.value.startswith("skilldev.")
+)
+
+_SKILL_ROUTES: dict[ReqMethod, str] = {
+    ReqMethod.SKILLS_LIST: "handle_skills_list",
+    ReqMethod.SKILLS_INSTALLED: "handle_skills_installed",
+    ReqMethod.SKILLS_GET: "handle_skills_get",
+    ReqMethod.SKILLS_VERSIONS_LIST: "handle_skills_versions_list",
+    ReqMethod.SKILLS_FILES_LIST: "handle_skills_files_list",
+    ReqMethod.SKILLS_FILES_GET: "handle_skills_files_get",
+    ReqMethod.SKILLS_REBUILD: "handle_skills_rebuild",
+    ReqMethod.SKILLS_TOGGLE: "handle_skills_toggle",
+    ReqMethod.SKILLS_MARKETPLACE_LIST: "handle_skills_marketplace_list",
+    ReqMethod.SKILLS_INSTALL: "handle_skills_install",
+    ReqMethod.SKILLS_PACK_MEMBER_INSTALL: "handle_skills_pack_member_install",
+    ReqMethod.SKILLS_UNINSTALL: "handle_skills_uninstall",
+    ReqMethod.SKILLS_IMPORT_LOCAL: "handle_skills_import_local",
+    ReqMethod.SKILLS_IMPORT_UPLOAD: "handle_skills_import_upload",
+    ReqMethod.SKILLS_CREATE_FROM_KNOWLEDGE: "handle_skills_create_from_knowledge",
+    ReqMethod.SKILLS_MARKETPLACE_ADD: "handle_skills_marketplace_add",
+    ReqMethod.SKILLS_MARKETPLACE_REMOVE: "handle_skills_marketplace_remove",
+    ReqMethod.SKILLS_MARKETPLACE_TOGGLE: "handle_skills_marketplace_toggle",
+    ReqMethod.SKILLS_ONLINE_SEARCH: "handle_skills_online_search",
+    ReqMethod.SKILLS_ONLINE_SEARCH_INSTALL: "handle_skills_online_search_install",
+    ReqMethod.SKILLS_SKILLNET_SEARCH: "handle_skills_skillnet_search",
+    ReqMethod.SKILLS_SKILLNET_INSTALL: "handle_skills_skillnet_install",
+    ReqMethod.SKILLS_SKILLNET_INSTALL_STATUS: "handle_skills_skillnet_install_status",
+    ReqMethod.SKILLS_SKILLNET_EVALUATE: "handle_skills_skillnet_evaluate",
+    ReqMethod.SKILLS_CLAWHUB_GET_TOKEN: "handle_skills_clawhub_get_token",
+    ReqMethod.SKILLS_CLAWHUB_SET_TOKEN: "handle_skills_clawhub_set_token",
+    ReqMethod.SKILLS_CLAWHUB_SEARCH: "handle_skills_clawhub_search",
+    ReqMethod.SKILLS_CLAWHUB_DOWNLOAD: "handle_skills_clawhub_download",
+    ReqMethod.SKILLS_TEAMSKILLS_HUB_INFO: "handle_skills_team_skills_hub_info",
+    ReqMethod.SKILLS_TEAMSKILLS_HUB_INIT: "handle_skills_team_skills_hub_init",
+    ReqMethod.SKILLS_TEAMSKILLS_HUB_VALIDATE: "handle_skills_team_skills_hub_validate",
+    ReqMethod.SKILLS_TEAMSKILLS_HUB_PACK: "handle_skills_team_skills_hub_pack",
+    ReqMethod.SKILLS_TEAMSKILLS_HUB_SEARCH: "handle_skills_team_skills_hub_search",
+    ReqMethod.SKILLS_SWARMSKILLS_HUB_RECOMMEND: "handle_skills_swarm_skills_hub_recommend",
+    ReqMethod.SKILLS_TEAMSKILLS_HUB_INSTALL: "handle_skills_team_skills_hub_install",
+    ReqMethod.SKILLS_TEAMSKILLS_HUB_PUBLISH: "handle_skills_team_skills_hub_publish",
+    ReqMethod.SKILLS_TEAMSKILLS_HUB_DELETE: "handle_skills_team_skills_hub_delete",
+    ReqMethod.SKILLS_SWARMSKILLS_HUB_DETAIL: "handle_skills_swarm_skills_hub_detail",
+    ReqMethod.SKILLS_RETRIEVAL_STATUS: "handle_skills_retrieval_status",
+    ReqMethod.SKILLS_RETRIEVAL_INDEX_BUILD: "handle_skills_retrieval_index_build",
+    ReqMethod.SKILLS_RETRIEVAL_INDEX_CANCEL: "handle_skills_retrieval_index_cancel",
+    ReqMethod.SKILLS_RETRIEVAL_SEARCH: "handle_skills_retrieval_search",
+    ReqMethod.SKILLS_RETRIEVAL_TREE: "handle_skills_retrieval_tree",
+    ReqMethod.SKILLS_GRAPH_BUILD: "handle_skills_graph_build",
+    ReqMethod.SKILLS_GRAPH_STATUS: "handle_skills_graph_status",
+    ReqMethod.SKILLS_GRAPH_GET: "handle_skills_graph_get",
+    ReqMethod.SKILLS_GRAPH_CANCEL: "handle_skills_graph_cancel",
+    ReqMethod.SKILLS_EXPERIENCE_LIST: "handle_skills_experience_list",
+    ReqMethod.SKILLS_EXPERIENCE_REQUEST: "handle_skills_experience_request",
+    ReqMethod.SKILLS_EVOLUTION_STATUS: "handle_skills_evolution_status",
+    ReqMethod.SKILLS_EVOLUTION_GET: "handle_skills_evolution_get",
+    ReqMethod.SKILLS_EVOLUTION_SAVE: "handle_skills_evolution_save",
+    ReqMethod.SKILLS_VISIBILITY_GET: "handle_skills_visibility_get",
+    ReqMethod.SKILLS_VISIBILITY_SET: "handle_skills_visibility_set",
+    ReqMethod.SKILLS_VISIBILITY_UPDATE: "handle_skills_visibility_update",
+    # skills.sync.* 仅保留 reload：web 进程 HTTP apply 落盘后的进程间通知，
+    # 不落盘、只触发重建。diff / package / apply 不进 WS 路由——它们的
+    # token 鉴权只在 HTTP 层（/skill-sync/*），经 WS 调用会绕过鉴权；
+    # 且 WS package 无人清理临时目录、WS apply 的 zip_bytes 无法过 JSON
+    # 序列化，均不可用。外部统一走 HTTP，进程内测试直调 SkillManager。
+    ReqMethod.SKILL_SYNC_RELOAD: "handle_skill_sync_reload",
+}
+
+_SESSION_ASSET_ROUTES: dict[ReqMethod, str] = {
+    ReqMethod.SESSION_ASSETS_LIST: "handle_session_assets_list",
+    ReqMethod.SESSION_ASSETS_REGISTER: "handle_session_assets_register",
+    ReqMethod.SESSION_ASSETS_RENAME: "handle_session_assets_rename",
+    ReqMethod.SESSION_ASSETS_REMOVE: "handle_session_assets_remove",
+}
+
+# Handlers that persist a Skill visibility document; every one of them must
+# trigger a rail refresh so a grant or a revocation takes effect on the next
+# turn. The read-only ``get`` deliberately stays out.
+_SKILL_VISIBILITY_WRITE_HANDLERS: frozenset[str] = frozenset(
+    {
+        "handle_skills_visibility_set",
+        "handle_skills_visibility_update",
+    }
+)
+
+# 同步 handler 涉及技能目录与 local_skills，处理前须重载磁盘 state，
+# 保证 AgentServer 长生命周期 _skill_manager 实例看到最新状态
+# （handle_skill_sync_reload：web 进程刚落盘，state 必须重读）。
+_SKILL_SYNC_HANDLERS: frozenset[str] = frozenset(
+    {
+        "handle_skill_sync_reload",
+    }
+)
+
+# 已收缩出 WS 路由的同步方法：合法枚举值不会被入口解析拦截，须在
+# _handle_skills_request 显式拒绝，否则落入聊天路径触发空 query 的
+# LLM 调用。
+_SKILL_SYNC_WS_REJECTED: frozenset[ReqMethod] = frozenset(
+    {
+        ReqMethod.SKILL_SYNC_DIFF,
+        ReqMethod.SKILL_SYNC_PACKAGE,
+        ReqMethod.SKILL_SYNC_APPLY,
+    }
+)
+
+_PLUGIN_ROUTES: dict[ReqMethod, str] = {
+    ReqMethod.PLUGINS_LIST: "handle_plugins_list",
+    ReqMethod.PLUGINS_INSTALL: "handle_plugins_install",
+    ReqMethod.PLUGINS_UNINSTALL: "handle_plugins_uninstall",
+    ReqMethod.PLUGINS_ENABLE: "handle_plugins_enable",
+    ReqMethod.PLUGINS_DISABLE: "handle_plugins_disable",
+    ReqMethod.PLUGINS_RELOAD: "handle_plugins_reload",
+}
+
+# Catalog + lifecycle: method → package_manager callable.
+_PACKAGE_ROUTES: dict[ReqMethod, str] = {
+    ReqMethod.AGENT_GROUPS_LIST: "list_agent_groups",
+    ReqMethod.AGENT_GROUPS_SHOW: "show_agent_group",
+    ReqMethod.AGENT_GROUPS_FILE_LIST: "list_agent_group_files",
+    ReqMethod.AGENT_GROUPS_FILE_READ: "read_agent_group_file",
+    ReqMethod.AGENT_GROUPS_CREATE: "create_agent_group",
+    ReqMethod.AGENT_GROUPS_IMPORT_LOCAL: "import_agent_group",
+    ReqMethod.AGENT_GROUPS_INSTALL: "install_agent_group",
+    ReqMethod.AGENT_GROUPS_UNINSTALL: "uninstall_agent_group",
+    ReqMethod.AGENT_TEMPLATES_LIST: "list_agent_templates",
+    ReqMethod.AGENT_TEMPLATES_SHOW: "show_agent_template",
+    ReqMethod.AGENT_TEMPLATES_FILE_LIST: "list_agent_template_files",
+    ReqMethod.AGENT_TEMPLATES_FILE_READ: "read_agent_template_file",
+    ReqMethod.AGENT_TEMPLATES_CREATE: "create_agent_template",
+    ReqMethod.AGENT_TEMPLATES_UPDATE: "update_agent_template",
+    ReqMethod.AGENT_TEMPLATES_DELETE: "delete_agent_template",
+    ReqMethod.AGENT_TEMPLATES_IMPORT_LOCAL: "import_agent_template",
+    ReqMethod.AGENT_TEMPLATES_INSTALL: "install_agent_template",
+    ReqMethod.AGENT_TEMPLATES_UNINSTALL: "uninstall_agent_template",
+    ReqMethod.PLUGIN_PACKAGES_LIST: "list_plugin_packages",
+    ReqMethod.PLUGIN_PACKAGES_SHOW: "show_plugin_package",
+    ReqMethod.PLUGIN_PACKAGES_CREATE: "create_plugin_package",
+    ReqMethod.PLUGIN_PACKAGES_IMPORT_LOCAL: "import_plugin_package",
+    ReqMethod.PLUGIN_PACKAGES_INSTALL: "install_plugin_package",
+    ReqMethod.PLUGIN_PACKAGES_UNINSTALL: "uninstall_plugin_package",
+}
+
+_AGENT_GROUP_PACKAGE_METHODS: frozenset[ReqMethod] = frozenset(
+    {
+        ReqMethod.AGENT_GROUPS_LIST,
+        ReqMethod.AGENT_GROUPS_SHOW,
+        ReqMethod.AGENT_GROUPS_FILE_LIST,
+        ReqMethod.AGENT_GROUPS_FILE_READ,
+        ReqMethod.AGENT_GROUPS_CREATE,
+        ReqMethod.AGENT_GROUPS_IMPORT_LOCAL,
+        ReqMethod.AGENT_GROUPS_INSTALL,
+        ReqMethod.AGENT_GROUPS_UNINSTALL,
+    }
+)
+
+_SKILL_COMMAND_REGEX = re.compile(
+    r"^/skills use\s+(?P<skill_names>[^,]+)\s*,\s*(?P<query>.*)$"
+)
+
+# /statusline prompt-type 模式：
+# 用户输入 "/statusline <描述>" → 让父代理调用内置 statusline-setup 子代理
+# 排除已知子命令（set, padding, clear, help, json）——这些由 TUI 前端本地处理，
+# 但如果消息经过 Gateway 传到 AgentServer，后端也需要区分。
+_STATUSLINE_KNOWN_SUBCOMMANDS = {"set", "padding", "clear", "help", "json", "get"}
+_STATUSLINE_PROMPT_REGEX = re.compile(
+    r"^/statusline\s+(?P<description>.+)$"
+)
+
+# Backward-compatible alias for tests and callers that imported the old name.
+# The text is now the dedicated subagent's system prompt, not a suffix appended
+# to every parent-agent user turn.
+_STATUSLINE_SETUP_PROMPT = STATUSLINE_SETUP_SYSTEM_PROMPT
+
+
+def _handle_skills_use_slash_command(query: str) -> Tuple[list, str]:
+    """Handle the /skills use slash command"""
+    stripped = query.strip()
+    if not stripped.startswith("/skills use"):
+        return [], query
+
+    skill_list = []
+    matches = _SKILL_COMMAND_REGEX.match(stripped)
+    if matches:
+        skill_list.append(matches.group("skill_names")) # Currently only extracts one skill
+        new_query = matches.group("query")
+        return skill_list, new_query
+    else:
+        logger.warning(f"Couldn't parse command: {stripped}")
+        return [], query
+
+
+def _handle_statusline_prompt_command(query: str) -> Tuple[str, str]:
+    """处理 /statusline <prompt>
+
+    不调用 /skills 命令。返回一条让父代理通过 ``task_tool`` 调用内置
+    ``statusline-setup`` 子代理的调度指令。
+
+    Args:
+        query: 用户原始输入（含 "/statusline" 前缀）
+
+    Returns:
+        (dispatch_prompt, description) — 子代理调度指令和提取的描述
+        如果不是 /statusline prompt 模式，返回 ("", query)
+    """
+    stripped = query.strip()
+    if not stripped.startswith("/statusline"):
+        return "", query
+
+    match = _STATUSLINE_PROMPT_REGEX.match(stripped)
+    if match:
+        description = match.group("description").strip()
+        # 排除已知子命令——它们由 TUI 前端本地处理，不应被当作 prompt
+        first_word = description.split()[0] if description else ""
+        if first_word in _STATUSLINE_KNOWN_SUBCOMMANDS:
+            return "", query
+        if description:
+            # 把用户的描述转化为让 Agent 自动配置状态栏的 prompt
+            return build_statusline_setup_dispatch(description), description
+
+    # /statusline 无参数 → 不是 prompt 模式（TUI 应已拦截处理 help）
+    return "", query
+
+
+def build_user_prompt(content: str | dict, files: dict, channel: str, language: str, *,
+    trusted_dirs: list[str] | None = None, metadata: dict[str, Any] | None = None,
+    skills: list[str] | None = None,
+    origin_kind: str = HOST_USER_ORIGIN_INTERNAL) -> str:
+    """Build the user prompt for an agent.
+
+    Thin wrapper over :meth:`UserTurn.render` — the single renderer shared by
+    single-agent and team runs. Kept for callers that hold loose arguments
+    rather than a ``UserTurn``.
+
+    Args:
+        content: The user's message text, or an A2UI client-event dict.
+        files: ``chat.send`` files mapping carrying uploaded attachments.
+        channel: Originating channel id.
+        language: Preferred response language.
+        trusted_dirs: Directories the client declared as trusted.
+        metadata: Request metadata (sender / chat_type / interaction context).
+        skills: 显式传入的 skill 名列表（来自 params.skills，前端从 content 提取）。
+            若提供，直接作为 skills_to_use，且 **不再对 content 做 /skills use 剥离**
+            （content 原样保留，如 "帮我用 /doc写文档"）。
+            若为 None，回退到从 content 文本解析 /skills use（兼容 IM/CLI 老路径），
+            同样不剥离 content，仅提取 skill 名。
+
+    Returns:
+        The rendered prompt.
+    """
+    return UserTurn(
+        text=content,
+        channel=channel,
+        language=language,
+        files=files or {},
+        trusted_dirs=trusted_dirs,
+        skills=skills,
+        metadata=metadata,
+        origin_kind=origin_kind,
+    ).render()
+
+
+class JiuWenSwarm:
+    """JiuWenSwarm 统一门面.
+
+    提供：
+    - SDK 工厂路由
+    - 统一对外 API（create_instance, reload_agent_config, process_message, process_message_stream）
+    - 公共编排（session 队列、Skills 路由、heartbeat、流式包装）
+    """
+
+    # Keep a small bounded hand-off buffer between the agent producer and the
+    # WebSocket consumer.  An unbounded queue lets a fast Team runtime retain
+    # every pending AgentResponseChunk while a slow client is sending earlier
+    # chunks, which raises the process RSS across short-lived TUI sessions.
+    STREAM_QUEUE_MAXSIZE = 64
+
+    async def configure_process_cli_run(
+        self, *, max_turns: int | None, host_tools: tuple[Any, ...]
+    ) -> None:
+        """Apply a transient machine invocation to the ready single-Agent adapter."""
+        adapter = self._ensure_adapter()
+        configure = getattr(adapter, "configure_process_cli_run", None)
+        if not callable(configure):
+            raise ValueError("process CLI run options require a single-Agent adapter")
+        await configure(max_turns=max_turns, host_tools=host_tools)
+
+    def __init__(self) -> None:
+        self._prepare_skill_library()
+        self._adapter: AgentAdapter | None = None
+        # PersonalContext Rail follows the Host runtime switch.  Keep the
+        # latest snapshot on the facade so a lazily-created adapter inherits
+        # the current state before its first rail synchronization.
+        self._personal_context_runtime_enabled: bool = False
+        self._sdk_name: str | None = None
+        self._skill_manager = SkillManager(workspace_dir=str(get_agent_workspace_dir()))
+        self._session_asset_manager = get_session_asset_manager()
+        self._session_manager = SessionManager()
+        self._heartbeat_service: Any | None = None
+        self._permissions_changed_notifier: Callable[[], None] | None = None
+        self._permissions_external_input_context_builder: Callable[..., Any] | None = None
+        # Preserve an SDK-declared root Agent across the SkillNet rebuild hook.
+        # Default Agent builds retain their historical no-argument reload path.
+        self._runtime_agent_create_snapshot: tuple[
+            dict[str, Any] | None,
+            str,
+            str | None,
+            dict[str, Any],
+        ] | None = None
+        # SkillDev 模式：懒初始化，首次 skilldev.* 请求时构造
+        self._skilldev_service = None
+
+    def set_heartbeat_service(self, service: Any | None) -> None:
+        """Inject the AgentServer-owned Heartbeat runtime before adapter creation."""
+        self._heartbeat_service = service
+        # Team members are assembled declaratively outside the single-agent
+        # adapter. Publish the same process-owned service to their build context;
+        # this is dependency injection only, never scheduler ownership.
+        from jiuwenswarm.agents.swarm.context import set_heartbeat_job_service
+
+        set_heartbeat_job_service(service)
+        if self._adapter is not None and hasattr(self._adapter, "set_heartbeat_service"):
+            self._adapter.set_heartbeat_service(service)
+
+    @staticmethod
+    def _prepare_skill_library() -> None:
+        """Pin the single Skill library and retire legacy per-workspace views.
+
+        Runs before any adapter, team or rail is built so legacy view directories
+        are gone by the time anything reads a team workspace. Correctness no
+        longer depends on that ordering: the migration seeds its allow lists at
+        ``AUTHORITY_MIGRATION``, which outranks the config seeds written during
+        assembly whichever one lands first. The agent-teams home still has to be
+        pinned before the scan, otherwise it would look under openJiuWen's own
+        default root instead of this instance's workspace.
+
+        Single-agent mode is untouched by all of this: it reads the same library
+        directory it always did and owns no visibility document.
+        """
+        try:
+            from jiuwenswarm.agents.harness.team.bootstrap import configure_agent_teams_home
+
+            configure_agent_teams_home()
+            configure_skill_library()
+            migrate_team_skill_views()
+        except Exception as exc:
+            logger.warning("[JiuWenSwarm] skill library preparation failed: %s", exc)
+
+    def _get_skilldev_service(self):
+        """懒初始化并返回 SkillDevService 实例.
+
+        SkillDevService 是无状态的，单实例即可服务所有请求。
+        首次调用时从当前 JiuWenSwarm 配置中提取最小依赖并构造。
+        """
+        if self._skilldev_service is not None:
+            return self._skilldev_service
+
+        from jiuwenswarm.server.runtime.skill.skilldev import (SkillDevDeps, SkillDevService,
+                                                              StateStore, WorkspaceProvider)
+        from jiuwenswarm.common.utils import get_workspace_dir
+        from jiuwenswarm.agents.harness.common.tools.mcp_toolkits import get_mcp_tools
+
+        skilldev_base = get_workspace_dir() / "skilldev"
+        state_store = StateStore(skilldev_base)
+        workspace_provider = WorkspaceProvider(skilldev_base)
+
+        config = get_config()
+        model_configs = config.get("models", {})
+        default_model = model_configs.get("default", {})
+
+        deps = SkillDevDeps(
+            model_name=default_model.get("model_name", ""),
+            model_client_config=default_model.get("model_client_config", {}),
+            mcp_tools_factory=get_mcp_tools,  # 直接复用已加载的 MCP 工具工厂
+            sysop_config=None,
+            state_store=state_store,
+            workspace_provider=workspace_provider,
+        )
+        self._skilldev_service = SkillDevService(deps)
+        logger.info("[JiuWenSwarm] SkillDevService 初始化完成")
+        return self._skilldev_service
+
+    def _ensure_adapter(self, *, mode: str = "agent") -> AgentAdapter:
+        """确保 adapter 已初始化，如果未初始化则根据环境变量和 mode 创建."""
+        if self._adapter is None:
+            self._sdk_name = resolve_sdk_choice()
+            self._adapter = create_adapter(self._sdk_name, mode=mode)
+            if hasattr(self._adapter, "set_skill_manager"):
+                self._adapter.set_skill_manager(self._skill_manager)
+            if hasattr(self._adapter, "set_heartbeat_service"):
+                self._adapter.set_heartbeat_service(self._heartbeat_service)
+            setter = getattr(
+                self._adapter, "set_personal_context_runtime_enabled", None
+            )
+            if callable(setter):
+                setter(self._personal_context_runtime_enabled)
+            if hasattr(self._adapter, "set_permissions_changed_notifier"):
+                self._adapter.set_permissions_changed_notifier(
+                    self._permissions_changed_notifier
+                )
+            if hasattr(self._adapter, "set_permissions_external_input_context_builder"):
+                self._adapter.set_permissions_external_input_context_builder(
+                    self._permissions_external_input_context_builder
+                )
+            self._skill_manager.set_skillnet_install_complete_hook(
+                self._on_skillnet_install_complete
+            )
+            logger.info("[JiuWenSwarm] Initialized adapter: sdk=%s, mode=%s", self._sdk_name, mode)
+        return self._adapter
+
+    def set_personal_context_runtime_enabled(self, enabled: bool) -> None:
+        """Store and forward the PersonalContext Host runtime switch."""
+
+        self._personal_context_runtime_enabled = bool(enabled)
+        adapter = self._adapter
+        setter = (
+            getattr(adapter, "set_personal_context_runtime_enabled", None)
+            if adapter is not None
+            else None
+        )
+        if callable(setter):
+            setter(self._personal_context_runtime_enabled)
+
+    async def refresh_personal_context_rail(self) -> None:
+        """Refresh the PersonalContext Rail without creating an Agent."""
+
+        adapter = self._adapter
+        refresher = (
+            getattr(adapter, "refresh_personal_context_rail", None)
+            if adapter is not None
+            else None
+        )
+        if callable(refresher):
+            await refresher()
+
+
+    def set_permissions_changed_notifier(
+        self,
+        notifier: Callable[[], None] | None,
+    ) -> None:
+        """Inject the host composition callback for persisted permission changes."""
+        self._permissions_changed_notifier = notifier
+        if self._adapter is not None and hasattr(
+            self._adapter, "set_permissions_changed_notifier"
+        ):
+            self._adapter.set_permissions_changed_notifier(notifier)
+
+    def set_permissions_external_input_context_builder(
+        self,
+        builder: Callable[..., Any] | None,
+    ) -> None:
+        """Inject the Host external-input permission publication context."""
+        self._permissions_external_input_context_builder = builder
+        if self._adapter is not None and hasattr(
+            self._adapter, "set_permissions_external_input_context_builder"
+        ):
+            self._adapter.set_permissions_external_input_context_builder(builder)
+
+    @staticmethod
+    def _adapter_mode_for_request(request: AgentRequest) -> str:
+        """选择 Deep / Code adapter。
+
+        Web 请求（显式携带 ``work_mode``）由 ``work_mode`` 决定 profile：
+        ``code`` 走 CodeAdapter，``work`` 走 DeepAdapter。TUI 等历史客户端不带
+        ``work_mode``，继续按完整 mode 串判定，行为不变。
+        """
+        params = request.params if isinstance(request.params, dict) else {}
+        work_mode = read_request_work_mode(params)
+        raw_mode = params.get("mode", "")
+        mode = canonicalize_mode_text(raw_mode)
+        if work_mode is not None and is_web_composable_mode(mode or "agent"):
+            return "code" if work_mode == "code" else "agent"
+        if is_code_profile_mode(mode) or mode == "code":
+            return "code"
+        return "agent"
+
+    async def create_instance(
+        self,
+        config: dict[str, Any] | None = None,
+        *,
+        mode: str = "agent",
+        sub_mode: str = None,
+        agent_definition: dict[str, Any] | None = None,
+    ) -> None:
+        """初始化 Agent 实例.
+
+        Args:
+            config: 可选配置，透传给底层 adapter.
+            mode: 实例化模式，"claw"（默认）或 "code"，透传给底层 adapter.
+            sub_mode: 子模式
+        """
+        runtime_agent_snapshot = (
+            (
+                deepcopy(config) if config is not None else None,
+                mode,
+                sub_mode,
+                deepcopy(agent_definition),
+            )
+            if agent_definition is not None
+            else None
+        )
+        adapter = self._ensure_adapter(mode=mode)
+        create_kwargs: dict[str, Any] = {"mode": mode, "sub_mode": sub_mode}
+        if agent_definition is not None:
+            create_kwargs["agent_definition"] = dict(agent_definition)
+        await adapter.create_instance(config, **create_kwargs)
+        self._runtime_agent_create_snapshot = runtime_agent_snapshot
+        logger.info(
+            "[JiuWenSwarm] Agent instance created: sdk=%s, mode=%s, sub_mode=%s",
+            self._sdk_name, mode, sub_mode,
+        )
+
+        sm = self._session_manager
+        if hasattr(adapter, "try_start_dreaming"):
+            asyncio.create_task(adapter.try_start_dreaming(
+                busy_checker=lambda: sm.has_active_tasks(),))
+
+    async def _on_skillnet_install_complete(self) -> None:
+        """Reload the agent and refresh live team skill rails after async install."""
+        snapshot = self._runtime_agent_create_snapshot
+        if snapshot is None:
+            await self.create_instance()
+        else:
+            config, mode, sub_mode, definition = deepcopy(snapshot)
+            await self.create_instance(
+                config,
+                mode=mode,
+                sub_mode=sub_mode,
+                agent_definition=definition,
+            )
+        await self._reload_team_skill_rails()
+
+    @staticmethod
+    async def _reload_team_skill_rails(session_id: str | None = None) -> None:
+        """Re-scan the shared Skill library for live team members.
+
+        Replaces the old shared-link refresh: teams no longer own a mirrored
+        ``skills/`` directory, so nothing has to be re-linked. What still needs
+        a nudge is each running member's in-memory Skill rail, which otherwise
+        keeps serving the library listing from before the change.
+
+        Args:
+            session_id: Restrict the reload to one session; None reloads all.
+        """
+        try:
+            from jiuwenswarm.agents.harness.team import reload_team_skill_views_across_managers
+
+            await reload_team_skill_views_across_managers(session_id)
+        except Exception as exc:
+            logger.warning("[JiuWenSwarm] team skill view reload failed: %s", exc)
+
+    async def _refresh_skill_rails_after_change(self) -> None:
+        """轻量刷新 skill rail，避免 uninstall 后全量重建 agent 实例.
+
+        SkillUseRail 通过 reload_skills() 重新扫描 skills_dir 并清除已删除的 skill 缓存，
+        无需重建整个 agent（省去 _get_tool_cards + _build_agent_rails + create_deep_agent 开销）。
+        """
+        adapter = self._adapter
+        if adapter is None:
+            return
+        if hasattr(adapter, "refresh_skill_rails"):
+            await adapter.refresh_skill_rails()
+
+    async def reload_agent_config(
+            self,
+            config_base: dict[str, Any] | None = None,
+            env_overrides: dict[str, Any] | None = None,
+            target_session_id: str | None = None,
+            reload_scopes: set[str] | None = None,
+    ) -> None:
+        """从配置重新加载.
+
+        Args:
+            config_base: 可选的完整配置快照；传入时优先使用它而不是读取本地 config.yaml。
+            env_overrides: 可选的环境变量增量；仅覆盖请求中出现的 key。
+            target_session_id: 可选的目标 session id；传入时限制 session adapter 级联热更新范围。
+            reload_scopes: 可选的精确配置作用域，用于定向热更新。
+        """
+        adapter = self._ensure_adapter()
+        if hasattr(adapter, "try_stop_dreaming"):
+            await adapter.try_stop_dreaming()
+        await adapter.reload_agent_config(
+            config_base,
+            env_overrides,
+            target_session_id=target_session_id,
+            reload_scopes=reload_scopes,
+        )
+        logger.info("[JiuWenSwarm] Agent config reloaded: sdk=%s", self._sdk_name)
+        if hasattr(adapter, "try_start_dreaming"):
+            sm = self._session_manager
+            asyncio.create_task(adapter.try_start_dreaming(
+                busy_checker=lambda: sm.has_active_tasks(),))
+
+    def has_smart_permission_lifecycle(self, config: dict[str, Any]) -> bool:
+        checker = getattr(self._adapter, "has_smart_permission_lifecycle", None)
+        return bool(callable(checker) and checker(config))
+
+    async def reload_permissions_config(self, config: dict[str, Any], *, include_legacy: bool) -> None:
+        if self.has_smart_permission_lifecycle(config):
+            await self._adapter.notify_permissions_changed(config, include_legacy=include_legacy)
+        elif include_legacy:
+            await self.reload_agent_config(config_base=config, env_overrides={})
+
+    async def prepare_session(
+        self,
+        *,
+        session_id: str,
+        channel_id: str,
+        mode: str,
+        project_dir: str | None = None,
+    ) -> None:
+        """Initialize and start the session-owned DeepAgent without sending input."""
+        adapter = self._ensure_adapter(mode="code" if mode.startswith("code") else "agent")
+        prepare = getattr(adapter, "prepare_session", None)
+        if not callable(prepare):
+            raise RuntimeError("active adapter does not support session prewarming")
+        await prepare(
+            session_id=session_id,
+            channel_id=channel_id,
+            mode=mode,
+            project_dir=project_dir,
+        )
+
+    def build_inputs(self, request: AgentRequest) -> Tuple[dict[str, Any], str, UserTurn]:
+        """构建 adapter 所需的 inputs 字典（公共接口）."""
+        return self._build_inputs(request)
+
+    def _build_inputs(self, request: AgentRequest) -> Tuple[dict[str, Any], str, UserTurn]:
+        """构建 adapter 所需的 inputs 字典.
+
+        Returns:
+            ``(inputs, memory_mode, turn)`` — ``turn`` is the rendered user turn;
+            ``turn.text`` keeps the user's own words for callers that parse them.
+        """
+        from openjiuwen.core.session.interaction.interactive_input import InteractiveInput
+        from jiuwenswarm.common.schema.chat_send import ChatSendParams
+
+        config_base = get_config()
+        memory_mode = get_memory_mode(config_base)
+        params: ChatSendParams = request.params if isinstance(request.params, dict) else {}
+        query = params.get("query")
+        if query is None or query == "":
+            query = params.get("content", "")
+        if (query is None or query == "") and isinstance(params, dict):
+            message = params.get("message")
+            if isinstance(message, str):
+                query = message
+            elif message is not None:
+                query = message
+        # /debug 请求级指令：仅 agent/code 在此剥离前缀；team 自行从
+        # ``turn.text`` 解析 /debug（见 team_helpers），故此处对 team 不剥离。
+        _request_debug = False
+        _dbg_mode = params.get("mode")
+        _dbg_mode_s = _dbg_mode.strip().lower() if isinstance(_dbg_mode, str) else ""
+        cross_session_turn = isinstance(
+            params.get(SESSION_MESSAGE_INTERNAL_KEY), dict
+        )
+        if not cross_session_turn and not (
+            params.get("team") or is_team_runtime_mode(_dbg_mode_s)
+        ):
+            if isinstance(query, str):
+                from jiuwenswarm.server.runtime.debug_trace.directives import strip_debug_directive
+                query, _request_debug = strip_debug_directive(query)
+        if self._is_malformed_team_plan_approval_payload(params):
+            raise _TeamPlanApprovalPayloadError(self._team_plan_approval_payload_error_message())
+        request_channel = str(request.channel_id or "").strip()
+        channel = request_channel or (
+            request.session_id.split('_')[0] if request.session_id else "web"
+        )
+        language = config_base.get("preferred_language", "zh")
+
+        # Get trusted directories from request params (passed by TUI)
+        trusted_dirs: list[str] = []
+        raw_trusted_dirs = params.get("trusted_dirs")
+        if isinstance(raw_trusted_dirs, list):
+            for d in raw_trusted_dirs:
+                if isinstance(d, str) and d.strip():
+                    trusted_dirs.append(d.strip())
+        # 用户选中的 skill 名列表（前端从 content 提取，如 /doc /review）。
+        # 若提供，build_user_prompt 直接用作 skills_to_use、且不剥离 content。
+        skills: list[str] | None = None
+        raw_skills = params.get("skills")
+        if isinstance(raw_skills, list):
+            skills = [s.strip() for s in raw_skills if isinstance(s, str) and s.strip()] or None
+        metadata = dict(request.metadata or {}) if isinstance(request.metadata, dict) else {}
+        # params.metadata.scene / target_skill 并入 prompt 上下文
+        param_metadata = params.get("metadata") if isinstance(params, dict) else None
+        if isinstance(param_metadata, dict):
+            metadata = {**metadata, **param_metadata}
+        metadata.pop(TEAM_EXECUTION_CONTEXT_METADATA_KEY, None)
+        origin_kind = (
+            HOST_USER_ORIGIN_EXTERNAL
+            if is_external_user_authored_dispatch(
+                params,
+                channel_id=channel,
+                request_method=request.req_method,
+                metadata=request.metadata,
+            )
+            else HOST_USER_ORIGIN_INTERNAL
+        )
+        param_project_dir = params.get("project_dir")
+        metadata_project_dir = metadata.get("project_dir") if isinstance(metadata, dict) else None
+        project_dir = (
+            param_project_dir.strip()
+            if isinstance(param_project_dir, str) and param_project_dir.strip()
+            else metadata_project_dir.strip()
+            if isinstance(metadata_project_dir, str) and metadata_project_dir.strip()
+            else None
+        )
+        param_cwd = params.get("cwd")
+        metadata_cwd = metadata.get("cwd") if isinstance(metadata, dict) else None
+        cwd = (
+            param_cwd.strip()
+            if isinstance(param_cwd, str) and param_cwd.strip()
+            else metadata_cwd.strip()
+            if isinstance(metadata_cwd, str) and metadata_cwd.strip()
+            else None
+        )
+        if request.metadata and request.metadata.get("interaction_context"):
+            logger.info(
+                "[_build_inputs][DEBUG] request.params.query=\n%s",
+                query[:2000] if isinstance(query, str) else str(query)[:2000],
+            )
+
+        # One turn, one renderer: single-agent and team both deliver
+        # ``turn.render()``. The team path additionally keeps ``turn.text`` to
+        # parse directives / ``$member`` routing before it renders.
+        turn = UserTurn(
+            text=query,
+            channel=channel,
+            language=language,
+            files=params.get("files", {}) or {},
+            trusted_dirs=trusted_dirs,
+            skills=skills,
+            metadata=metadata,
+            origin_kind=origin_kind,
+        )
+
+        if isinstance(query, InteractiveInput):
+            final_query = query
+        else:
+            answers = params.get("answers", [])
+            if answers:
+                request_id = params.get("request_id", "")
+                source = params.get("source", "")
+                interactive_input = self._build_interactive_input_from_answers(
+                    request_id,
+                    answers,
+                    source,
+                )
+                if interactive_input is not None:
+                    final_query = interactive_input
+                    turn = turn.with_text(interactive_input)
+                else:
+                    final_query = turn.render()
+            else:
+                final_query = turn.render()
+                # 调试日志：确认 /statusline 是否已改写为内置子代理调度
+                if isinstance(query, str) and "/statusline" in query:
+                    logger.info(
+                        "[_build_inputs][STATUSLINE] 原始 query=%s, 最终 prompt 长度=%d, "
+                        "包含 statusline-setup 调度=%s",
+                        query[:200],
+                        len(final_query) if isinstance(final_query, str) else 0,
+                        "statusline-setup" in final_query if isinstance(final_query, str) else False,
+                    )
+
+        inputs: dict[str, Any] = {
+            "conversation_id": request.session_id,
+            "query": final_query,
+            "channel": channel,
+            "language": language,
+            # Only an explicit false disables interactive tools. Existing
+            # clients that omit this capability remain backward compatible.
+            "supports_user_interaction": params.get("supports_user_interaction") is not False,
+        }
+        if _request_debug:
+            inputs["_request_debug"] = True
+        skip_a2ui = bool(
+            request.metadata and request.metadata.get("skip_a2ui") is True
+        )
+        if skip_a2ui:
+            inputs["skip_a2ui"] = True
+
+        # 传递 enable_memory 参数
+        enable_memory = request.metadata.get("enable_memory", True) if request.metadata else True
+        inputs["enable_memory"] = enable_memory
+
+        # 传递 trusted_dirs 参数（用于 RuntimePromptRail 添加路径限制策略）
+        if trusted_dirs:
+            inputs["trusted_dirs"] = trusted_dirs
+        if project_dir:
+            inputs["project_dir"] = project_dir
+        if cwd:
+            inputs["cwd"] = cwd
+
+        run = params.get("run")
+        if run:
+            inputs["run"] = run
+
+        # 处理 cron 字段：将 params.cron 转换为 run 结构
+        # scheduler 使用 params.cron 标识定时任务，需要转换为 run.kind="cron"
+        # cron 信息放到 RunContext.extra 中
+        cron = params.get("cron")
+        if cron:
+            inputs["run"] = {
+                "kind": "cron",
+                "context": {"extra": {"cron": cron}},
+            }
+
+        # DeepAgent normalizes inputs to a fixed InvokeInputs schema, so loose
+        # top-level fields such as ``channel`` do not reach model-call rails.
+        # RunContext.extra is the SDK-supported request-scoped extension point
+        # and survives every ReAct iteration independently of the Agent mode.
+        inputs["run"] = _with_request_runtime_context(
+            inputs.get("run"),
+            channel=request_channel,
+            skip_a2ui=skip_a2ui,
+        )
+        # Only Host-authenticated provenance may select Agent/tool input. Never
+        # trust a client-supplied copy inside the SDK's extensible run context.
+        run_extra = inputs["run"]["context"]["extra"]
+        run_extra.pop(SESSION_MESSAGE_INTERNAL_KEY, None)
+        cross_session = metadata.get(SESSION_MESSAGE_INTERNAL_KEY)
+        if isinstance(cross_session, dict):
+            run_extra[SESSION_MESSAGE_INTERNAL_KEY] = dict(cross_session)
+
+        # Per-request workspace_dir scopes one prompt's cwd to the given
+        # directory; threaded into inputs["cwd"] which downstream init_cwd
+        # installs onto openjiuwen's CwdState ContextVar. See E2A-protocol.md
+        # section 11.6 for the wire contract and precedence rules.
+        workspace_dir = params.get("workspace_dir")
+        if isinstance(workspace_dir, str) and workspace_dir.strip():
+            expanded = Path(workspace_dir).expanduser().resolve()
+            try:
+                expanded.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                logger.warning(
+                    "[JiuWenSwarm] workspace_dir %s mkdir failed (%s); "
+                    "request falls back to params.cwd or the global default",
+                    workspace_dir, exc,
+                )
+            else:
+                # Scope BOTH cwd and workspace so the agent's tools (which
+                # read get_cwd() for relative-path resolution) AND its
+                # fs_operation sandbox (which gates absolute-path writes by
+                # workspace membership) agree on the per-request root.
+                inputs["cwd"] = str(expanded)
+                inputs["workspace_dir"] = str(expanded)
+
+        # The turn carries both the user's own words (``turn.text``, needed by
+        # the team path for directive / ``$member`` / slash parsing) and the
+        # single renderer that produced ``inputs["query"]``.
+        return inputs, memory_mode, turn
+
+    def _make_retry_without_a2ui_call(
+            self,
+            *,
+            adapter: AgentAdapter,
+            request: AgentRequest,
+    ):
+        async def retry_without_a2ui_call(query: str) -> str | None:
+            if getattr(adapter, "_instance", None) is None:
+                return None
+            try:
+                modified_request = AgentRequest(
+                    request_id=request.request_id,
+                    channel_id=request.channel_id,
+                    session_id=request.session_id,
+                    chat_id=request.chat_id,
+                    req_method=request.req_method,
+                    params={**request.params, "query": query},
+                    is_stream=False,
+                    timestamp=request.timestamp,
+                    metadata={**(request.metadata or {}), "skip_a2ui": True},
+                )
+                retry_inputs, _, _ = self._build_inputs(modified_request)
+                retry_inputs["_invoke_turn_id"] = request.request_id
+                result = await adapter.process_message_impl(modified_request, retry_inputs)
+                if result.ok and result.payload.get("content"):
+                    return str(result.payload["content"])
+            except Exception as exc:
+                logger.warning(
+                    "Retry without A2UI failed: request_id=%s error=%s",
+                    request.request_id,
+                    exc,
+                )
+            return None
+
+        return retry_without_a2ui_call
+
+    @staticmethod
+    def _team_plan_approval_payload_error_message() -> str:
+        return (
+            "Malformed team.plan approval answer: expected structured "
+            "`confirm_interrupt` payload with `plan_approval_kind`, "
+            "`plan_content`, and `plan_language`."
+        )
+
+    @classmethod
+    def _is_malformed_team_plan_approval_payload(cls, params: dict[str, Any]) -> bool:
+        return (
+            is_team_plan_mode(params.get("mode"))
+            and str(params.get("source") or "").strip() == "confirm_interrupt"
+            and isinstance(params.get("answers"), list)
+            and bool(params.get("answers"))
+            and "plan_approval_kind" in params
+            and not cls._is_team_plan_confirm_answer(params)
+        )
+
+    def _make_retry_without_a2ui_call(
+            self,
+            *,
+            adapter: AgentAdapter,
+            request: AgentRequest,
+    ):
+        async def retry_without_a2ui_call(query: str) -> str | None:
+            if getattr(adapter, "_instance", None) is None:
+                return None
+            try:
+                modified_request = AgentRequest(
+                    request_id=request.request_id,
+                    channel_id=request.channel_id,
+                    session_id=request.session_id,
+                    chat_id=request.chat_id,
+                    req_method=request.req_method,
+                    params={**request.params, "query": query},
+                    is_stream=False,
+                    timestamp=request.timestamp,
+                    metadata={**(request.metadata or {}), "skip_a2ui": True},
+                )
+                retry_inputs, _, _ = self._build_inputs(modified_request)
+                retry_inputs["_invoke_turn_id"] = request.request_id
+                result = await adapter.process_message_impl(modified_request, retry_inputs)
+                if result.ok and result.payload.get("content"):
+                    return str(result.payload["content"])
+            except Exception as exc:
+                logger.warning(
+                    "Retry without A2UI failed: request_id=%s error=%s",
+                    request.request_id,
+                    exc,
+                )
+            return None
+
+        return retry_without_a2ui_call
+
+    @staticmethod
+    def _build_interactive_input_from_answers(
+            request_id: str,
+            answers: list[dict],
+            source: str = "",
+    ) -> Any:
+        """从用户答案构建 InteractiveInput.
+
+        Args:
+            request_id: 工具调用 ID
+            answers: 用户答案列表，每个答案对应一个问题
+            source: 中断来源，用于区分 PermissionRail 和 AskUserRail
+
+        Returns:
+            InteractiveInput 实例
+        """
+        from openjiuwen.core.session.interaction.interactive_input import InteractiveInput
+
+        interactive_input = InteractiveInput()
+
+        if source == "ask_user_interrupt":
+            answers_dict = {}
+            free_text_answer: str | None = None
+            for answer in answers:
+                if isinstance(answer, dict):
+                    question_text = str(answer.get("question", "") or "").strip()
+                    selected_options = answer.get("selected_options", [])
+                    custom_input = str(answer.get("custom_input", "") or "").strip()
+                    if selected_options and isinstance(selected_options, list):
+                        # Normalize each option to a stripped string, drop empties.
+                        cleaned_options = [
+                            str(raw_option or "").strip()
+                            for raw_option in selected_options
+                            if str(raw_option or "").strip()
+                        ]
+                        if custom_input:
+                            # "Other" is only a UI placeholder. Preserve normal
+                            # multi-select choices and append the user's text.
+                            normal_options = [
+                                option for option in cleaned_options if option != "Other"
+                            ]
+                            if normal_options:
+                                answer_value: Any = [*normal_options, custom_input]
+                            else:
+                                answer_value = custom_input
+                        elif len(cleaned_options) == 1:
+                            # Bare "Other" without custom text is incomplete (#2330).
+                            sole = cleaned_options[0]
+                            answer_value = "" if sole == "Other" else sole
+                        elif cleaned_options:
+                            # Multi-select: preserve real choices; drop placeholder-only Other.
+                            normal_options = [
+                                option for option in cleaned_options if option != "Other"
+                            ]
+                            answer_value = normal_options if normal_options else ""
+                        else:
+                            answer_value = ""
+                    elif custom_input:
+                        answer_value = custom_input
+                    else:
+                        answer_value = ""
+                    if question_text and answer_value:
+                        answers_dict[question_text] = answer_value
+                    elif answer_value:
+                        free_text_answer = (
+                            answer_value
+                            if isinstance(answer_value, str)
+                            else ", ".join(answer_value)
+                        )
+            if not answers_dict and free_text_answer:
+                answers_dict["__free_text__"] = free_text_answer
+            interactive_input.update(request_id, {"answers": answers_dict})
+            logger.info(
+                "[JiuWenSwarm] AskUserRail InteractiveInput.update: request_id=%s "
+                "answer_count=%s",
+                request_id,
+                len(answers_dict),
+            )
+            return interactive_input
+
+        if source in EVOLUTION_INTERRUPT_METADATA_SOURCES:
+            answer = answers[0] if answers else {}
+            selected_options = answer.get("selected_options", []) if isinstance(answer, dict) else []
+            custom_input = answer.get("custom_input", "") if isinstance(answer, dict) else ""
+            value = str(selected_options[0] if selected_options else "").strip()
+            action_by_value = {
+                "accept": "allow_once",
+                "接收": "allow_once",
+                "接受": "allow_once",
+                "allow_once": "allow_once",
+                "本次允许": "allow_once",
+                "Allow Once": "allow_once",
+                "allow_always": "allow_always",
+                "总是允许": "allow_always",
+                "Always Allow": "allow_always",
+                "reject": "reject",
+                "拒绝": "reject",
+                "Reject": "reject",
+            }
+            action = action_by_value.get(value)
+            if action is None:
+                _warn_unrecognised_approval_option(
+                    "SkillEvolutionApproval", source, request_id, value, "rejected_as_unknown_option"
+                )
+                action = "reject"
+            payload = {"action": action}
+            if custom_input:
+                payload["feedback"] = custom_input
+            interactive_input.update(request_id, payload)
+            logger.info(
+                "[JiuWenSwarm] SkillEvolutionApproval InteractiveInput.update: request_id=%s payload=%s",
+                request_id, payload
+            )
+            return interactive_input
+
+        if source and source not in {
+            "permission_interrupt",
+            "confirm_interrupt",
+        }:
+            return None
+
+        answer = answers[0] if answers else {}
+        selected_options = answer.get("selected_options", []) if isinstance(answer, dict) else []
+        custom_input = answer.get("custom_input", "") if isinstance(answer, dict) else ""
+
+        value = selected_options[0] if selected_options else ""
+
+        # 选项字符串来自各渲染端：web / CLI 回传 ``value``，TUI 回传 ``label``。
+        # 统一走 ``permission_options`` 的词表解析，别在这里再维护一份字面量元组。
+        action = resolve_permission_action(value)
+
+        if action == ALLOW_ONCE:
+            confirm_payload = {"approved": True, "auto_confirm": False, "feedback": ""}
+        elif action == SESSION_ALLOW:
+            confirm_payload = {
+                "approved": True,
+                "auto_confirm": True,
+                "persist_allow": False,
+                "feedback": "",
+            }
+        elif action == ALWAYS_ALLOW:
+            confirm_payload = {
+                "approved": True,
+                "auto_confirm": True,
+                "persist_allow": True,
+                "feedback": "",
+            }
+        elif value in PLAN_EXECUTE_OPTION_VALUES:
+            # Web 的"执行"：批准并退出 plan，但本轮不再调模型。真正的执行由前端
+            # 紧接着补发的普通消息开启新一轮完成。``plan_execute`` 是额外键，
+            # ConfirmPayload 会忽略它，rail 在校验前从原始 dict 读取。
+            confirm_payload = {
+                "approved": True,
+                "auto_confirm": False,
+                "feedback": "",
+                "plan_execute": True,
+            }
+        elif value in PLAN_SKIP_OPTION_VALUES:
+            # Web 的"跳过"：不退出 plan，也不继续修改，直接结束本轮。
+            # ``plan_skip`` 是额外键，ConfirmPayload 会忽略它；
+            # PlanApprovalInterruptRail 在校验前从原始 dict 读取该标记。
+            confirm_payload = {
+                "approved": False,
+                "auto_confirm": False,
+                "feedback": custom_input
+                or plan_skip_feedback(get_config().get("preferred_language")),
+                "plan_skip": True,
+            }
+        elif value in PLAN_REVISE_OPTION_VALUES:
+            # Web 的"下一步"：不退出 plan，按修改意见续跑。``plan_revise`` 是额外键，
+            # ConfirmPayload 会忽略它；rail 只在看到它时才给假回执包修订前缀。
+            # TUI 仍发 ``reject``，不会进这个分支。
+            confirm_payload = {
+                "approved": False,
+                "auto_confirm": False,
+                "feedback": custom_input or "用户希望继续规划",
+                "plan_revise": True,
+            }
+        elif action == REJECT:
+            feedback = custom_input or (
+                "用户希望继续规划" if is_keep_planning_value(value) else "用户拒绝"
+            )
+            confirm_payload = {"approved": False, "auto_confirm": False, "feedback": feedback}
+        elif custom_input:
+            # 选项没认出来，但用户填了自由文本，就用文本当反馈继续拒绝。取值仍然
+            # 是没解出来的，同样要告警。
+            _warn_unrecognised_approval_option(
+                "PermissionRail", source, request_id, value, "rejected_with_custom_input"
+            )
+            confirm_payload = {"approved": False, "auto_confirm": False, "feedback": custom_input}
+        else:
+            _warn_unrecognised_approval_option(
+                "PermissionRail", source, request_id, value, "rejected_as_unknown_option"
+            )
+            confirm_payload = {"approved": False, "auto_confirm": False, "feedback": f"未知选项: {value}"}
+
+        card_ids = (
+            _permission_card_ids_from_answers(answers)
+            if source == "permission_interrupt" else []
+        )
+        if not card_ids:
+            interactive_input.update(request_id, confirm_payload)
+            return interactive_input
+        interactive_input.update(card_ids[0], confirm_payload)
+        logger.info(
+            "[JiuWenSwarm] PermissionRail card InteractiveInput.update: "
+            "request_id=%s card_id=%s",
+            request_id,
+            card_ids[0],
+        )
+        return interactive_input
+
+    async def _handle_skilldev_request(self, request: AgentRequest) -> AgentResponse | None:
+        """处理 SkillDev 相关请求，返回 None 表示不是 SkillDev 请求."""
+        if request.req_method not in _SKILLDEV_METHODS:
+            return None
+
+        service = self._get_skilldev_service()
+        try:
+            chunks = []
+            async for chunk in service.handle(request):
+                chunks.append(chunk)
+            final = chunks[-1] if chunks else None
+            payload = final.payload if final else {}
+        except Exception as exc:
+            logger.error("[JiuWenSwarm] skilldev 请求处理失败: %s", exc)
+            return AgentResponse(
+                request_id=request.request_id,
+                channel_id=request.channel_id,
+                ok=False,
+                payload={"error": str(exc)},
+                metadata=request.metadata,
+            )
+        return AgentResponse(
+            request_id=request.request_id,
+            channel_id=request.channel_id,
+            ok=True,
+            payload=payload,
+            metadata=request.metadata,
+        )
+
+    async def _handle_skills_request(self, request: AgentRequest) -> AgentResponse | None:
+        """处理 Skills 相关请求，返回 None 表示不是 Skills 请求."""
+        # skills.sync.diff/package/apply 已收缩出 WS 路由（经 WS 调用会绕过
+        # HTTP 层 token 鉴权），但它们仍是合法 ReqMethod——若不在此显式
+        # 拒绝，请求会沿 facade 链路落入聊天处理路径，空 query 触发一次
+        # 无意义的 LLM 调用（收缩前是干净的 handler 报错）。
+        if request.req_method in _SKILL_SYNC_WS_REJECTED:
+            message = (
+                "skills.sync.diff/package/apply 未开放 WS 调用，"
+                "请使用带鉴权的 HTTP /skill-sync/* 接口"
+            )
+            return AgentResponse(
+                request_id=request.request_id,
+                channel_id=request.channel_id,
+                ok=False,
+                payload={
+                    "code": "SKILL_SYNC_WS_UNSUPPORTED",
+                    "error": message,
+                    "message": message,
+                },
+                metadata=request.metadata,
+            )
+        if request.req_method not in _SKILL_ROUTES:
+            return None
+
+        handler_name = _SKILL_ROUTES[request.req_method]
+        handler = getattr(self._skill_manager, handler_name)
+        try:
+            params = dict(request.params) if isinstance(request.params, dict) else {}
+            if handler_name in _SKILL_SYNC_HANDLERS:
+                # 长生命周期实例先重载磁盘 state（外部流程可能已写
+                # local_skills / skill_configs），同步结果才与磁盘一致
+                try:
+                    self._skill_manager.reload_state()
+                except Exception:  # noqa: BLE001
+                    logger.warning("[skills] reload state before sync failed")
+            if handler_name in (
+                "handle_skills_import_local",
+                "handle_skills_get",
+                "handle_skills_files_get",
+                "handle_skills_experience_request",
+            ):
+                # download_token / 正文图片 token 校验需要绑定当前会话 sid
+                params["_session_id"] = str(request.session_id or "").strip()
+                if handler_name == "handle_skills_experience_request":
+                    params["_channel_id"] = str(request.channel_id or "").strip()
+                if handler_name == "handle_skills_files_get" and not params.get("session_id"):
+                    params["session_id"] = params["_session_id"]
+            if handler_name in {
+                "handle_skills_retrieval_status",
+                "handle_skills_retrieval_index_build",
+            }:
+                params.pop("_session_profile", None)
+                profile_getter = getattr(
+                    self._adapter,
+                    "get_skill_retrieval_status_profile",
+                    None,
+                )
+                if callable(profile_getter):
+                    profile = profile_getter(request.session_id)
+                    if isinstance(profile, dict):
+                        params["_session_profile"] = profile
+            payload = await handler(params)
+            _reload_after_skills = handler_name in [
+                "handle_skills_install",
+                "handle_skills_import_local",
+                "handle_skills_import_upload",
+                "handle_skills_toggle",
+                "handle_skills_skillnet_install",
+                "handle_skills_online_search_install",
+                "handle_skills_clawhub_download",
+                "handle_skills_team_skills_hub_install",
+                "handle_skill_sync_reload",
+            ]
+            if handler_name == "handle_skill_sync_reload" and not (
+                payload.get("applied") or []
+            ):
+                # 仅当无任何技能实际落盘（web 进程 apply 全部 skipped /
+                # 全部安装失败）时才不重建；通知方只在 applied 非空时
+                # 发送，此处为防御性兜底。
+                _reload_after_skills = False
+            if (
+                handler_name
+                in {
+                    "handle_skills_skillnet_install",
+                    "handle_skills_online_search_install",
+                }
+                and payload.get("pending")
+            ):
+                _reload_after_skills = False
+            if _reload_after_skills:
+                await self.create_instance()
+                await self._reload_team_skill_rails(request.session_id)
+            elif handler_name == "handle_skills_uninstall" and payload.get("success"):
+                # 卸载只需轻量刷新 skill rail，不需要全量重建 agent 实例。
+                # SkillUseRail 会通过文件系统签名检测到目录删除并自动刷新，
+                # 这里主动调用 reload_skills() 确保立即生效，避免延迟到下一次模型调用。
+                await self._refresh_skill_rails_after_change()
+                await self._reload_team_skill_rails(request.session_id)
+            elif handler_name in _SKILL_VISIBILITY_WRITE_HANDLERS and payload.get("success"):
+                # 可见性只改 metadata，库内容没变：agent 无需重建，只要让各
+                # skill rail 重新读一次 metadata，授权/撤权即刻生效。
+                await self._refresh_skill_rails_after_change()
+                await self._reload_team_skill_rails(request.session_id)
+            elif handler_name == "handle_skills_evolution_save" and payload.get("success"):
+                await self._refresh_skill_rails_after_change()
+            elif handler_name == "handle_skills_rebuild" and self._is_skills_rebuild_followup(
+                payload
+            ):
+                # 与 /evolve_rebuild 同 prompt+Agent，但 RPC 内同步静默跑完，不经 Gateway chat.send
+                try:
+                    await self._run_skills_rebuild_followup(request, payload)
+                except SkillRpcError:
+                    raise
+                except Exception as exc:
+                    logger.exception(
+                        "[JiuWenSwarm] skills.rebuild 静默 Agent 失败: request_id=%s skill=%s",
+                        request.request_id,
+                        payload.get("skill_name"),
+                    )
+                    raise SkillRpcError(
+                        "SKILL_REBUILD_FAILED",
+                        f"rebuild Agent 失败: {exc}",
+                    ) from exc
+                payload = {"success": True}
+            elif handler_name == "handle_skills_create_from_knowledge":
+                if self._is_skills_create_from_knowledge_followup(payload):
+                    payload = await self._run_skills_create_from_knowledge_silent(
+                        request, payload
+                    )
+                    if payload.get("success"):
+                        await self.create_instance()
+                        await self._reload_team_skill_rails(request.session_id)
+        except Exception as exc:
+            logger.error("[JiuWenSwarm] skills 请求处理失败: %s", exc)
+            err_payload: dict = {"error": str(exc), "message": str(exc)}
+            code = getattr(exc, "code", None)
+            if isinstance(code, str) and code.strip():
+                err_payload["code"] = code.strip()
+            return AgentResponse(
+                request_id=request.request_id,
+                channel_id=request.channel_id,
+                ok=False,
+                payload=err_payload,
+                metadata=request.metadata,
+            )
+        return AgentResponse(
+            request_id=request.request_id,
+            channel_id=request.channel_id,
+            ok=True,
+            payload=payload,
+            metadata=request.metadata,
+        )
+
+    async def _handle_session_asset_request(self, request: AgentRequest) -> AgentResponse | None:
+        """Handle task-asset requests (session.assets.*); None means not one of them."""
+        if request.req_method not in _SESSION_ASSET_ROUTES:
+            return None
+        handler = getattr(self._session_asset_manager, _SESSION_ASSET_ROUTES[request.req_method])
+        params = dict(request.params) if isinstance(request.params, dict) else {}
+        params.setdefault("session_id", request.session_id or "")
+        try:
+            payload = await handler(params)
+        except Exception as exc:
+            code = getattr(exc, "code", None)
+            if not isinstance(code, str):
+                logger.error("[JiuWenSwarm] session.assets request failed: method=%s error=%s", request.req_method, exc)
+            err_payload: dict = {"error": str(exc), "message": str(exc)}
+            if isinstance(code, str) and code.strip():
+                err_payload["code"] = code.strip()
+            return AgentResponse(
+                request_id=request.request_id,
+                channel_id=request.channel_id,
+                ok=False,
+                payload=err_payload,
+                metadata=request.metadata,
+            )
+        return AgentResponse(
+            request_id=request.request_id,
+            channel_id=request.channel_id,
+            ok=True,
+            payload=payload,
+            metadata=request.metadata,
+        )
+
+    @staticmethod
+    def _is_skills_rebuild_followup(payload: Any) -> bool:
+        """判断 skills.rebuild 响应是否需要静默 follow-up."""
+        if not isinstance(payload, dict):
+            return False
+        return payload.get("result_type") == "followup" and bool(payload.get("success"))
+
+    @staticmethod
+    def _is_skills_create_from_knowledge_followup(payload: Any) -> bool:
+        """判断 skills.create_from_knowledge 响应是否需要静默 follow-up."""
+        if not isinstance(payload, dict):
+            return False
+        return payload.get("result_type") == "followup" and bool(payload.get("success"))
+
+    async def _run_skills_rebuild_followup(
+        self,
+        request: AgentRequest,
+        payload: dict[str, Any],
+    ) -> None:
+        """同步静默执行 rebuild Agent follow-up，并按版本目标同步 workspace / 版本副本.
+
+        不经外层 process_message_stream（避免写用户会话 history / 推 UI），
+        直接走 adapter.process_message_stream_impl，并使用临时 session 隔离 checkpointer。
+        """
+        followup = str(payload.get("followup_prompt") or "").strip()
+        if not followup:
+            raise SkillRpcError("SKILL_REBUILD_FAILED", "evolve_rebuild follow-up prompt 为空")
+
+        target = payload.get("rebuild_target") if isinstance(payload.get("rebuild_target"), dict) else {}
+        skill_dir_raw = str(target.get("skill_dir") or "").strip()
+        content_root_raw = str(target.get("content_root") or "").strip()
+        swap_workspace = bool(target.get("swap_workspace"))
+        is_default = bool(target.get("is_default"))
+        skill_dir = Path(skill_dir_raw) if skill_dir_raw else None
+        content_root = Path(content_root_raw) if content_root_raw else None
+        should_write_back = is_default or swap_workspace
+
+        workspace_backup: Path | None = None
+        try:
+            if swap_workspace and skill_dir is not None and content_root is not None:
+                # 非默认版本：临时把版本 mid-state 放到 workspace，供 Agent 按 skill 名改写
+                workspace_backup = Path(tempfile.mkdtemp(prefix="skill-rebuild-ws-bak-"))
+                for child in list(skill_dir.iterdir()):
+                    if child.name == ARCHIVE_DIRNAME:
+                        continue
+                    dest = workspace_backup / child.name
+                    if child.is_dir() and not child.is_symlink():
+                        shutil.copytree(child, dest)
+                    elif child.is_file():
+                        shutil.copy2(child, dest)
+                self._skill_manager.sync_workspace_from_version_content(skill_dir, content_root)
+
+            params = dict(request.params) if isinstance(request.params, dict) else {}
+            params["query"] = followup
+            params["log_as_user"] = False
+            params.setdefault("mode", params.get("mode") or "agent")
+
+            metadata = dict(request.metadata) if isinstance(request.metadata, dict) else {}
+            metadata["skills_rebuild_silent"] = True
+
+            # Windows 禁止路径分量含 ':'；用 '-' 隔离，避免 sessions 目录 mkdir 失败。
+            raw_rid = str(request.request_id or "").strip() or "anon"
+            safe_rid = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw_rid).strip("._-") or "anon"
+            rebuild_session_id = f"skills-rebuild-{safe_rid}"
+            chat_request = AgentRequest(
+                request_id=f"{request.request_id}-rebuild-followup",
+                channel_id=request.channel_id,
+                session_id=rebuild_session_id,
+                chat_id=request.chat_id,
+                req_method=ReqMethod.CHAT_SEND,
+                params=params,
+                is_stream=True,
+                timestamp=request.timestamp,
+                metadata=metadata,
+            )
+            adapter = self._ensure_adapter(mode=self._adapter_mode_for_request(chat_request))
+            inputs, _, _ = self._build_inputs(chat_request)
+            silent_token = SKILLS_REBUILD_SILENT.set(True)
+            try:
+                async for _chunk in adapter.process_message_stream_impl(chat_request, inputs):
+                    pass
+            finally:
+                SKILLS_REBUILD_SILENT.reset(silent_token)
+
+            if skill_dir is not None and content_root is not None and should_write_back:
+                # Agent 改写 workspace 后回写目标版本副本
+                self._skill_manager.copy_workspace_business_to_version(skill_dir, content_root)
+                version = target.get("version")
+                if isinstance(version, str) and version.strip():
+                    from jiuwenswarm.server.runtime.skill.archive_store import touch_version_metadata
+
+                    touch_version_metadata(skill_dir, version.strip())
+            await self._refresh_skill_rails_after_change()
+        finally:
+            if workspace_backup is not None and skill_dir is not None:
+                try:
+                    for child in list(skill_dir.iterdir()):
+                        if child.name == ARCHIVE_DIRNAME:
+                            continue
+                        if child.is_dir() and not child.is_symlink():
+                            shutil.rmtree(child, ignore_errors=True)
+                        else:
+                            child.unlink(missing_ok=True)
+                    for child in workspace_backup.iterdir():
+                        dest = skill_dir / child.name
+                        if child.is_dir() and not child.is_symlink():
+                            shutil.copytree(child, dest)
+                        elif child.is_file():
+                            shutil.copy2(child, dest)
+                finally:
+                    shutil.rmtree(workspace_backup, ignore_errors=True)
+
+    @staticmethod
+    def _coerce_optional_str_list(raw: Any) -> list[str]:
+        if not isinstance(raw, list):
+            return []
+        return [str(item).strip() for item in raw if str(item).strip()]
+
+    @staticmethod
+    def _build_skills_knowledge_followup_request(
+        request: AgentRequest,
+        *,
+        followup: str,
+        skills: list[str],
+        trusted_dirs: list[str],
+        input_file: str,
+    ) -> AgentRequest:
+        params = dict(request.params) if isinstance(request.params, dict) else {}
+        params["query"] = followup
+        params["log_as_user"] = False
+        params.setdefault("mode", params.get("mode") or "agent")
+        params["skills"] = skills
+        if trusted_dirs:
+            params["trusted_dirs"] = trusted_dirs
+        if input_file:
+            params["files"] = {
+                "uploaded_documents": [
+                    {"path": input_file, "filename": Path(input_file).name}
+                ]
+            }
+        param_metadata = (
+            params.get("metadata") if isinstance(params.get("metadata"), dict) else {}
+        )
+        params["metadata"] = {
+            **param_metadata,
+            "scene": "create_skill",
+        }
+
+        metadata = dict(request.metadata) if isinstance(request.metadata, dict) else {}
+        metadata["skills_create_from_knowledge_silent"] = True
+        metadata["scene"] = "create_skill"
+
+        # Windows 禁止路径分量含 ':'；用 '-' 隔离，避免 sessions 目录 mkdir 失败。
+        raw_rid = str(request.request_id or "").strip() or "anon"
+        safe_rid = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw_rid).strip("._-") or "anon"
+        return AgentRequest(
+            request_id=f"{request.request_id}-knowledge-followup",
+            channel_id=request.channel_id,
+            session_id=f"skills-knowledge-{safe_rid}",
+            chat_id=request.chat_id,
+            req_method=ReqMethod.CHAT_SEND,
+            params=params,
+            is_stream=True,
+            timestamp=request.timestamp,
+            metadata=metadata,
+        )
+
+    @staticmethod
+    def _cleanup_knowledge_upload_file(input_file: str) -> None:
+        if not input_file:
+            return
+        try:
+            path = Path(input_file)
+            if path.is_file() and "jiuwenswarm_knowledge_upload_" in str(path.parent):
+                shutil.rmtree(path.parent, ignore_errors=True)
+        except OSError:
+            pass
+
+    async def _run_skills_create_from_knowledge_silent(
+        self,
+        request: AgentRequest,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """静默执行知识转 Skill：隔离临时目录生成 → 校验 → 安装到 workspace."""
+        followup = str(payload.get("followup_prompt") or "").strip()
+        output_dir = str(payload.get("output_dir") or "").strip()
+        if not followup or not output_dir:
+            raise SkillRpcError(
+                "SKILL_INVALID_PACKAGE",
+                "create-from-knowledge follow-up 参数不完整",
+            )
+
+        skills = self._coerce_optional_str_list(payload.get("skills"))
+        trusted_dirs = self._coerce_optional_str_list(payload.get("trusted_dirs"))
+        input_file = str(payload.get("input_file") or "").strip()
+        skills_root = Path(self._skill_manager.skills_dir)
+        before_names = set(self._skill_manager.list_installed_skill_dir_names())
+
+        try:
+            chat_request = self._build_skills_knowledge_followup_request(
+                request,
+                followup=followup,
+                skills=skills,
+                trusted_dirs=trusted_dirs,
+                input_file=input_file,
+            )
+            adapter = self._ensure_adapter(mode=self._adapter_mode_for_request(chat_request))
+            inputs, _, _ = self._build_inputs(chat_request)
+            async for _chunk in adapter.process_message_stream_impl(chat_request, inputs):
+                pass
+
+            after_names = set(self._skill_manager.list_installed_skill_dir_names())
+            skip_names = {
+                "_marketplace",
+                "_pending_knowledge",
+                "skill-omni-creation",
+                "skill-creator",
+                "skill-creator-normal",
+                "skill-creator-router",
+                "swarmskill-creator",
+                "agent-creator",
+                "agent-group-creator",
+                "plugin-creator",
+            }
+            workspace_candidates = [
+                skills_root / name
+                for name in sorted(after_names - before_names)
+                if name not in skip_names
+            ]
+            result = self._skill_manager.finalize_create_from_knowledge(
+                output_dir,
+                workspace_candidates=workspace_candidates,
+                existing_skill_names=before_names,
+            )
+            if result.get("success"):
+                await self._refresh_skill_rails_after_change()
+            return result
+        finally:
+            shutil.rmtree(output_dir, ignore_errors=True)
+            self._cleanup_knowledge_upload_file(input_file)
+
+    async def _handle_plugins_request(self, request: AgentRequest) -> AgentResponse | None:
+        """处理 Plugin 相关请求，返回 None 表示不是 Plugin 请求."""
+        if request.req_method not in _PLUGIN_ROUTES:
+            return None
+
+        handler_name = _PLUGIN_ROUTES[request.req_method]
+        handler = getattr(self._skill_manager, handler_name)
+        try:
+            payload = await handler(request.params)
+            # install / uninstall / reload 之后重建 Agent 实例
+            _reload_after = handler_name in [
+                "handle_plugins_install",
+                "handle_plugins_uninstall",
+                "handle_plugins_reload",
+            ]
+            if _reload_after:
+                await self.create_instance()
+        except Exception as exc:
+            logger.error("[JiuWenSwarm] plugins 请求处理失败: %s", exc)
+            return AgentResponse(
+                request_id=request.request_id,
+                channel_id=request.channel_id,
+                ok=False,
+                payload={"error": str(exc)},
+                metadata=request.metadata,
+            )
+        return AgentResponse(
+            request_id=request.request_id,
+            channel_id=request.channel_id,
+            ok=True,
+            payload=payload,
+            metadata=request.metadata,
+        )
+
+    async def _handle_package_catalog_request(self, request: AgentRequest) -> AgentResponse | None:
+        """Route catalog / lifecycle ReqMethods to package_manager and wrap AgentResponse."""
+        method = request.req_method
+        if method not in _PACKAGE_ROUTES:
+            return None
+        params = request.params if isinstance(request.params, dict) else {}
+        # Frontend contract uses `id`; accept legacy `name` as alias.
+        name = params.get("id") if params.get("id") not in (None, "") else params.get("name")
+        try:
+            if method == ReqMethod.AGENT_GROUPS_LIST:
+                cards = await package_manager.list_agent_groups_with_hub(params)
+                payload: dict[str, Any] = {"agentGroups": cards}
+                if hasattr(cards, "cache"):
+                    payload["cache"] = cards.cache
+            elif method == ReqMethod.AGENT_GROUPS_SHOW:
+                group = await package_manager.show_agent_group_with_hub(str(name or ""))
+                if group is None:
+                    raise ValueError(f"agent_group not found: {name!r}")
+                payload = {"group": group}
+            elif method == ReqMethod.AGENT_GROUPS_FILE_LIST:
+                payload = {
+                    "tree": await package_manager.list_agent_group_files_with_hub(str(name or ""))
+                }
+            elif method == ReqMethod.AGENT_GROUPS_FILE_READ:
+                payload = await package_manager.read_agent_group_file_with_hub(
+                    str(name or ""), str(params.get("path", ""))
+                )
+            elif method == ReqMethod.AGENT_GROUPS_CREATE:
+                payload = package_manager.create_agent_group(params)
+            elif method == ReqMethod.AGENT_GROUPS_IMPORT_LOCAL:
+                payload = package_manager.import_agent_group(params)
+            elif method == ReqMethod.AGENT_GROUPS_INSTALL:
+                await package_manager.install_agent_group_with_hub(params)
+                payload = {}
+            elif method == ReqMethod.AGENT_GROUPS_UNINSTALL:
+                from jiuwenswarm.server.runtime.organization_packages import uninstall_organization_agent_group
+
+                await uninstall_organization_agent_group(params)
+                payload = {}
+            elif method == ReqMethod.AGENT_TEMPLATES_LIST:
+                cards = await package_manager.list_agent_templates_with_hub(params)
+                payload = {"templates": cards}
+                if hasattr(cards, "cache"):
+                    payload["cache"] = cards.cache
+            elif method == ReqMethod.AGENT_TEMPLATES_SHOW:
+                card = await package_manager.show_agent_template_with_hub(
+                    str(name or "")
+                )
+                if card is None:
+                    raise ValueError(f"agent_template not found: {name!r}")
+                payload = {"template": card}
+            elif method == ReqMethod.AGENT_TEMPLATES_FILE_LIST:
+                payload = {
+                    "tree": await package_manager.list_agent_template_files_with_hub(
+                        str(name or "")
+                    )
+                }
+            elif method == ReqMethod.AGENT_TEMPLATES_FILE_READ:
+                payload = await package_manager.read_agent_template_file_with_hub(
+                    str(name or ""), str(params.get("path", ""))
+                )
+            elif method == ReqMethod.PLUGIN_PACKAGES_LIST:
+                cards = await package_manager.list_plugin_packages_with_hub(params)
+                payload = {"packages": cards}
+                if hasattr(cards, "cache"):
+                    payload["cache"] = cards.cache
+            elif method == ReqMethod.PLUGIN_PACKAGES_SHOW:
+                card = await package_manager.show_plugin_package_with_hub(
+                    str(name or "")
+                )
+                if card is None:
+                    raise ValueError(f"plugin not found: {name!r}")
+                payload = {"package": card}
+            elif method == ReqMethod.AGENT_TEMPLATES_INSTALL:
+                ok, payload = await asyncio.wait_for(
+                    package_manager.install_equipment_from_hub_gated("agent_templates", params),
+                    timeout=120,
+                )
+                if not ok:
+                    return AgentResponse(
+                        request_id=request.request_id,
+                        channel_id=request.channel_id,
+                        ok=False,
+                        payload=payload,
+                        metadata=request.metadata,
+                    )
+            elif method == ReqMethod.PLUGIN_PACKAGES_INSTALL:
+                ok, payload = await asyncio.wait_for(
+                    package_manager.install_equipment_from_hub_gated("plugin_packages", params),
+                    timeout=120,
+                )
+                if not ok:
+                    return AgentResponse(
+                        request_id=request.request_id,
+                        channel_id=request.channel_id,
+                        ok=False,
+                        payload=payload,
+                        metadata=request.metadata,
+                    )
+            elif method == ReqMethod.AGENT_TEMPLATES_UNINSTALL:
+                unload_live = getattr(self, "_unload_live_equipment", None)
+                if unload_live is not None:
+                    runtime_name = package_manager.resolve_equipment_runtime_id(
+                        "agent_templates", name
+                    )
+                    await unload_live("agent_templates", runtime_name)
+                payload = package_manager.uninstall_equipment_with_notice(
+                    "agent_templates", params
+                )
+            elif method == ReqMethod.PLUGIN_PACKAGES_UNINSTALL:
+                unload_live = getattr(self, "_unload_live_equipment", None)
+                if unload_live is not None:
+                    runtime_name = package_manager.resolve_equipment_runtime_id(
+                        "plugin_packages", name
+                    )
+                    await unload_live("plugin_packages", runtime_name)
+                payload = package_manager.uninstall_equipment_with_notice(
+                    "plugin_packages", params
+                )
+            elif method == ReqMethod.AGENT_TEMPLATES_IMPORT_LOCAL:
+                payload = package_manager.import_agent_template(params)
+            elif method == ReqMethod.AGENT_TEMPLATES_UPDATE:
+                # 先卸载已加载到运行会话的模板，使本次更新对当前会话立即生效；
+                # 否则 _load_agent_template_for_request 的版本比对会命中旧 record
+                # （本地包 manifest 不写 version 键，恒 ""==""→True）而不重载。
+                unload_live = getattr(self, "_unload_live_equipment", None)
+                if unload_live is not None:
+                    runtime_name = package_manager.resolve_equipment_runtime_id(
+                        "agent_templates", name
+                    )
+                    await unload_live("agent_templates", runtime_name)
+                getattr(package_manager, _PACKAGE_ROUTES[method])(params)
+                payload = {}
+            elif method == ReqMethod.AGENT_TEMPLATES_DELETE:
+                unload_live = getattr(self, "_unload_live_equipment", None)
+                if unload_live is not None:
+                    runtime_name = package_manager.resolve_equipment_runtime_id(
+                        "agent_templates", name
+                    )
+                    await unload_live("agent_templates", runtime_name)
+                package_manager.delete_agent_template(params)
+                payload = {}
+            elif method == ReqMethod.PLUGIN_PACKAGES_IMPORT_LOCAL:
+                payload = package_manager.import_plugin_package(params)
+            else:
+                # lifecycle: create → ok + {}
+                getattr(package_manager, _PACKAGE_ROUTES[method])(params)
+                payload = {}
+        except Exception as exc:
+            from jiuwenswarm.server.runtime.marketplace.hub_client import HubNotFoundError
+            from jiuwenswarm.server.runtime.marketplace.hub_catalog_cache import invalidate_hub_catalog
+            error_payload = {"error": "安装超时，请稍后重试" if isinstance(exc, asyncio.TimeoutError) else str(exc)}
+            if isinstance(exc, HubNotFoundError):
+                kind = "agent_template" if method.value.startswith("agent_templates.") else "plugin"
+                invalidate_hub_catalog(kind)
+                error_payload["code"] = "HUB_ASSET_NOT_FOUND"
+            logger.warning("[extension_package_manager] request %s failed: %s", method, exc)
+            error_code = getattr(exc, "code", None)
+            if method in _AGENT_GROUP_PACKAGE_METHODS and not isinstance(error_code, str):
+                error_code = "AGENT_GROUP_REQUEST_FAILED"
+            if isinstance(error_code, str) and error_code:
+                error_payload["code"] = error_code
+            return AgentResponse(
+                request_id=request.request_id,
+                channel_id=request.channel_id,
+                ok=False,
+                payload=error_payload,
+                metadata=request.metadata,
+            )
+        return AgentResponse(
+            request_id=request.request_id,
+            channel_id=request.channel_id,
+            ok=True,
+            payload=payload,
+            metadata=request.metadata,
+        )
+
+    async def _process_interrupt(self, request: AgentRequest) -> AgentResponse:
+        """处理 interrupt 请求.
+
+        根据 intent 分流：
+        - pause: 暂停 ReAct 循环（不取消任务）
+        - resume: 恢复已暂停的 ReAct 循环
+        - cancel: 取消当前 session 正在运行的任务
+        - supplement: 取消当前任务但保留 todo
+
+        Args:
+            request: AgentRequest，params 中可包含：
+                - intent: 中断意图 ('pause' | 'cancel' | 'resume' | 'supplement')
+                - new_input: 新的用户输入（用于切换任务）
+
+        Returns:
+            AgentResponse 包含 interrupt_result 事件数据
+        """
+        intent = request.params.get("intent", "cancel")
+        session_id = self._session_manager.get_session_id(request.session_id)
+        is_team_mode = is_team_params(request.params if isinstance(request.params, dict) else None)
+
+        if is_team_mode:
+            return await self._process_team_interrupt(
+                request=request,
+                intent=intent,
+                session_id=session_id,
+            )
+
+        adapter = self._ensure_adapter(mode=self._adapter_mode_for_request(request))
+        external_session_checker = getattr(
+            adapter,
+            "is_external_harness_session",
+            None,
+        )
+        is_external_session = bool(
+            callable(external_session_checker)
+            and external_session_checker(request.session_id)
+        )
+
+        if intent == "pause":
+            # 暂停：不取消任务，只暂停 ReAct 循环
+            return await adapter.process_interrupt(request)
+
+        if intent == "resume":
+            # 恢复：恢复 ReAct 循环
+            return await adapter.process_interrupt(request)
+
+        if intent == "supplement":
+            # 取消当前 session 的任务
+            response = await adapter.process_interrupt(request)
+            if is_external_session:
+                return response
+            await self._session_manager.cancel_session_task(session_id, "interrupt(supplement): ")
+            return response
+
+        # cancel: 先调用 adapter.process_interrupt（此时 session 仍在 _active_session_ids 中，
+        # guard 能通过），再 cancel_session_task（其 finally 会把 session 从 _active_session_ids 移除）。
+        # 顺序不能反，否则 process_interrupt 的 session guard 会误判为 "not active" 而跳过 abort。
+        response = await adapter.process_interrupt(request)
+        if is_external_session:
+            return response
+        await self._cancel_team_work_for_session(
+            session_id,
+            request.channel_id,
+            log_prefix=f"interrupt(intent={intent}): ",
+        )
+        await self._session_manager.cancel_session_task(
+            session_id,
+            f"interrupt(intent={intent}): ",
+            wait_timeout=5.0,
+        )
+        return response
+
+    @staticmethod
+    def _build_interrupt_result_response(
+        request: AgentRequest,
+        *,
+        intent: str,
+        success: bool,
+        message: str,
+    ) -> AgentResponse:
+        return AgentResponse(
+            request_id=request.request_id,
+            channel_id=request.channel_id,
+            ok=True,
+            payload={
+                "event_type": "chat.interrupt_result",
+                "intent": intent,
+                "success": success,
+                "message": message,
+            },
+            metadata=request.metadata,
+        )
+
+    async def _process_team_interrupt(
+        self,
+        *,
+        request: AgentRequest,
+        intent: str,
+        session_id: str,
+    ) -> AgentResponse:
+        """Handle interrupt requests for Team mode.
+
+        Team runtime is persistent and owned by openjiuwen Runner pool. For team sessions:
+        - pause stops the foreground stream and parks the runtime in paused state
+          via Runner.pause_agent_team, allowing same-session resume.
+        - cancel removes the runtime from Runner pool via Runner.stop_agent_team,
+          preventing pool/DB inconsistency for subsequent sessions.
+        - resume is not a first-class runtime action. Users should send the next
+          message directly to continue a paused session.
+        """
+        from jiuwenswarm.agents.harness.team import get_team_manager
+        from jiuwenswarm.extensions.video_duplex.backend.tasks.design_execution import control_target
+
+        voice_round = control_target(request)
+
+        team_manager = get_team_manager(request.channel_id)
+        reason = f"interrupt(intent={intent}): "
+
+        if intent == "resume":
+            return self._build_interrupt_result_response(
+                request,
+                intent=intent,
+                success=True,
+                message="团队暂停后，直接发送下一条消息即可继续。",
+            )
+
+        if intent in {"pause", "cancel"}:
+            if intent == "pause":
+                paused = await team_manager.pause_session_runtime(session_id, reason=reason)
+                # Runtime retains pure observation subscriptions and broadcasts
+                # completion after the cancelled business response streams exit.
+                await self._session_manager.cancel_session_task(
+                    session_id,
+                    reason,
+                    wait_timeout=5.0,
+                )
+                message = "团队已暂停" if paused else "当前没有可暂停的团队任务"
+            else:
+                # 断连兜底（client_disconnect）→ pause_all 保账本（可冷启动续跑）；用户主动终止 → stop_all 落 seal。
+                metadata = request.metadata if isinstance(request.metadata, dict) else {}
+                cancel_source = metadata.get(E2A_INTERNAL_CANCEL_SOURCE_KEY)
+                workflow_disposition = (
+                    "pause"
+                    if cancel_source == E2A_CANCEL_SOURCE_CLIENT_DISCONNECT
+                    else "stop"
+                )
+                cancelled = await team_manager.cancel_session_runtime(
+                    session_id, reason=reason, workflow_disposition=workflow_disposition
+                )
+                await self._session_manager.cancel_session_task(
+                    session_id,
+                    reason,
+                    wait_timeout=5.0,
+                )
+                message = "团队当前执行已结束" if cancelled else "当前没有可取消的团队任务"
+            success = paused if intent == "pause" else cancelled
+            if voice_round is not None and intent == "cancel" and cancelled:
+                await voice_round.settle(cancelled=True)
+            return self._build_interrupt_result_response(
+                request,
+                intent=intent,
+                success=success,
+                message=message,
+            )
+
+        return self._build_interrupt_result_response(
+            request,
+            intent=intent,
+            success=False,
+            message=f"团队模式暂不支持中断意图: {intent}",
+        )
+
+    async def _cancel_team_work_for_session(
+        self,
+        session_id: str,
+        channel_id: str | None = None,
+        log_prefix: str = "",
+    ) -> bool:
+        """终止当前 session 的 Team runtime（若存在）。"""
+        from jiuwenswarm.agents.harness.team import get_team_manager
+
+        try:
+            team_manager = get_team_manager(channel_id)
+            return await team_manager.terminate_session_runtime(session_id, reason=log_prefix)
+        except Exception:
+            logger.exception(
+                "[JiuWenSwarm] failed to terminate team runtime: session_id=%s",
+                session_id,
+            )
+            return False
+
+    @staticmethod
+    def _is_team_plan_confirm_answer(params: dict[str, Any]) -> bool:
+        """Return True for structured team.plan approval answers."""
+        request_id = str(params.get("request_id") or "").strip()
+        answers = params.get("answers")
+        if not request_id or not isinstance(answers, list) or not answers:
+            return False
+
+        source = str(params.get("source") or "").strip()
+        if source != "confirm_interrupt":
+            return False
+        if str(params.get("plan_approval_kind") or "").strip() != "plan_approval":
+            return False
+        if "plan_content" not in params:
+            return False
+        plan_language = str(params.get("plan_language") or "").strip().lower()
+        return plan_language in {"cn", "en"}
+
+    async def process_message(self, request: AgentRequest) -> AgentResponse:
+        """Process a request through the facade-owned Session scheduler."""
+        return await self._process_message(request, schedule_session=True)
+
+    async def execute_message(self, request: AgentRequest) -> AgentResponse:
+        """Execute one request when scheduling is owned by AgentRuntime."""
+        return await self._process_message(request, schedule_session=False)
+
+    async def _process_message(
+        self,
+        request: AgentRequest,
+        *,
+        schedule_session: bool,
+    ) -> AgentResponse:
+        """处理非流式请求.
+
+        支持多 session 并发执行，同 session 内任务按先进后出顺序执行.
+        """
+        if request.req_method == ReqMethod.CHAT_CANCEL:
+            return await self._process_interrupt(request)
+
+        if request.req_method == ReqMethod.CHAT_ANSWER:
+            if (request.channel_id == "video_tool" and (request.params or {}).get("mode") == "team.design"
+                    and (request.params or {}).get("managed_task_request")):
+                from jiuwenswarm.extensions.video_duplex.backend.tasks.design_execution import answer_design_task
+
+                return await answer_design_task(request, self._build_inputs)
+            adapter = self._ensure_adapter(mode=self._adapter_mode_for_request(request))
+            validator = getattr(
+                adapter, "validate_auto_permission_workspace_request", None
+            )
+            if callable(validator):
+                validator(request)
+            return await adapter.handle_user_answer(request)
+
+        if request.req_method == ReqMethod.CHAT_SWARMFLOW_REPLY:
+            adapter = self._ensure_adapter(mode=self._adapter_mode_for_request(request))
+            return await adapter.handle_swarmflow_reply(request)
+
+        # Non-stream goal command (GET, PAUSE, CLEAR)
+        if request.req_method == ReqMethod.COMMAND_GOAL:
+            try:
+                adapter = self._ensure_adapter(mode=self._adapter_mode_for_request(request))
+                params = request.params if isinstance(request.params, dict) else {}
+                action = params.get("action", "get")
+                session_id = self._session_manager.get_session_id(request.session_id)
+                logger.info(
+                    "[Goal] COMMAND_GOAL received: request_id=%s action=%s "
+                    "resolved_session_id=%s",
+                    request.request_id, action, session_id,
+                )
+                # Pass protocol fields straight to the Goal capability adapter.
+                goal_result = await adapter.handle_goal_command_structured(params, session_id)
+                if goal_result is not None:
+                    result_type = goal_result.get("result_type")
+                    ok = result_type not in {"goal_error", "goal_confirm_required"}
+                    # Only set writes user history (objective as the user turn).
+                    # pause / resume / clear / get stay control-only.
+                    # 忙碌时与流式路径同一 helper：推迟到上一轮收尾再落盘。
+                    if ok and str(action or "").strip().lower() == "set":
+                        goal_obj = goal_result.get("goal")
+                        record_fn = getattr(adapter, "_record_goal_set_history_if_needed", None)
+                        if callable(record_fn):
+                            history_result = record_fn(
+                                request,
+                                action=str(action),
+                                result_type=str(result_type) if result_type else None,
+                                goal_payload=goal_obj if isinstance(goal_obj, dict) else None,
+                            )
+                            if inspect.isawaitable(history_result):
+                                await history_result
+                        else:
+                            objective = str(params.get("objective") or "").strip()
+                            if objective:
+                                goal_id = (
+                                    str(goal_obj.get("goal_id") or "").strip() or None
+                                    if isinstance(goal_obj, dict)
+                                    else None
+                                )
+                                await _run_history_io(
+                                    append_history_record,
+                                    session_id=session_id,
+                                    request_id=request.request_id,
+                                    channel_id=request.channel_id,
+                                    role="user",
+                                    content=objective,
+                                    timestamp=time.time(),
+                                    channel_metadata=request.metadata,
+                                    mode=params.get("mode", "unknown"),
+                                    extra={
+                                        "goal_id": goal_id,
+                                        "is_goal_objective_message": True,
+                                    },
+                                )
+                    # Keep message for callers that read payload.message; also
+                    # mirror into error on failure so Gateway top-level error
+                    # forwarding and older clients stay consistent.
+                    human_text = goal_result.get("output", goal_result.get("error", ""))
+                    payload = {
+                        "action": goal_result.get("action", action),
+                        "message": human_text,
+                        "goal": goal_result.get("goal"),
+                        # Keep this field for the existing TUI command
+                        # surface; it is a copy of the authoritative goal.
+                        "record": goal_result.get("goal"),
+                        "cleared_goal": goal_result.get("cleared_goal"),
+                        "existing_goal": goal_result.get("existing_goal"),
+                        "requested_objective": goal_result.get("requested_objective"),
+                        "code": goal_result.get("error_code"),
+                    }
+                    if not ok and human_text:
+                        payload["error"] = human_text
+                    return AgentResponse(
+                        request_id=request.request_id,
+                        channel_id=request.channel_id,
+                        ok=ok,
+                        payload=payload,
+                        metadata=request.metadata,
+                    )
+                return AgentResponse(
+                    request_id=request.request_id,
+                    channel_id=request.channel_id,
+                    ok=False,
+                    payload={"error": "Goal command not handled"},
+                    metadata=request.metadata,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "[JiuWenSwarm] COMMAND_GOAL 处理失败: request_id=%s error=%s",
+                    request.request_id,
+                    exc,
+                )
+                return AgentResponse(
+                    request_id=request.request_id,
+                    channel_id=request.channel_id,
+                    ok=False,
+                    payload={"error": f"Goal command error: {exc}"},
+                    metadata=request.metadata,
+                )
+
+        # 无状态请求（skills / skilldev / plugins / Skill Graph）不需要 adapter，
+        # 在 _ensure_adapter 之前检查，避免触发 adapter 懒初始化。
+        # COMMAND_GOAL 已在上方单独处理（其内部按需 ensure），不影响本顺序。
+        skilldev_response = await self._handle_skilldev_request(request)
+        if skilldev_response is not None:
+            return skilldev_response
+
+        skills_response = await self._handle_skills_request(request)
+        if skills_response is not None:
+            return skills_response
+
+        session_asset_response = await self._handle_session_asset_request(request)
+        if session_asset_response is not None:
+            return session_asset_response
+
+        plugins_response = await self._handle_plugins_request(request)
+        if plugins_response is not None:
+            return plugins_response
+
+        package_catalog_response = await self._handle_package_catalog_request(request)
+        if package_catalog_response is not None:
+            return package_catalog_response
+
+        adapter = self._ensure_adapter(mode=self._adapter_mode_for_request(request))
+        validator = getattr(adapter, "validate_auto_permission_workspace_request", None)
+        if callable(validator):
+            validator(request)
+
+        heartbeat_response = await adapter.handle_heartbeat(request)
+        if heartbeat_response is not None:
+            return heartbeat_response
+
+        session_id = self._session_manager.get_session_id(request.session_id)
+        if isinstance(request.params, dict):
+            restore_chat_send_equipment_params(session_id, request.params)
+        query = request.params.get("query", "")
+        # proactive_recommendation 是系统触发的推荐指令（不是用户说的话），不写 user
+        # history——否则刷新页面会显示"[主动推荐指令] xxx"这种用户没说过的消息。
+        if _should_record_user_history(request.params):
+            await _run_history_io(
+                append_history_record,
+                session_id=session_id,
+                request_id=request.request_id,
+                channel_id=request.channel_id,
+                role="user",
+                content=_history_user_content(request.params, query),
+                timestamp=time.time(),
+                extra=_history_user_extra(request.params),
+                channel_metadata=request.metadata,
+                mode=request.params.get("mode", "unknown"),
+            )
+        # 注：ask_user_answer 的落盘在 deliver_control_input 里——ask_user_interrupt
+        # resume 走 control-input 路径，不经过本方法。
+
+        logger.info(
+            "[JiuWenSwarm] 处理请求: request_id=%s channel_id=%s session_id=%s sdk=%s",
+            request.request_id, request.channel_id, session_id, self._sdk_name,
+        )
+
+        try:
+            inputs, memory_mode, user_turn = self._build_inputs(request)
+        except _TeamPlanApprovalPayloadError as exc:
+            return AgentResponse(
+                request_id=request.request_id,
+                channel_id=request.channel_id,
+                ok=False,
+                payload={"error": str(exc)},
+                metadata=request.metadata,
+            )
+
+        # Session-level MCP enable: reconcile to explicit mcp ∪ equipment
+        # connectors before the agent runs. Always pass a list (never None):
+        # empty clears selection when neither side contributes names.
+        params = request.params if isinstance(request.params, dict) else {}
+        try:
+            runtime_binding = self._resolve_runtime_binding_for_request(
+                adapter,
+                request,
+                session_id,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            return AgentResponse(
+                request_id=request.request_id,
+                channel_id=request.channel_id,
+                ok=False,
+                payload={"error": str(exc)},
+                metadata=request.metadata,
+            )
+        reconcile_kwargs: dict[str, Any] = {
+            "model_name": params.get("model_name"),
+            "history_before_request_id": request.request_id,
+        }
+        if runtime_binding is not None:
+            reconcile_kwargs["runtime_binding"] = runtime_binding
+        if params.get("model_selection") is not None:
+            reconcile_kwargs["model_selection"] = params["model_selection"]
+        if "moa_enabled" in params:
+            reconcile_kwargs["moa_enabled"] = params["moa_enabled"]
+        moa_access = getattr(adapter, "moa_access_kwargs", None)
+        if callable(moa_access):
+            reconcile_kwargs.update(moa_access(request))
+        await self.reconcile_session_mcp(
+            request.session_id,
+            compute_chat_send_mcp_needed(params),
+            **reconcile_kwargs,
+        )
+
+        # cloud memory: before chat hook
+        if memory_mode == "cloud":
+            mem_ctx = MemoryHookContext(
+                session_id=request.session_id or "default",
+                request_id=request.request_id or "",
+                channel_id=request.channel_id,
+                agent_name="main_agent",
+                workspace_dir=str(get_agent_home_dir()),
+                extra=request.params,
+            )
+            await ExtensionRegistry.get_instance().trigger(AgentServerHookEvents.MEMORY_BEFORE_CHAT, mem_ctx)
+            memory_block = "\n\n".join(b for b in mem_ctx.memory_blocks if b)
+            inputs["memory_block"] = memory_block
+
+        async def run_agent_task():
+            return await adapter.process_message_impl(request, inputs)
+
+        if schedule_session:
+            result = await self._session_manager.submit_and_wait(
+                session_id, run_agent_task
+            )
+        else:
+            result = await run_agent_task()
+
+        if result.ok and result.payload.get("content"):
+            content = result.payload["content"]
+            content_str = content if isinstance(content, str) else str(content)
+            repair_call = getattr(adapter, "repair_model_response", None)
+            retry_without_a2ui_call = self._make_retry_without_a2ui_call(
+                adapter=adapter,
+                request=request,
+            )
+            content_str = await finalize_assistant_response_if_a2ui(
+                content_str,
+                channel=request.channel_id,
+                user_query=user_turn.text,
+                request_id=request.request_id or "",
+                repair_call=repair_call,
+                retry_without_a2ui_call=retry_without_a2ui_call,
+            )
+            if isinstance(content, str):
+                result.payload["content"] = content_str
+            result.payload = _with_web_agent_template_payload(
+                result.payload,
+                request.params,
+                request.channel_id,
+                event_type="chat.final",
+            )
+            await _run_history_io(
+                append_history_record,
+                session_id=session_id,
+                request_id=request.request_id,
+                channel_id=request.channel_id,
+                role="assistant",
+                event_type="chat.final",
+                content=content_str,
+                timestamp=time.time(),
+                extra=_with_heartbeat_history_metadata(
+                    _with_web_agent_template_metadata(
+                        None,
+                        request.params,
+                        request.channel_id,
+                        event_type="chat.final",
+                        payload=result.payload,
+                    ),
+                    request.params,
+                ),
+                mode=request.params.get("mode", "unknown"),
+            )
+            # cloud memory: after chat hook
+            if memory_mode == "cloud":
+                after_ctx = MemoryHookContext(
+                    session_id=request.session_id or "default",
+                    request_id=request.request_id or "",
+                    channel_id=request.channel_id,
+                    agent_name="main_agent",
+                    workspace_dir=str(get_agent_home_dir()),
+                    assistant_message=content_str,
+                    extra=request.params,
+                )
+                await ExtensionRegistry.get_instance().trigger(AgentServerHookEvents.MEMORY_AFTER_CHAT, after_ctx)
+
+            # auto memory: extract memories after conversation ends
+            # 需要 auto_memory_enabled 和 memory.enabled 都为 true 才触发
+            mode = request.params.get("mode", "code") if isinstance(request.params, dict) else "code"
+            config = get_config()
+            if is_auto_memory_enabled(mode, config) and is_memory_enabled(mode, config):
+                _trigger_auto_memory_extraction(adapter, request, session_id, is_stream=False)
+
+        return result
+
+    async def deliver_session_input(
+        self, request: AgentRequest
+    ) -> AsyncIterator[AgentResponseChunk]:
+        """Submit new text to this Session, independently of question answers."""
+        from jiuwenswarm.runtime.session_input import resolve_session_input_mode, validate_session_input
+
+        input_mode = resolve_session_input_mode(request.params)
+        if is_interrupt_resume_payload(request.params) or input_mode is None:
+            raise ValueError("supplemental input requires an explicit input mode")
+        validate_session_input(request.params)
+        adapter = self._adapter
+        deliver = getattr(adapter, "deliver_session_input_impl", None)
+        if not callable(deliver):
+            raise RuntimeError("active agent does not support supplemental input")
+        session_id = self._session_manager.get_session_id(request.session_id)
+        restore_chat_send_equipment_params(session_id, request.params)
+        inputs, _memory_mode, _user_turn = self._build_inputs(request)
+        history_persisted = False
+        async with aclosing(deliver(request, inputs)) as stream:
+            async for chunk in stream:
+                payload = chunk.payload if isinstance(chunk.payload, dict) else {}
+                if not history_persisted and input_mode.value == "steer":
+                    if (
+                        payload.get("event_type") == "runtime.accepted"
+                        and payload.get("input_boundary") != "stream"
+                    ):
+                        params = request.params if isinstance(request.params, dict) else {}
+                        history_extra = _history_user_extra(params) or {}
+                        history_extra.update({
+                            "is_supplemental_input": True,
+                            "supplemental_input": {
+                                "execution_id": str(params.get("expected_execution_id") or ""),
+                                "stream_offset": 0,
+                            },
+                        })
+                        query = params.get("query") or params.get("content") or ""
+                        await _run_history_io(
+                            append_history_record,
+                            session_id=session_id,
+                            request_id=request.request_id,
+                            channel_id=request.channel_id,
+                            role="user",
+                            content=_history_user_content(params, query),
+                            timestamp=time.time(),
+                            extra=history_extra,
+                            channel_metadata=request.metadata,
+                            mode=params.get("mode", "unknown"),
+                        )
+                        history_persisted = True
+                yield chunk
+
+    async def deliver_control_input(
+        self, request: AgentRequest
+    ) -> AsyncIterator[AgentResponseChunk]:
+        """Inject an interaction answer into this Session's active execution."""
+        if not is_interrupt_resume_payload(request.params):
+            raise ValueError("control input must answer an active interaction")
+        adapter = self._ensure_adapter(mode=self._adapter_mode_for_request(request))
+        session_id = self._session_manager.get_session_id(request.session_id)
+        params = request.params if isinstance(request.params, dict) else {}
+        restore_chat_send_equipment_params(session_id, params)
+        inputs, _memory_mode, _user_turn = self._build_inputs(request)
+        await self.reconcile_session_mcp(
+            request.session_id,
+            compute_chat_send_mcp_needed(params),
+            model_name=params.get("model_name"),
+            history_before_request_id=request.request_id,
+            retain_moa_snapshot=True,
+            **({"model_selection": params["model_selection"]} if params.get("model_selection") is not None else {}),
+            **({"moa_enabled": params["moa_enabled"]} if "moa_enabled" in params else {}),
+            **(adapter.moa_access_kwargs(request) if callable(getattr(adapter, "moa_access_kwargs", None)) else {}),
+        )
+        # 问题澄清答案 resume 走的是 control-input 路径（Runtime.session_work_kind 判定
+        # 为 CONTROL_INPUT → _deliver_control → 本方法），**不经过** process_message_stream，
+        # 所以 ask_user_answer 的落盘必须放在这里。否则刷新后 chat.ask_user_question 找不到
+        # 配对的 chat.ask_user_answer，已答问题又会弹成实时交互框（卡在确认位置）。
+        # request_id 必须用 params.request_id（原问题那一轮的 rid），而非本轮信封 id
+        # （request.request_id 是前端为这次 resume 新生成的 req_xxx）——否则前端按
+        # request_id 与 chat.ask_user_question 配对会失败。
+        await _persist_ask_user_answer_history(request, session_id, params)
+        # rid 用于 chunk 落盘的 request_id——用本轮信封 id（request.request_id），
+        # 与 process_message_stream 一致：resume 这轮的 LLM 回复是新一轮产出，
+        # 前端按信封 id 跟踪。chat.ask_user_answer 已上面用原问题 rid 单独落盘。
+        rid = request.request_id
+        cid = request.channel_id
+        # chat.delta 累积器：对齐 process_message_stream 的 durable_pending_final_chunks
+        # ——delta 增量不落盘，只累积文本；空 chat.final / 中断边界 / 流结束时合并成一条
+        # chat.final 落盘。否则空 final 场景正文只在 delta 里，刷新后 delta 不在
+        # _HISTORY_RESTORABLE_ASSISTANT_EVENT_TYPES 被过滤、空 final 又被空壳规则丢弃，
+        # 整段回复凭空消失。
+        pending_final_chunks: list[str] = []
+        # 首个非空 delta 到达时刻——对齐 pms 的 durable_pending_final_started_at，
+        # 合并落盘时作 segment_started_at 传给 resolve_final_record_timestamp，
+        # 使 chat.final 记录的 timestamp=气泡起始时刻、extra.completed_at=收尾时刻
+        # （与 pms 路径时间语义一致）。
+        # 单元素 list 持有首个非空 delta 时刻——list 可变，让 _persist_control_chunk_to_history
+        # 能「读 + 重置」调用方闭包里的时刻（Python tuple 不可变，不能用 tuple）。
+        pending_final_started_at_holder: list[float | None] = [None]
+        async with aclosing(adapter.process_message_stream_impl(request, inputs)) as stream:
+            async for chunk in stream:
+                # 历史落盘：control-input 路径绕过了 process_message_stream 的落盘循环，
+                # 这里补上核心 event_type 的落盘，否则 resume 后 LLM 回复刷新后丢失。
+                try:
+                    await self._persist_control_chunk_to_history(
+                        chunk, request=request, session_id=session_id, rid=rid, cid=cid,
+                        pending_final_chunks=pending_final_chunks,
+                        pending_final_started_at_holder=pending_final_started_at_holder,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "[JiuWenSwarm] deliver_control_input chunk 落盘失败: rid=%s", rid,
+                    )
+                yield chunk
+            # 流结束兜底：若仍有未落盘的 delta（不发 chat.final 的场景，如 Goal 中间态），
+            # 补落一次——对齐 process_message_stream 收尾的 _persist_pending_final_text。
+            if pending_final_chunks:
+                try:
+                    await self._persist_pending_final_text_control(
+                        request=request, session_id=session_id, rid=rid, cid=cid,
+                        pending_final_chunks=pending_final_chunks,
+                        segment_started_at=pending_final_started_at_holder[0],
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "[JiuWenSwarm] deliver_control_input 流末 delta 兜底落盘失败: rid=%s", rid,
+                    )
+
+    async def _persist_control_chunk_to_history(
+        self,
+        chunk: Any,
+        *,
+        request: AgentRequest,
+        session_id: str,
+        rid: str,
+        cid: str,
+        pending_final_chunks: list[str],
+        pending_final_started_at_holder: list[float | None],
+    ) -> None:
+        """control-input 路径的 chunk 历史落盘（简化自 process_message_stream）。
+
+        process_message_stream 有完整的 a2ui / durable / dedup 落盘机制（~700 行），
+        control-input 路径不需要那些——resume 是简单 continuation，只需把核心
+        event_type 的 chunk 落盘即可。这样刷新后 LLM 回复（chat.final）、思考
+        （chat.reasoning）、工具调用（chat.tool_call）、用量（context.usage /
+        chat.usage_summary）、再次提问（chat.ask_user_question）都能回显。
+
+        chat.delta 增量与 process_message_stream 一致**不直接落盘**——只把文本
+        累积到 pending_final_chunks；遇到非空 chat.final 落盘正文并清空累积器，
+        遇到空 chat.final / chat.tool_call / chat.ask_user_question 边界时把累积的
+        delta 合并落盘成一条 chat.final（由调用方在流末再兜底一次）。否则空 final
+        场景正文只在 delta 里，刷新后整段回复凭空消失（#与 pms 同源问题）。
+
+        pending_final_started_at_holder 是单元素 list，持有首个非空 delta 到达时刻，
+        合并落盘时作 segment_started_at 传给 resolve_final_record_timestamp，使
+        chat.final 记录 timestamp=气泡起始时刻、completed_at=收尾时刻（对齐 pms）。
+        用 list 容器是为了让本方法能「读 + 重置」调用方闭包里的时刻（Python tuple
+        不可变，故用 list）。
+        """
+        payload = getattr(chunk, "payload", None)
+        if not isinstance(payload, dict):
+            return
+        et = payload.get("event_type")
+        if not isinstance(et, str) or not et:
+            return
+        # should_record 判定（与 process_message_stream 一致）：
+        # chat.* 或 context.usage 落盘；其余不落盘。
+        should_record = (et.startswith("chat.") and et != "chat.moa_status") or et == "context.usage"
+        if not should_record:
+            return
+        # chat.delta / chat.reasoning 增量不落盘（与 process_message_stream 一致）。
+        # chat.delta 文本累积到 pending_final_chunks，供空 final / 边界合并落盘。
+        if et == "chat.delta":
+            content = str(payload.get("content") or "")
+            if content:
+                if pending_final_started_at_holder[0] is None:
+                    pending_final_started_at_holder[0] = time.time()
+                pending_final_chunks.append(content)
+            return
+        if et == "chat.reasoning":
+            return
+        # 合并落盘累积 delta 时用的 segment_started_at（首个 delta 时刻），
+        # 取出并重置 holder——对齐 pms _reset_durable_pending_final。
+        segment_started_at = pending_final_started_at_holder[0]
+        # 非空 chat.final 落盘时用的气泡起始时刻——pms line 4092 在 reset 前
+        # 捕获 final_segment_started_at，使 final 记录 timestamp=起始时刻、
+        # completed_at=收尾时刻。这里同样在重置 holder 前捕获。
+        final_segment_started_at: float | None = None
+        # 中断边界（tool_call / ask_user_question）：先把累积的 delta 合并落盘，
+        # 否则中断前的正文没人收尾——对齐 pms line 3958-3966 的 _persist_pending_final_text。
+        if et in ("chat.tool_call", "chat.ask_user_question"):
+            if pending_final_chunks:
+                await self._persist_pending_final_text_control(
+                    request=request, session_id=session_id, rid=rid, cid=cid,
+                    pending_final_chunks=pending_final_chunks,
+                    segment_started_at=segment_started_at,
+                )
+                pending_final_started_at_holder[0] = None
+        # chat.final：非空正文直接落盘并清空累积器（正文已由 final 承载）；
+        # 空 final（仅收尾信号）则把累积的 delta 合并落盘——对齐 pms line 3989-3995。
+        if et == "chat.final":
+            final_content = str(payload.get("content") or "")
+            if final_content:
+                # 先捕获起始时刻再重置——pms line 4092-4094 同序。
+                final_segment_started_at = pending_final_started_at_holder[0]
+                pending_final_chunks.clear()
+                pending_final_started_at_holder[0] = None
+            elif pending_final_chunks:
+                await self._persist_pending_final_text_control(
+                    request=request, session_id=session_id, rid=rid, cid=cid,
+                    pending_final_chunks=pending_final_chunks,
+                    segment_started_at=segment_started_at,
+                )
+                pending_final_started_at_holder[0] = None
+                return
+        extra_fields = {k: v for k, v in payload.items() if k not in ("event_type", "content")}
+        if not isinstance(extra_fields, dict):
+            extra_fields = {}
+        extra_fields = with_cross_session_history_metadata(
+            _with_heartbeat_history_metadata(
+                _with_web_agent_template_metadata(
+                    extra_fields,
+                    request.params,
+                    cid,
+                    event_type=et,
+                    payload=payload,
+                ),
+                request.params,
+            ),
+            _cross_session_marker_from_params(request.params),
+        ) or {}
+        # chat.final 用气泡起始时刻（对齐 pms line 4142 传 final_segment_started_at）；
+        # 其余事件传 None（resolve_final_record_timestamp 对非 final 事件忽略此参数）。
+        record_segment_started_at = final_segment_started_at if et == "chat.final" else None
+        record_timestamp = resolve_final_record_timestamp(
+            event_type=et,
+            segment_started_at=record_segment_started_at,
+            extra_fields=extra_fields,
+        )
+        await _run_history_io(
+            append_history_record,
+            session_id=session_id,
+            request_id=rid,
+            channel_id=cid,
+            role="assistant",
+            event_type=et,
+            content=payload.get("content") or payload.get("error") or "",
+            timestamp=record_timestamp,
+            extra=extra_fields if extra_fields else None,
+            mode=request.params.get("mode", "unknown") if isinstance(request.params, dict) else "unknown",
+        )
+
+    async def _persist_pending_final_text_control(
+        self,
+        *,
+        request: AgentRequest,
+        session_id: str,
+        rid: str,
+        cid: str,
+        pending_final_chunks: list[str],
+        segment_started_at: float | None,
+    ) -> None:
+        """把累积的 chat.delta 文本合并成一条 chat.final 落盘（control-input 路径）。
+
+        对齐 process_message_stream 的 _persist_pending_final_text：delta 增量不落盘，
+        只累积；空 chat.final / 中断边界 / 流结束时调本方法把累积文本合并落盘。否则
+        空 final 场景正文只在 delta 里，刷新后 delta 被过滤、空 final 被空壳规则丢弃，
+        整段回复凭空消失。
+
+        segment_started_at 为首个非空 delta 到达时刻，传给 resolve_final_record_timestamp
+        使记录 timestamp=气泡起始时刻、extra.completed_at=收尾时刻（对齐 pms）。
+
+        注意：不透传 request.params 里的 source/proactive_* 字段——control-input 路径
+        的 params 是 resume 信封参数（带 source=ask_user_interrupt），这些是中断答案的
+        语义标签，不应泄到 LLM 回复气泡的 chat.final 记录里（pms 的透传面向的是
+        proactive_recommendation 等正常 chat_send 来源，control 路径语义不同）。
+        """
+        if not pending_final_chunks:
+            return
+        pending_text = "".join(pending_final_chunks)
+        pending_final_chunks.clear()
+        if not pending_text:
+            return
+        extra_fields: dict[str, Any] = {}
+        extra_fields = with_cross_session_history_metadata(
+            _with_heartbeat_history_metadata(
+                _with_web_agent_template_metadata(
+                    extra_fields,
+                    request.params,
+                    cid,
+                    event_type="chat.final",
+                ),
+                request.params,
+            ),
+            _cross_session_marker_from_params(request.params),
+        ) or {}
+        record_timestamp = resolve_final_record_timestamp(
+            event_type="chat.final",
+            segment_started_at=segment_started_at,
+            extra_fields=extra_fields,
+        )
+        await _run_history_io(
+            append_history_record,
+            session_id=session_id,
+            request_id=rid,
+            channel_id=cid,
+            role="assistant",
+            event_type="chat.final",
+            content=pending_text,
+            timestamp=record_timestamp,
+            extra=extra_fields if extra_fields else None,
+            mode=request.params.get("mode", "unknown") if isinstance(request.params, dict) else "unknown",
+        )
+
+    async def process_message_stream(
+            self, request: AgentRequest
+    ) -> AsyncIterator[AgentResponseChunk]:
+        """处理流式请求.
+
+        支持多 session 并发执行，同 session 内任务按先进后出顺序执行.
+        """
+        # Streaming command.goal: get/pause/clear stay one-shot; set/resume
+        # continue into the DeepAdapter attach→set/resume→read path below.
+        if request.req_method == ReqMethod.COMMAND_GOAL:
+            params = request.params if isinstance(request.params, dict) else {}
+            action = str(params.get("action", "get") or "get").strip().lower()
+            if action not in {"set", "resume"}:
+                try:
+                    adapter = self._ensure_adapter(mode=self._adapter_mode_for_request(request))
+                    session_id = self._session_manager.get_session_id(request.session_id)
+                    goal_result = await adapter.handle_goal_command_structured(params, session_id)
+                    if goal_result is None:
+                        yield AgentResponseChunk(
+                            request_id=request.request_id,
+                            channel_id=request.channel_id,
+                            payload={"event_type": "chat.error", "error": "Goal command not handled"},
+                            is_complete=True,
+                        )
+                        return
+                    result_type = goal_result.get("result_type")
+                    if result_type == "goal_error":
+                        yield AgentResponseChunk(
+                            request_id=request.request_id,
+                            channel_id=request.channel_id,
+                            payload={
+                                "event_type": "chat.error",
+                                "code": goal_result.get("error_code", "goal_error"),
+                                "error": goal_result.get("error", "goal operation failed"),
+                                "goal": goal_result.get("goal"),
+                            },
+                            is_complete=True,
+                        )
+                        return
+                    yield AgentResponseChunk(
+                        request_id=request.request_id,
+                        channel_id=request.channel_id,
+                        payload={
+                            "event_type": "goal.snapshot",
+                            "action": goal_result.get("action", action),
+                            "goal": goal_result.get("goal"),
+                            "cleared_goal": goal_result.get("cleared_goal"),
+                            "message": goal_result.get("output", ""),
+                        },
+                        is_complete=True,
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "[JiuWenSwarm] streaming COMMAND_GOAL failed: request_id=%s error=%s",
+                        request.request_id,
+                        exc,
+                    )
+                    yield AgentResponseChunk(
+                        request_id=request.request_id,
+                        channel_id=request.channel_id,
+                        payload={"event_type": "chat.error", "error": f"Goal command error: {exc}"},
+                        is_complete=True,
+                    )
+                return
+            # set/resume: fall through to streaming adapter (no user-history write).
+
+        # SkillDev 流式请求：直接委托给 SkillDevService，绕过 ReActAgent
+        if request.req_method in _SKILLDEV_METHODS:
+            service = self._get_skilldev_service()
+            try:
+                async for chunk in service.handle(request):
+                    yield chunk
+            except Exception as exc:
+                logger.error("[JiuWenSwarm] skilldev 流式请求处理失败: %s", exc)
+                yield AgentResponseChunk(
+                    request_id=request.request_id,
+                    channel_id=request.channel_id,
+                    payload={"event_type": "skilldev.error", "error": str(exc)},
+                    is_complete=True,
+            )
+            return
+
+        # 无状态 RPC（skills / plugins / Skill Graph）不需要 adapter，
+        # 委托给非流式 handler 并包装为单个 chunk，避免触发 adapter 懒初始化。
+        # skilldev 已由上面的流式分支处理，这里不会再命中。
+        for stateless_handler in (
+            self._handle_skills_request,
+            self._handle_plugins_request,
+            self._handle_package_catalog_request,
+        ):
+            stateless_response = await stateless_handler(request)
+            if stateless_response is not None:
+                if stateless_response.ok:
+                    chunk_payload = stateless_response.payload
+                else:
+                    # handler 内部捕获异常并以 ok=False 返回时，注入 chat.error
+                    # 事件标记，使下游能识别为错误（与非流式 resp.ok 传播等价）。
+                    raw_payload = stateless_response.payload
+                    error_msg = (
+                        raw_payload.get("error", "unknown error")
+                        if isinstance(raw_payload, dict)
+                        else "unknown error"
+                    )
+                    chunk_payload = {"event_type": "chat.error", "error": error_msg}
+                yield AgentResponseChunk(
+                    request_id=request.request_id,
+                    channel_id=request.channel_id,
+                    payload=chunk_payload,
+                    is_complete=True,
+                )
+                return
+
+        adapter = self._ensure_adapter(mode=self._adapter_mode_for_request(request))
+        validator = getattr(adapter, "validate_auto_permission_workspace_request", None)
+        if callable(validator):
+            validator(request)
+
+        session_id = self._session_manager.get_session_id(request.session_id)
+        if isinstance(request.params, dict):
+            restore_chat_send_equipment_params(session_id, request.params)
+        query = request.params.get("query", "")
+
+        mode = request.params.get("mode", "") if isinstance(request.params, dict) else ""
+        team_flag = request.params.get("team", False) if isinstance(request.params, dict) else False
+        is_team_mode = team_flag or is_team_runtime_mode(mode)
+        # proactive_recommendation 是系统触发的推荐指令（不是用户说的话），不写 user
+        # history——否则刷新页面会显示"[主动推荐指令] xxx"这种用户没说过的消息。
+        # command.goal set history is written only after a successful set inside
+        # the DeepAdapter stream path (same success gate as unary process_message).
+        params_for_history = request.params if isinstance(request.params, dict) else {}
+        history_channel_metadata = (
+            dict(request.metadata)
+            if isinstance(request.metadata, dict)
+            else None
+        )
+        if history_channel_metadata is not None:
+            history_channel_metadata.pop(
+                TEAM_EXECUTION_CONTEXT_METADATA_KEY,
+                None,
+            )
+        if (
+            request.req_method != ReqMethod.COMMAND_GOAL
+            and _should_record_user_history(params_for_history)
+        ):
+            await _run_history_io(
+                append_history_record,
+                session_id=session_id,
+                request_id=request.request_id,
+                channel_id=request.channel_id,
+                role="user",
+                content=_history_user_content(params_for_history, query),
+                timestamp=time.time(),
+                extra=_history_user_extra(params_for_history),
+                channel_metadata=history_channel_metadata,
+                mode=params_for_history.get("mode", "unknown"),
+            )
+        logger.info(
+            "[JiuWenSwarm] 处理流式请求: request_id=%s channel_id=%s session_id=%s sdk=%s",
+            request.request_id, request.channel_id, session_id, self._sdk_name,
+        )
+
+        rid = request.request_id
+        cid = request.channel_id
+
+        try:
+            inputs, memory_mode, user_turn = self._build_inputs(request)
+        except _TeamPlanApprovalPayloadError as exc:
+            yield AgentResponseChunk(
+                request_id=rid,
+                channel_id=cid,
+                payload={"event_type": "chat.error", "error": str(exc)},
+                is_complete=False,
+            )
+            yield AgentResponseChunk(
+                request_id=rid,
+                channel_id=cid,
+                payload=None,
+                is_complete=True,
+            )
+            return
+
+        # Session-level MCP enable: reconcile to explicit mcp ∪ equipment
+        # connectors before the agent runs. Always pass a list (never None):
+        # empty clears selection when neither side contributes names.
+        params = request.params if isinstance(request.params, dict) else {}
+        try:
+            runtime_binding = self._resolve_runtime_binding_for_request(
+                adapter,
+                request,
+                session_id,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            yield AgentResponseChunk(
+                request_id=rid,
+                channel_id=cid,
+                payload={"event_type": "chat.error", "error": str(exc)},
+                is_complete=True,
+            )
+            return
+        reconcile_kwargs: dict[str, Any] = {
+            "model_name": params.get("model_name"),
+            "history_before_request_id": request.request_id,
+        }
+        if runtime_binding is not None:
+            reconcile_kwargs["runtime_binding"] = runtime_binding
+        if params.get("model_selection") is not None:
+            reconcile_kwargs["model_selection"] = params["model_selection"]
+        if "moa_enabled" in params:
+            reconcile_kwargs["moa_enabled"] = params["moa_enabled"]
+        moa_access = getattr(adapter, "moa_access_kwargs", None)
+        if callable(moa_access):
+            reconcile_kwargs.update(moa_access(request))
+        try:
+            await self.reconcile_session_mcp(
+                request.session_id,
+                compute_chat_send_mcp_needed(params),
+                **reconcile_kwargs,
+            )
+        except RuntimeError as exc:
+            if not is_team_mode:
+                raise
+            async for chunk in _team_preflight_failure_chunks(rid, cid, session_id, exc):
+                yield chunk
+            return
+        # Team 的交互回答走普通流式路径，不经过 deliver_control_input。
+        # 与单 Agent 使用同一落盘格式，按原问题的 params.request_id 配对。
+        await _persist_ask_user_answer_history(request, session_id, params)
+
+        # Team 模式：把整个 turn 交给 team_helpers。它先用 turn.text（用户原
+        # 文）解析 /debug、$member 与 slash，再用同一个 render() 投递，因此
+        # leader 收到的信封与单 agent 逐字段一致。
+        if is_team_mode:
+            inputs[TEAM_USER_TURN_KEY] = user_turn
+            logger.info(
+                "[JiuWenSwarm] Team模式 user turn: text=%s",
+                str(user_turn.text)[:100],
+            )
+
+        # cloud memory: before chat hook
+        if memory_mode == "cloud":
+            mem_ctx = MemoryHookContext(
+                session_id=request.session_id or "default",
+                request_id=request.request_id or "",
+                channel_id=request.channel_id,
+                agent_name="main_agent",
+                workspace_dir=str(get_agent_home_dir()),
+                extra=request.params,
+            )
+            await ExtensionRegistry.get_instance().trigger(AgentServerHookEvents.MEMORY_BEFORE_CHAT, mem_ctx)
+            memory_block = "\n\n".join(b for b in mem_ctx.memory_blocks if b)
+            inputs["memory_block"] = memory_block
+
+        stream_queue = asyncio.Queue(maxsize=self.STREAM_QUEUE_MAXSIZE)
+        stream_done = asyncio.Event()
+        producer_cancellation: asyncio.CancelledError | None = None
+        final_answer_content = ""
+        final_answer_chunks: list[str] = []
+        durable_pending_final_chunks: list[str] = []
+        durable_pending_final_started_at: float | None = None
+        durable_pending_reasoning_chunks: list[str] = []
+        # reasoning 首/末帧时刻（epoch ms）：随 reasoning_content 一起落盘，供刷新后
+        # 恢复耗时终点；即使 final/closeReasoning 丢失，末帧也是真实事件时刻。
+        durable_pending_reasoning_started_at: float | None = None
+        durable_pending_reasoning_updated_at: float | None = None
+        durable_final_content = ""
+        output_phase_metadata: dict[str, Any] = {}
+        durable_pending_final_order: dict[str, Any] | None = None
+        durable_pending_reasoning_order: dict[str, Any] | None = None
+        # Team 成员的 delta/reasoning 与 leader 交错到达，各自分桶，只被成员自己的
+        # 边界冲刷，避免成员正文被记成 leader 消息、reasoning 错配（见模块说明）。
+        team_member_history = TeamMemberStreamHistory()
+        # 这条流是否带过 Goal 事件。Goal 仍 active 时流结束是不发 chat.final 的
+        # （见 interface_deep._should_emit_stream_end_chat_final），气泡里的正文
+        # 就没人落盘；收尾时按这个标记补一次，只影响 Goal 流。
+        saw_goal_stream_output = False
+
+        def _note_durable_reasoning_delta(payload: dict[str, Any]) -> None:
+            nonlocal durable_pending_reasoning_started_at, durable_pending_reasoning_updated_at
+            nonlocal durable_pending_reasoning_order
+            if durable_pending_reasoning_started_at is None:
+                durable_pending_reasoning_order = payload.get("output_order")
+            now_ms = time.time() * 1000
+            if durable_pending_reasoning_started_at is None:
+                durable_pending_reasoning_started_at = now_ms
+            durable_pending_reasoning_updated_at = now_ms
+
+        def _consume_durable_reasoning_content() -> tuple[str, float | None, float | None]:
+            nonlocal \
+                durable_pending_reasoning_chunks, \
+                durable_pending_reasoning_started_at, \
+                durable_pending_reasoning_updated_at
+            reasoning_text = "".join(durable_pending_reasoning_chunks)
+            started_at = durable_pending_reasoning_started_at
+            updated_at = durable_pending_reasoning_updated_at
+            durable_pending_reasoning_chunks = []
+            durable_pending_reasoning_started_at = None
+            durable_pending_reasoning_updated_at = None
+            return reasoning_text, started_at, updated_at
+
+        def _attach_reasoning_content(extra_fields: dict[str, Any] | None = None) -> dict[str, Any] | None:
+            reasoning_text, started_at, updated_at = _consume_durable_reasoning_content()
+            if not reasoning_text.strip():
+                return extra_fields
+            merged = dict(extra_fields) if isinstance(extra_fields, dict) else {}
+            merged["reasoning_content"] = reasoning_text
+            if durable_pending_reasoning_order:
+                merged["reasoning_output_order"] = durable_pending_reasoning_order
+            merged["reasoning_updated_at"] = updated_at or started_at or (time.time() * 1000)
+            return merged
+
+        async def _persist_pending_reasoning() -> None:
+            """异常/非 Goal 结束兜底：把未随 tool_call/final 落盘的思考补落一条记录。
+
+            正常完成时 reasoning 已被最后一条 tool_call/final 附走、缓冲为空，这里 no-op。
+            单独落成 chat.reasoning 记录（不带正文 final），前端按 reasoning_content 提取。
+            """
+            started_at = durable_pending_reasoning_started_at
+            updated_at = durable_pending_reasoning_updated_at
+            reasoning_text, _, _ = _consume_durable_reasoning_content()
+            if not reasoning_text.strip():
+                return
+            now_ms = time.time() * 1000
+            await _run_history_io(
+                append_history_record,
+                session_id=session_id,
+                request_id=rid,
+                channel_id=cid,
+                role="assistant",
+                event_type="chat.reasoning",
+                content="",
+                timestamp=(started_at or now_ms) / 1000,
+                extra=_with_web_agent_template_metadata(
+                    {
+                        **output_phase_metadata,
+                        "reasoning_output_order": durable_pending_reasoning_order,
+                        "reasoning_content": reasoning_text,
+                        "reasoning_updated_at": updated_at or started_at or now_ms,
+                    },
+                    request.params,
+                    cid,
+                    event_type="chat.reasoning",
+                ),
+                mode=request.params.get("mode", "unknown"),
+            )
+
+        def _reset_durable_pending_final() -> None:
+            nonlocal durable_pending_final_chunks, durable_pending_final_started_at, durable_pending_final_order
+            durable_pending_final_order = None
+            durable_pending_final_chunks = []
+            durable_pending_final_started_at = None
+
+        def _note_durable_pending_final_delta(content: str, payload: dict[str, Any]) -> None:
+            nonlocal durable_pending_final_started_at, durable_pending_final_order
+            if durable_pending_final_started_at is None:
+                durable_pending_final_started_at = time.time()
+                durable_pending_final_order = payload.get("output_order")
+            durable_pending_final_chunks.append(content)
+
+        def _note_goal_stream_payload(event_type: str, payload: dict[str, Any]) -> None:
+            nonlocal saw_goal_stream_output
+            if saw_goal_stream_output:
+                return
+            if event_type.startswith("goal.") or payload.get("goal_intermediate"):
+                saw_goal_stream_output = True
+
+        async def _persist_pending_final_text(*, completed_at: float | None = None) -> None:
+            nonlocal durable_final_content
+            pending_text = "".join(durable_pending_final_chunks)
+            segment_started_at = durable_pending_final_started_at
+            segment_order = durable_pending_final_order
+            _reset_durable_pending_final()
+            if not pending_text or pending_text == durable_final_content:
+                return
+            extra_fields = _attach_reasoning_content({
+                **output_phase_metadata,
+                **({"output_order": segment_order} if segment_order else {}),
+                **({"completed_at": completed_at} if completed_at is not None else {}),
+                **{
+                    k: v for k, v in request.params.items()
+                    if k in ("source", "proactive_type", "proactive_target", "automation", "proactive_rec_id")
+                },
+            })
+            if not isinstance(extra_fields, dict):
+                extra_fields = {}
+            extra_fields = with_cross_session_history_metadata(
+                _with_heartbeat_history_metadata(
+                    _with_web_agent_template_metadata(
+                        extra_fields,
+                        request.params,
+                        cid,
+                        event_type="chat.final",
+                    ),
+                    request.params,
+                ),
+                _cross_session_marker_from_params(request.params),
+            ) or {}
+            record_timestamp = resolve_final_record_timestamp(
+                event_type="chat.final",
+                segment_started_at=segment_started_at,
+                extra_fields=extra_fields,
+            )
+            await _run_history_io(
+                append_history_record,
+                session_id=session_id,
+                request_id=rid,
+                channel_id=cid,
+                role="assistant",
+                event_type="chat.final",
+                content=pending_text,
+                timestamp=record_timestamp,
+                # 透传 proactive 标记到 history——刷新页面时前端靠 payload.source===
+                # 'proactive_recommendation' 渲染推荐卡片，不带则退化白色气泡。
+                extra=extra_fields if extra_fields else None,
+                mode=request.params.get("mode", "unknown"),
+            )
+            durable_final_content = pending_text
+
+        async def _persist_team_member_pending_final(
+            member_key: str | None = None,
+            *,
+            completed_at: float | None = None,
+        ) -> None:
+            if member_key is None:
+                pending_items = team_member_history.take_all_pending_finals(completed_at=completed_at)
+            else:
+                item = team_member_history.take_pending_final(member_key, completed_at=completed_at)
+                pending_items = [item] if item is not None else []
+            for item in pending_items:
+                extra_fields = dict(item.extra)
+                record_timestamp = resolve_final_record_timestamp(
+                    event_type="chat.final",
+                    segment_started_at=item.started_at,
+                    extra_fields=extra_fields,
+                )
+                await _run_history_io(
+                    append_history_record,
+                    session_id=session_id,
+                    request_id=rid,
+                    channel_id=cid,
+                    role="assistant",
+                    event_type="chat.final",
+                    content=item.content,
+                    timestamp=record_timestamp,
+                    extra=extra_fields,
+                    mode=request.params.get("mode", "unknown"),
+                )
+
+        async def _note_team_member_stream_event(
+            member_key: str,
+            event_type: str,
+            payload: dict[str, Any],
+            content: str,
+        ) -> bool:
+            """Buffer/flush a teammate frame in its own bucket; return whether to record it."""
+            if event_type == "chat.delta":
+                team_member_history.note_delta(member_key, content, payload)
+                return False
+            if event_type == "chat.reasoning":
+                team_member_history.note_reasoning(member_key, content, payload)
+                return False
+            if event_type in MEMBER_SEGMENT_BOUNDARY_EVENTS:
+                await _persist_team_member_pending_final(member_key)
+            elif event_type == "chat.final":
+                ensure_final_mode_inplace(payload)
+                if content:
+                    team_member_history.discard_text(member_key, final_content=content)
+                else:
+                    await _persist_team_member_pending_final(member_key)
+            return True
+
+        async def _persist_input_boundary(payload: dict[str, Any]) -> None:
+            # Flush BEFORE writing the user. This is the same ordered boundary
+            # the browser receives, so reload cannot merge old/new answers.
+            await _persist_pending_final_text(completed_at=payload["timestamp"] / 1000)
+            await _persist_pending_reasoning()
+            await _persist_team_member_pending_final(completed_at=payload["timestamp"] / 1000)
+            await _run_history_io(
+                append_history_record,
+                session_id=session_id,
+                request_id=payload["input_request_id"],
+                channel_id=cid,
+                role="user",
+                content=payload["content"],
+                timestamp=payload["timestamp"] / 1000,
+                extra={
+                    "output_order": payload.get("output_order"),
+                    "is_supplemental_input": True,
+                    **{
+                        key: payload[key]
+                        for key in ("message_origin", "session_message_id", "cross_session")
+                        if key in payload
+                    },
+                },
+                mode=request.params.get("mode", "unknown"),
+            )
+
+        async def run_stream_task():
+            nonlocal producer_cancellation
+            logger.info("[JiuWenSwarm] run_stream_task started: request_id=%s session_id=%s", rid, session_id)
+            _put_count = 0
+            producer_stream: AsyncIterator[AgentResponseChunk] | None = None
+            try:
+                producer_stream = adapter.process_message_stream_impl(request, inputs)
+                async for chunk in producer_stream:
+                    _put_count += 1
+                    if _put_count <= 3:
+                        _pl = getattr(chunk, "payload", None) or {}
+                        _et = _pl.get("event_type", "") if isinstance(_pl, dict) else ""
+                        logger.info(
+                            "[JiuWenSwarm] run_stream_task chunk #%s: request_id=%s event_type=%s",
+                            _put_count, rid, _et,
+                        )
+                    await stream_queue.put(("chunk", chunk))
+            except asyncio.CancelledError as exc:
+                producer_cancellation = exc
+                logger.info("[JiuWenSwarm] 流式任务被取消: request_id=%s session_id=%s", rid, session_id)
+                # The outer consumer owns cancellation and awaits this task in
+                # its finally block.  Do not enqueue into a potentially full
+                # bounded queue after that consumer has gone away.
+                raise
+            except Exception as exc:
+                logger.exception("[JiuWenSwarm] 流式任务异常: %s", exc)
+                try:
+                    await stream_queue.put(("error", exc))
+                except asyncio.CancelledError as cancel_exc:
+                    producer_cancellation = cancel_exc
+                    raise
+            finally:
+                try:
+                    if producer_stream is not None:
+                        close_stream = getattr(producer_stream, "aclose", None)
+                        if callable(close_stream):
+                            try:
+                                await close_stream()
+                            except asyncio.CancelledError as exc:
+                                producer_cancellation = exc
+                                raise
+                            except Exception:
+                                logger.debug(
+                                    "[JiuWenSwarm] stream producer close failed: request_id=%s",
+                                    rid,
+                                    exc_info=True,
+                                )
+                finally:
+                    logger.info(
+                        "[JiuWenSwarm] run_stream_task finished: request_id=%s total_chunks=%s",
+                        rid, _put_count,
+                    )
+                    stream_done.set()
+
+        stream_task = asyncio.create_task(run_stream_task())
+
+        suppress_a2ui_stream = False
+        a2ui_pending_render_sent = False
+        a2ui_stream_probe = ""
+        team_a2ui_blocks = TeamA2UIBlockBuffer()
+        repair_call = getattr(adapter, "repair_model_response", None)
+        retry_without_a2ui_call = self._make_retry_without_a2ui_call(
+            adapter=adapter,
+            request=request,
+        )
+
+        team_a2ui_tasks: dict[tuple[str, str], asyncio.Task] = {}
+        team_a2ui_pending_finals: dict[tuple[str, str], dict[str, Any]] = {}
+
+        # proactive 请求：source 标记在 request.params 里，由外层 proactive_adapter
+        # 消费流时注入到 chunk。这里（生产端）收不到注入后的 source，只能自己按同一
+        # 规则判定"话术轮"：工具轮总结 final / 延续轮 final 不带 proactive 标记落盘，
+        # 只有最后一个非工具轮非空 final（=推荐话术）落盘带 source/rec_id——否则刷新
+        # 后 history 里每一条 chat.final 都带 rec_id，被渲染成多张推荐卡片（bug）。
+        # "最后一个"要等流结束才能确定，故缓存话术轮候选、流末补落。
+        is_proactive_request = bool(
+            request.params.get("source") == "proactive_recommendation"
+        )
+        proactive_pending_final: dict[str, Any] | None = None
+        # 自上一个 chat.final 以来是否出现过 chat.tool_call（用于识别工具轮总结 final）。
+        saw_proactive_tool_call_since_final = False
+
+        async def _persist_proactive_final_record(
+            *,
+            content: str,
+            payload: dict[str, Any],
+            marked: bool,
+        ) -> None:
+            """落盘 proactive 流的一条 chat.final 记录。
+
+            marked=True（话术轮/最后一个非工具轮非空 final）时带
+            source/proactive_rec_id，刷新后前端渲染成推荐卡片；否则为普通
+            气泡（工具轮总结、延续轮文本等不参与卡片渲染）。
+            """
+            extra_fields: dict[str, Any] = {
+                k: v for k, v in payload.items()
+                if k not in ("event_type", "event", "content")
+            }
+            if marked:
+                # 只给话术轮补 proactive 标记（请求级参数仅这一条记录消费）。
+                for pk in (
+                    "source",
+                    "proactive_type",
+                    "proactive_target",
+                    "automation",
+                    "proactive_rec_id",
+                ):
+                    if pk not in extra_fields and pk in request.params:
+                        extra_fields[pk] = request.params[pk]
+            extra_fields = _attach_reasoning_content(extra_fields) or {}
+            extra_fields = with_cross_session_history_metadata(
+                _with_heartbeat_history_metadata(
+                    _with_web_agent_template_metadata(
+                        extra_fields,
+                        request.params,
+                        cid,
+                        event_type="chat.final",
+                    ),
+                    request.params,
+                ),
+                _cross_session_marker_from_params(request.params),
+            ) or {}
+            await _run_history_io(
+                append_history_record,
+                session_id=session_id,
+                request_id=rid,
+                channel_id=cid,
+                role="assistant",
+                event_type="chat.final",
+                content=content,
+                timestamp=resolve_final_record_timestamp(
+                    event_type="chat.final",
+                    segment_started_at=None,
+                    extra_fields=extra_fields,
+                ),
+                extra=extra_fields if extra_fields else None,
+                mode=request.params.get("mode", "unknown"),
+            )
+
+        async def _finalize_team_a2ui_block(payload: dict[str, Any], decision: Any) -> None:
+            try:
+                finalized = await finalize_assistant_response_if_a2ui(
+                    decision.raw_block,
+                    channel=cid,
+                    user_query=user_turn.text,
+                    request_id=f"{rid}:{decision.key[0]}:{decision.key[1]}",
+                    repair_call=repair_call,
+                    retry_without_a2ui_call=retry_without_a2ui_call,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Team A2UI local finalization failed: request_id=%s round=%s member=%s",
+                    rid,
+                    decision.key[0],
+                    decision.key[1],
+                )
+                finalized = decision.raw_block
+            await stream_queue.put((
+                "team_a2ui_finalized",
+                (payload, decision, finalized),
+            ))
+
+        def _schedule_team_a2ui_block(payload: dict[str, Any], decision: Any) -> None:
+            logger.info(
+                "Team A2UI block finalization scheduled: request_id=%s round=%s member=%s",
+                rid,
+                decision.key[0],
+                decision.key[1],
+            )
+            team_a2ui_tasks[decision.key] = asyncio.create_task(
+                _finalize_team_a2ui_block(payload, decision)
+            )
+
+        def _process_team_a2ui_payload(
+                payload: dict[str, Any],
+        ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+            """Schedule member-local finalization without pausing teammates."""
+            event_type = str(payload.get("event_type") or "")
+            content = str(payload.get("content") or "")
+            key = team_a2ui_blocks.key_for(payload)
+            if event_type == "chat.final" and key in team_a2ui_tasks:
+                team_a2ui_pending_finals[key] = payload
+                return [], None
+
+            decision = team_a2ui_blocks.consume(payload, event_type, content)
+            if decision is None:
+                return [], payload
+
+            direct_payloads: list[dict[str, Any]] = []
+            if decision.passthrough:
+                direct_payloads.append({**payload, "content": decision.passthrough})
+
+            if decision.replacement is not None:
+                return direct_payloads, {**payload, "content": decision.replacement}
+
+            if decision.raw_block:
+                _schedule_team_a2ui_block(payload, decision)
+            if decision.suppress:
+                return direct_payloads, None
+            return direct_payloads, payload
+
+        _yielded_from_queue = 0
+        logger.info(
+            "[JiuWenSwarm] consumer loop starting: request_id=%s is_team=%s",
+            rid, is_team_mode,
+        )
+        try:
+            while (
+                    not stream_done.is_set()
+                    or not stream_queue.empty()
+                    or bool(team_a2ui_tasks)
+            ):
+                try:
+                    item = await asyncio.wait_for(stream_queue.get(), timeout=0.1)
+                except asyncio.TimeoutError:
+                    continue
+
+                event_type, data = item
+                if event_type == "team_a2ui_finalized":
+                    original_payload, decision, finalized = data
+                    team_a2ui_tasks.pop(decision.key, None)
+                    pending_final = team_a2ui_pending_finals.pop(decision.key, None)
+                    if pending_final is not None:
+                        team_a2ui_blocks.remember_finalized(
+                            decision.key,
+                            decision.raw_block,
+                            finalized,
+                        )
+                        replay = team_a2ui_blocks.consume(
+                            pending_final,
+                            "chat.final",
+                            str(pending_final.get("content") or ""),
+                        )
+                        if replay is not None and replay.raw_block:
+                            _schedule_team_a2ui_block(pending_final, replay)
+                            continue
+                        replay_content = replay.replacement if replay is not None else None
+                        output_payload = {
+                            **pending_final,
+                            "content": replay_content or finalized,
+                            "session_id": session_id,
+                        }
+                    elif decision.finalize_whole_event:
+                        output_payload = {
+                            **original_payload,
+                            "event_type": "chat.final",
+                            "content": finalized,
+                            "session_id": session_id,
+                        }
+                    else:
+                        team_a2ui_blocks.remember_finalized(
+                            decision.key,
+                            decision.raw_block,
+                            finalized,
+                        )
+                        output_payload = {
+                            **original_payload,
+                            "content": f"{finalized}{decision.trailing}",
+                        }
+                    output_payload["_team_a2ui_finalized"] = True
+                    data = AgentResponseChunk(
+                        request_id=rid,
+                        channel_id=cid,
+                        payload=output_payload,
+                        is_complete=False,
+                    )
+                    event_type = "chunk"
+                _yielded_from_queue += 1
+                if _yielded_from_queue <= 3:
+                    _pl = getattr(data, "payload", None) if event_type == "chunk" else None
+                    _et = _pl.get("event_type", "") if isinstance(_pl, dict) else ""
+                    logger.info(
+                        "[JiuWenSwarm] consumer loop yield #%s: request_id=%s event_type=%s item_type=%s",
+                        _yielded_from_queue, rid, _et, event_type,
+                    )
+
+                if event_type == "error":
+                    if isinstance(data, asyncio.CancelledError):
+                        logger.info("[JiuWenSwarm] 流式处理被中断: request_id=%s", rid)
+                        raise data
+                    # Surface exception class so consumers can classify
+                    # failures structurally instead of regexing the message.
+                    error_type = (
+                        type(data).__name__ if isinstance(data, BaseException) else ""
+                    )
+                    error_payload: dict[str, Any] = {
+                        "event_type": "chat.error",
+                        "error": str(data),
+                    }
+                    if error_type:
+                        error_payload["error_type"] = error_type
+                    await _run_history_io(
+                        append_history_record,
+                        session_id=session_id,
+                        request_id=rid,
+                        channel_id=cid,
+                        role="assistant",
+                        event_type="chat.error",
+                        content=str(data),
+                        timestamp=time.time(),
+                        mode=request.params.get("mode", "unknown"),
+                        extra=_with_heartbeat_history_metadata(
+                            {"error_type": error_type} if error_type else None,
+                            request.params,
+                        ),
+                    )
+                    yield AgentResponseChunk(
+                        request_id=rid,
+                        channel_id=cid,
+                        payload=error_payload,
+                        is_complete=False,
+                    )
+                else:
+                    if isinstance(data, AgentResponseChunk):
+                        phase_payload = data.payload if isinstance(data.payload, dict) else {}
+                        phase_event = phase_payload.get("event_type")
+                        if phase_event == "chat.input_received":
+                            await _persist_input_boundary(phase_payload)
+                            output_phase_metadata["output_suppressed"] = True
+                            yield data
+                            continue
+                        if phase_event == "chat.output_phase":
+                            # An automatic Goal attempt changes model phase, not
+                            # the visible bubble. Only consumed user input starts
+                            # a new segment and closes the suppressed old tail.
+                            if phase_payload.get("applied_input_ids"):
+                                await _persist_pending_final_text()
+                                await _persist_pending_reasoning()
+                                output_phase_metadata = {}
+                                durable_final_content = ""
+                            output_phase_metadata["output_phase_id"] = phase_payload["output_phase_id"]
+                        elif phase_payload.get("output_phase_id"):
+                            # A stream-end final is visible even if steering was
+                            # never consumed. Persist buffered hidden output with
+                            # its own visibility before accepting that control.
+                            if (
+                                output_phase_metadata.get("output_suppressed")
+                                and not phase_payload.get("output_suppressed")
+                            ):
+                                await _persist_pending_final_text()
+                                await _persist_pending_reasoning()
+                            output_phase_metadata = {
+                                key: phase_payload[key] for key in ("output_phase_id", "output_suppressed")
+                                if key in phase_payload
+                            }
+                        if suppress_a2ui_stream:
+                            data = _normalize_nested_stream_chunk(data)
+                            if data is None:
+                                continue
+                        if isinstance(data.payload, dict):
+                            payload_event_type = data.payload.get("event_type")
+                            enriched_payload = _with_web_agent_template_payload(
+                                data.payload,
+                                request.params,
+                                cid,
+                                event_type=(
+                                    payload_event_type
+                                    if isinstance(payload_event_type, str)
+                                    else None
+                                ),
+                            )
+                            if enriched_payload is not data.payload:
+                                data = replace(data, payload=enriched_payload)
+                        if isinstance(data.payload, dict) and isinstance(data.payload.get("event_type"), str):
+                            et = str(data.payload.get("event_type"))
+                            _note_goal_stream_payload(et, data.payload)
+                            should_record = (et.startswith("chat.") and et != "chat.moa_status") or et == "context.usage"
+                            final_segment_started_at: float | None = None
+                            final_segment_order = None
+                            if not should_record and et == EventType.TEAM_MESSAGE.value:
+                                should_record = True
+                            if et == "context.compression_state":
+                                await _run_history_io(
+                                    _append_compact_history_from_payload,
+                                    payload=data.payload,
+                                    session_id=session_id,
+                                    request_id=rid,
+                                    channel_id=cid,
+                                    mode=request.params.get("mode", "unknown"),
+                                )
+
+                            payload_content = str(data.payload.get("content", ""))
+                            locally_finalized = bool(data.payload.get("_team_a2ui_finalized"))
+                            if locally_finalized:
+                                next_payload = dict(data.payload)
+                                next_payload.pop("_team_a2ui_finalized", None)
+                                data = replace(data, payload=next_payload)
+                            if (
+                                    is_team_mode
+                                    and not locally_finalized
+                                    and et in {"chat.delta", "chat.final"}
+                            ):
+                                direct_payloads, next_payload = _process_team_a2ui_payload(data.payload)
+                                for direct_payload in direct_payloads:
+                                    yield replace(
+                                        data,
+                                        payload=direct_payload,
+                                        is_complete=False,
+                                    )
+                                if next_payload is None:
+                                    continue
+                                data = replace(data, payload=next_payload)
+                                et = str(next_payload.get("event_type") or et)
+                                payload_content = str(next_payload.get("content", ""))
+                            a2ui_split = None
+                            if (
+                                    _should_probe_a2ui_stream(is_team_mode=is_team_mode)
+                                    and et in {"chat.delta", "chat.final"}
+                                    and payload_content
+                            ):
+                                a2ui_split = _split_a2ui_stream_content(a2ui_stream_probe, payload_content)
+                                a2ui_stream_probe = _extend_a2ui_stream_probe(a2ui_stream_probe, payload_content)
+                            if _should_defer_a2ui_processing_status(
+                                    suppress_a2ui_stream=suppress_a2ui_stream,
+                                    event_type=et,
+                                    payload=data.payload,
+                            ):
+                                logger.info(
+                                    "A2UI processing_status=false deferred until finalization: "
+                                    "request_id=%s",
+                                    rid,
+                                )
+                                continue
+                            team_member_key = (
+                                team_member_stream_key(data.payload) if is_team_mode else None
+                            )
+                            if team_member_key is not None:
+                                if et == "chat.final":
+                                    final_segment_started_at, final_segment_order = (
+                                        team_member_history.text_segment_start(team_member_key)
+                                    )
+                                record_member_event = await _note_team_member_stream_event(
+                                    team_member_key,
+                                    et,
+                                    data.payload,
+                                    payload_content,
+                                )
+                                should_record = should_record and record_member_event
+                            elif et == "chat.delta":
+                                final_answer_chunks.append(payload_content)
+                                if suppress_a2ui_stream or a2ui_split is not None:
+                                    first_a2ui_suppression = not suppress_a2ui_stream
+                                    if first_a2ui_suppression:
+                                        logger.info(
+                                            "A2UI stream suppression activated: request_id=%s event_type=%s",
+                                            rid,
+                                            et,
+                                        )
+                                    suppress_a2ui_stream = True
+                                    if a2ui_split is not None and a2ui_split[0]:
+                                        prefix_payload = dict(data.payload)
+                                        prefix_payload["content"] = a2ui_split[0]
+                                        yield AgentResponseChunk(
+                                            request_id=data.request_id,
+                                            channel_id=data.channel_id,
+                                            payload=prefix_payload,
+                                            is_complete=False,
+                                        )
+                                    if first_a2ui_suppression and not a2ui_pending_render_sent:
+                                        yield _make_a2ui_pending_render_chunk(request_id=rid, channel_id=cid)
+                                        a2ui_pending_render_sent = True
+                                    continue
+                                _note_durable_pending_final_delta(payload_content, data.payload)
+                                should_record = False
+                            elif et == "chat.reasoning":
+                                _note_durable_reasoning_delta(data.payload)
+                                durable_pending_reasoning_chunks.append(payload_content)
+                                should_record = False
+                            elif et in (
+                                "chat.tool_call",
+                                # 中断边界（ask_user / 权限确认）结束本轮输出且不会再有
+                                # 收尾 chat.final；不冲刷的话中断前流出的正文整段
+                                # 不落盘，刷新后这段回答凭空消失（#3785）。
+                                "chat.ask_user_question",
+                                "harness.activate_interaction",
+                            ):
+                                if is_proactive_request and et == "chat.tool_call":
+                                    saw_proactive_tool_call_since_final = True
+                                await _persist_pending_final_text()
+                            elif et == "chat.final":
+                                if isinstance(data.payload, dict):
+                                    ensure_final_mode_inplace(data.payload)
+                                if suppress_a2ui_stream or a2ui_split is not None:
+                                    first_a2ui_suppression = not suppress_a2ui_stream
+                                    if first_a2ui_suppression:
+                                        logger.info(
+                                            "A2UI stream suppression activated: request_id=%s event_type=%s",
+                                            rid,
+                                            et,
+                                        )
+                                    suppress_a2ui_stream = True
+                                    if first_a2ui_suppression and not a2ui_pending_render_sent:
+                                        yield _make_a2ui_pending_render_chunk(request_id=rid, channel_id=cid)
+                                        a2ui_pending_render_sent = True
+                                    if payload_content:
+                                        final_answer_content = payload_content
+                                        final_answer_chunks.clear()
+                                    _reset_durable_pending_final()
+                                    continue
+                                if is_proactive_request and payload_content:
+                                    # proactive 话术轮判定（与 proactive_adapter 同规则）：
+                                    # - 工具轮总结 final（该轮有 tool_call）：立即按普通气泡
+                                    #   落盘，不带 proactive 标记；
+                                    # - 第一个非工具轮非空 final（=推荐话术）：缓存为话术轮
+                                    #   候选，等流结束才带 source/rec_id 落盘（否则工具轮
+                                    #   总结/延续轮文本会带着 rec_id 落盘，刷新后被渲染成
+                                    #   第二张推荐卡片——bug）；其后的非工具轮 final（如话术
+                                    #   后的纯文本延续）不是交付物，立即落盘为普通气泡。
+                                    _reset_durable_pending_final()
+                                    final_segment_started_at = None
+                                    final_answer_content = payload_content
+                                    final_answer_chunks.clear()
+                                    durable_final_content = payload_content
+                                    if saw_proactive_tool_call_since_final:
+                                        saw_proactive_tool_call_since_final = False
+                                        await _persist_proactive_final_record(
+                                            content=payload_content,
+                                            payload=(
+                                                dict(data.payload)
+                                                if isinstance(data.payload, dict)
+                                                else {}
+                                            ),
+                                            marked=False,
+                                        )
+                                    else:
+                                        # 第一个非工具轮非空 final = 话术轮候选，缓存等
+                                        # 流末带标记落盘；其后的非工具轮 final（如话术后的
+                                        # 纯文本延续）不是交付物，立即落盘为普通气泡，
+                                        # 不覆盖候选。
+                                        if proactive_pending_final is None:
+                                            proactive_pending_final = {
+                                                "content": payload_content,
+                                                "payload": (
+                                                    dict(data.payload)
+                                                    if isinstance(data.payload, dict)
+                                                    else {}
+                                                ),
+                                            }
+                                        else:
+                                            await _persist_proactive_final_record(
+                                                content=payload_content,
+                                                payload=(
+                                                    dict(data.payload)
+                                                    if isinstance(data.payload, dict)
+                                                    else {}
+                                                ),
+                                                marked=False,
+                                            )
+                                    should_record = False
+                                # 先记住本段起始时刻：下面的 reset/flush 会把它清掉。
+                                final_segment_started_at = durable_pending_final_started_at
+                                final_segment_order = durable_pending_final_order
+                                if payload_content:
+                                    _reset_durable_pending_final()
+                                else:
+                                    # 空 final 只是收尾/拆气泡信号（Goal 中间态 final 被降级成
+                                    # chat.delta、流末尾的兜底 final），气泡里留下的正文就是前面
+                                    # 那些 delta。这里必须落盘同一份，否则历史里整段回答会消失。
+                                    await _persist_pending_final_text()
+                                    final_segment_started_at = None
+
+                            if should_record:
+                                payload_dict = dict(data.payload)
+                                extra_fields = {k: v for k, v in payload_dict.items() if
+                                                k not in ("event_type", "content")}
+                                if payload_dict.get("output_phase_id"):
+                                    # The stream clock is milliseconds. History owns its
+                                    # seconds timestamp and first-delta position below.
+                                    stream_timestamp = extra_fields.pop("timestamp")
+                                    if et == "chat.final":
+                                        extra_fields["completed_at"] = stream_timestamp / 1000
+                                if et == "chat.final" and final_segment_order:
+                                    extra_fields["output_order"] = final_segment_order
+                                if et == EventType.TEAM_MESSAGE.value and "event" in payload_dict:
+                                    event_data = payload_dict.get("event", {})
+                                    if isinstance(event_data, dict):
+                                        for k, v in event_data.items():
+                                            if k not in ("type", "timestamp", "content"):
+                                                extra_fields[k] = v
+                                if et in {"chat.final", "chat.tool_call"}:
+                                    extra_fields = (
+                                        team_member_history.attach_reasoning(team_member_key, extra_fields)
+                                        if team_member_key is not None
+                                        else _attach_reasoning_content(extra_fields)
+                                    )
+                                # 透传 proactive 标记——刷新页面时前端靠 source 识别卡片
+                                for pk in (
+                                    "source",
+                                    "proactive_type",
+                                    "proactive_target",
+                                    "automation",
+                                    "proactive_rec_id",
+                                ):
+                                    if pk not in extra_fields and pk in request.params:
+                                        extra_fields[pk] = request.params[pk]
+                                if not isinstance(extra_fields, dict):
+                                    extra_fields = {}
+                                extra_fields = with_cross_session_history_metadata(
+                                    _with_heartbeat_history_metadata(
+                                        _with_web_agent_template_metadata(
+                                            extra_fields,
+                                            request.params,
+                                            cid,
+                                            event_type=et,
+                                            payload=payload_dict,
+                                        ),
+                                        request.params,
+                                    ),
+                                    _cross_session_marker_from_params(request.params),
+                                ) or {}
+                                record_timestamp = resolve_final_record_timestamp(
+                                    event_type=et,
+                                    segment_started_at=(
+                                        final_segment_started_at if et == "chat.final" else None
+                                    ),
+                                    extra_fields=extra_fields,
+                                )
+                                await _run_history_io(
+                                    append_history_record,
+                                    session_id=session_id,
+                                    request_id=rid,
+                                    channel_id=cid,
+                                    role="assistant",
+                                    event_type=et,
+                                    content=data.payload.get("content") or data.payload.get("error") or "",
+                                    timestamp=record_timestamp,
+                                    extra=extra_fields if extra_fields else None,
+                                    mode=request.params.get("mode", "unknown"),
+                                )
+                                if et == "chat.final" and team_member_key is None:
+                                    durable_final_content = str(data.payload.get("content", ""))
+                            if et == "chat.final" and team_member_key is None:
+                                next_final_content = str(data.payload.get("content", ""))
+                                if next_final_content:
+                                    final_answer_content = next_final_content
+                                    final_answer_chunks.clear()
+                        yield data
+                    elif isinstance(data, dict) and isinstance(data.get("event_type"), str):
+                        data = _with_web_agent_template_payload(
+                            data,
+                            request.params,
+                            cid,
+                        ) or data
+                        et = str(data.get("event_type"))
+                        _note_goal_stream_payload(et, data)
+                        should_record = (et.startswith("chat.") and et != "chat.moa_status") or et == "context.usage"
+                        final_segment_started_at = None
+                        if not should_record and et == EventType.TEAM_MESSAGE.value:
+                            should_record = True
+                        if et == "context.compression_state":
+                            await _run_history_io(
+                                _append_compact_history_from_payload,
+                                payload=data,
+                                session_id=session_id,
+                                request_id=rid,
+                                channel_id=cid,
+                                mode=request.params.get("mode", "unknown"),
+                            )
+
+                        payload_content = str(data.get("content", ""))
+                        locally_finalized = bool(data.get("_team_a2ui_finalized"))
+                        if locally_finalized:
+                            data = dict(data)
+                            data.pop("_team_a2ui_finalized", None)
+                        if (
+                                is_team_mode
+                                and not locally_finalized
+                                and et in {"chat.delta", "chat.final"}
+                        ):
+                            direct_payloads, next_payload = _process_team_a2ui_payload(data)
+                            for direct_payload in direct_payloads:
+                                yield AgentResponseChunk(
+                                    request_id=rid,
+                                    channel_id=cid,
+                                    payload=direct_payload,
+                                    is_complete=False,
+                                )
+                            if next_payload is None:
+                                continue
+                            data = next_payload
+                            et = str(next_payload.get("event_type") or et)
+                            payload_content = str(next_payload.get("content", ""))
+                        a2ui_split = None
+                        if (
+                                _should_probe_a2ui_stream(is_team_mode=is_team_mode)
+                                and et in {"chat.delta", "chat.final"}
+                                and payload_content
+                        ):
+                            a2ui_split = _split_a2ui_stream_content(a2ui_stream_probe, payload_content)
+                            a2ui_stream_probe = _extend_a2ui_stream_probe(a2ui_stream_probe, payload_content)
+                        if _should_defer_a2ui_processing_status(
+                                suppress_a2ui_stream=suppress_a2ui_stream,
+                                event_type=et,
+                                payload=data,
+                        ):
+                            logger.info(
+                                "A2UI processing_status=false deferred until finalization: "
+                                "request_id=%s",
+                                rid,
+                            )
+                            continue
+                        if et == "chat.final":
+                            ensure_final_mode_inplace(data)
+                        team_member_key = team_member_stream_key(data) if is_team_mode else None
+                        if team_member_key is not None:
+                            if et == "chat.final":
+                                final_segment_started_at, _ = team_member_history.text_segment_start(
+                                    team_member_key
+                                )
+                            record_member_event = await _note_team_member_stream_event(
+                                team_member_key,
+                                et,
+                                data,
+                                payload_content,
+                            )
+                            should_record = should_record and record_member_event
+                        elif et == "chat.delta":
+                            final_answer_chunks.append(payload_content)
+                            if suppress_a2ui_stream or a2ui_split is not None:
+                                first_a2ui_suppression = not suppress_a2ui_stream
+                                if first_a2ui_suppression:
+                                    logger.info(
+                                        "A2UI stream suppression activated: request_id=%s event_type=%s",
+                                        rid,
+                                        et,
+                                    )
+                                suppress_a2ui_stream = True
+                                if a2ui_split is not None and a2ui_split[0]:
+                                    prefix_payload = dict(data)
+                                    prefix_payload["content"] = a2ui_split[0]
+                                    yield AgentResponseChunk(
+                                        request_id=rid,
+                                        channel_id=cid,
+                                        payload=prefix_payload,
+                                        is_complete=False,
+                                    )
+                                if first_a2ui_suppression and not a2ui_pending_render_sent:
+                                    yield _make_a2ui_pending_render_chunk(request_id=rid, channel_id=cid)
+                                    a2ui_pending_render_sent = True
+                                continue
+                            _note_durable_pending_final_delta(payload_content, data)
+                            should_record = False
+                        elif et == "chat.reasoning":
+                            _note_durable_reasoning_delta(data)
+                            durable_pending_reasoning_chunks.append(payload_content)
+                            should_record = False
+                        elif et in (
+                            "chat.tool_call",
+                            # 同上：中断边界结束本轮输出，冲刷 pending 正文（#3785）。
+                            "chat.ask_user_question",
+                            "harness.activate_interaction",
+                        ):
+                            if is_proactive_request and et == "chat.tool_call":
+                                saw_proactive_tool_call_since_final = True
+                            await _persist_pending_final_text()
+                        elif et == "chat.final":
+                            if suppress_a2ui_stream or a2ui_split is not None:
+                                first_a2ui_suppression = not suppress_a2ui_stream
+                                if first_a2ui_suppression:
+                                    logger.info(
+                                        "A2UI stream suppression activated: request_id=%s event_type=%s",
+                                        rid,
+                                        et,
+                                    )
+                                suppress_a2ui_stream = True
+                                if first_a2ui_suppression and not a2ui_pending_render_sent:
+                                    yield _make_a2ui_pending_render_chunk(request_id=rid, channel_id=cid)
+                                    a2ui_pending_render_sent = True
+                                if payload_content:
+                                    final_answer_content = payload_content
+                                    final_answer_chunks.clear()
+                                _reset_durable_pending_final()
+                                continue
+                            if is_proactive_request and payload_content:
+                                # 与第一分支（AgentResponseChunk）相同的 proactive
+                                # 话术轮判定与延迟落盘（见上）。
+                                _reset_durable_pending_final()
+                                final_segment_started_at = None
+                                final_answer_content = payload_content
+                                final_answer_chunks.clear()
+                                durable_final_content = payload_content
+                                if saw_proactive_tool_call_since_final:
+                                    saw_proactive_tool_call_since_final = False
+                                    await _persist_proactive_final_record(
+                                        content=payload_content,
+                                        payload=dict(data),
+                                        marked=False,
+                                    )
+                                else:
+                                    # 同第一分支：第一个非工具轮 final 缓存为话术轮候选，
+                                    # 其后的非工具轮 final 立即落盘为普通气泡，不覆盖。
+                                    if proactive_pending_final is None:
+                                        proactive_pending_final = {
+                                            "content": payload_content,
+                                            "payload": dict(data),
+                                        }
+                                    else:
+                                        await _persist_proactive_final_record(
+                                            content=payload_content,
+                                            payload=dict(data),
+                                            marked=False,
+                                        )
+                                should_record = False
+                            final_segment_started_at = durable_pending_final_started_at
+                            if payload_content:
+                                _reset_durable_pending_final()
+                            else:
+                                # 同上：空 final 收尾时把气泡正文落盘，别丢历史。
+                                await _persist_pending_final_text()
+                                final_segment_started_at = None
+
+                        if should_record:
+                            extra_fields = {k: v for k, v in data.items() if k not in ("event_type", "content")}
+                            if et == EventType.TEAM_MESSAGE.value and "event" in data:
+                                event_data = data.get("event", {})
+                                if isinstance(event_data, dict):
+                                    for k, v in event_data.items():
+                                        if k not in ("type", "timestamp", "content"):
+                                            extra_fields[k] = v
+                            if et in {"chat.final", "chat.tool_call"}:
+                                extra_fields = (
+                                    team_member_history.attach_reasoning(team_member_key, extra_fields)
+                                    if team_member_key is not None
+                                    else _attach_reasoning_content(extra_fields)
+                                )
+                            # 透传 proactive 标记——刷新页面时前端靠 source 识别卡片
+                            for pk in (
+                                "source",
+                                "proactive_type",
+                                "proactive_target",
+                                "automation",
+                                "proactive_rec_id",
+                            ):
+                                if pk not in extra_fields and pk in request.params:
+                                    extra_fields[pk] = request.params[pk]
+                            if not isinstance(extra_fields, dict):
+                                extra_fields = {}
+                            extra_fields = with_cross_session_history_metadata(
+                                _with_heartbeat_history_metadata(
+                                    _with_web_agent_template_metadata(
+                                        extra_fields,
+                                        request.params,
+                                        cid,
+                                        event_type=et,
+                                        payload=data,
+                                    ),
+                                    request.params,
+                                ),
+                                _cross_session_marker_from_params(request.params),
+                            ) or {}
+                            record_timestamp = resolve_final_record_timestamp(
+                                event_type=et,
+                                segment_started_at=(
+                                    final_segment_started_at if et == "chat.final" else None
+                                ),
+                                extra_fields=extra_fields,
+                            )
+                            await _run_history_io(
+                                append_history_record,
+                                session_id=session_id,
+                                request_id=rid,
+                                channel_id=cid,
+                                role="assistant",
+                                event_type=et,
+                                content=data.get("content") or data.get("error") or "",
+                                timestamp=record_timestamp,
+                                extra=extra_fields if extra_fields else None,
+                                mode=request.params.get("mode", "unknown"),
+                            )
+                            if et == "chat.final" and team_member_key is None:
+                                durable_final_content = str(data.get("content", ""))
+                        if et == "chat.final" and team_member_key is None:
+                            next_final_content = str(data.get("content", ""))
+                            if next_final_content:
+                                final_answer_content = next_final_content
+                                final_answer_chunks.clear()
+                        yield AgentResponseChunk(
+                            request_id=rid,
+                            channel_id=cid,
+                            payload=data,
+                            is_complete=False,
+                        )
+        except asyncio.CancelledError:
+            logger.info("[JiuWenSwarm] 流式处理被中断: request_id=%s", rid)
+            raise
+        except GeneratorExit:
+            logger.info("[JiuWenSwarm] 流式连接已关闭: request_id=%s", rid)
+            raise
+        finally:
+            try:
+                # proactive 请求：流结束时把缓存的话术轮 final 补落（带 source/rec_id）。
+                # 流里的非空 final 都被延迟到此刻按序落盘，只有最后一个非工具轮 final
+                # （=推荐话术）带 proactive 标记，其余（工具轮总结/延续轮）为普通气泡。
+                if is_proactive_request and proactive_pending_final is not None:
+                    await _persist_proactive_final_record(
+                        content=str(proactive_pending_final["content"]),
+                        payload=proactive_pending_final["payload"],
+                        marked=True,
+                    )
+                # Goal 还在跑时这条流不会收到收尾的 chat.final，气泡里已经展示的正文
+                # 也就没有任何一处落盘。补一次，否则重新打开历史记录时这段回答凭空
+                # 消失，和实时看到的不是一回事。非 Goal 流不进这里。
+                if saw_goal_stream_output:
+                    await _persist_pending_final_text()
+                else:
+                    # 非 Goal 异常结束（LLM 错误/断连，或流结束无收尾事件）时，pending
+                    # reasoning 不会随 tool_call/final 落盘；补落一条，刷新后思考内容
+                    # 与耗时终点（末帧时刻）都能恢复。正文 final 故意不落——半截回答
+                    # 不该当 chat.final 写进历史。
+                    await _persist_pending_reasoning()
+            finally:
+                # The adapter producer owns RuntimeOutputStream.  Cancelling and
+                # awaiting it releases the runtime output lease and aborts the
+                # in-flight round when the outer WebSocket consumer disappears.
+                unfinished_a2ui_tasks = [
+                    task for task in team_a2ui_tasks.values() if not task.done()
+                ]
+                for task in unfinished_a2ui_tasks:
+                    task.cancel()
+                if not stream_task.done():
+                    stream_task.cancel()
+                if unfinished_a2ui_tasks:
+                    await asyncio.gather(*unfinished_a2ui_tasks, return_exceptions=True)
+                try:
+                    await stream_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    # run_stream_task normally converts producer failures into a
+                    # queue item.  Do not let a cleanup failure mask cancellation.
+                    logger.debug(
+                        "[JiuWenSwarm] stream producer cleanup failed: request_id=%s",
+                        rid,
+                        exc_info=True,
+                    )
+
+        # A producer may cancel itself without the outer WebSocket consumer
+        # being cancelled.  Keep that terminal state out of the bounded queue
+        # (which may be full after a disconnect), but preserve the public
+        # cancellation contract once all already-produced chunks are drained.
+        if producer_cancellation is not None:
+            raise producer_cancellation
+
+        assistant_message = final_answer_content or "".join(final_answer_chunks)
+        finalized_assistant_message = await finalize_assistant_response_if_a2ui(
+            assistant_message,
+            channel=cid,
+            user_query=user_turn.text,
+            request_id=rid or "",
+            repair_call=repair_call,
+            retry_without_a2ui_call=retry_without_a2ui_call,
+        )
+        if finalized_assistant_message and (
+                finalized_assistant_message != assistant_message or suppress_a2ui_stream
+        ):
+            history_metadata: dict[str, Any] = {}
+            for key in (
+                "source",
+                "proactive_type",
+                "proactive_target",
+                "automation",
+                "proactive_rec_id",
+            ):
+                if key in request.params:
+                    history_metadata[key] = request.params[key]
+            await _run_history_io(
+                append_history_record,
+                session_id=session_id,
+                request_id=rid,
+                channel_id=cid,
+                role="assistant",
+                event_type="chat.final",
+                content=finalized_assistant_message,
+                timestamp=time.time(),
+                extra=_with_heartbeat_history_metadata(
+                    _with_web_agent_template_metadata(
+                        _attach_reasoning_content(history_metadata),
+                        request.params,
+                        cid,
+                        event_type="chat.final",
+                    ),
+                    request.params,
+                ),
+                mode=request.params.get("mode", "unknown"),
+            )
+            final_answer_content = finalized_assistant_message
+            final_answer_chunks = []
+            final_chunk = _make_a2ui_final_chunk(
+                request_id=rid,
+                channel_id=cid,
+                session_id=session_id,
+                content=finalized_assistant_message,
+            )
+            enriched_payload = _with_web_agent_template_payload(
+                final_chunk.payload,
+                request.params,
+                cid,
+            )
+            if enriched_payload is not final_chunk.payload:
+                final_chunk = replace(final_chunk, payload=enriched_payload)
+            yield final_chunk
+
+        # cloud memory: after chat hook
+        if memory_mode == "cloud":
+            assistant_message = final_answer_content or "".join(final_answer_chunks)
+            after_ctx = MemoryHookContext(
+                session_id=request.session_id or "default",
+                request_id=request.request_id or "",
+                channel_id=request.channel_id,
+                agent_name="main_agent",
+                workspace_dir=str(get_agent_home_dir()),
+                assistant_message=assistant_message,
+                extra=request.params,
+            )
+            await ExtensionRegistry.get_instance().trigger(AgentServerHookEvents.MEMORY_AFTER_CHAT, after_ctx)
+
+        # auto memory: extract memories after conversation ends
+        # 需要 auto_memory_enabled 和 memory.enabled 都为 true 才触发
+        mode = request.params.get("mode", "code") if isinstance(request.params, dict) else "code"
+        config = get_config()
+        if is_auto_memory_enabled(mode, config) and is_memory_enabled(mode, config):
+            _trigger_auto_memory_extraction(adapter, request, session_id, is_stream=True)
+
+        yield AgentResponseChunk(
+            request_id=rid,
+            channel_id=cid,
+            payload={"is_complete": True},
+            is_complete=True,
+        )
+
+    # ---------- 实例获取 ----------
+
+    def get_instance(self):
+        return self._adapter._instance
+
+    async def ensure_instance(self):
+        """Return the adapter's DeepAgent, building the root one on first use.
+
+        ``get_instance`` stays a plain accessor and may return None before the
+        root DeepAgent has been built; callers that need a live handle outside
+        the chat path should await this instead.
+
+        Returns:
+            The DeepAgent instance, or None when there is no adapter yet (the
+            stateless-RPC fallback wrapper never calls ``create_instance``) or
+            the adapter cannot build one.
+        """
+        if self._adapter is None:
+            return None
+        return await self._adapter.ensure_instance()
+
+    def get_live_session_instance(self, session_id: str | None):
+        """Return the DeepAgent already running ``session_id``, if any.
+
+        Returns None when no adapter exists, when the adapter predates this
+        accessor, or when the session has not started a child adapter yet.
+        """
+        adapter = self._adapter
+        if adapter is None:
+            return None
+        getter = getattr(adapter, "get_live_session_instance", None)
+        if getter is None:
+            return None
+        return getter(session_id)
+
+    async def ensure_live_session_instance(self, session_id: str | None):
+        """Start the session-scoped adapter if needed and return its DeepAgent.
+
+        Used by plan-mode sync so the first turn writes ``plan_mode`` onto the
+        same Session the upcoming ``chat.send`` will invoke, not a throwaway.
+        """
+        adapter = self._adapter
+        if adapter is None:
+            return None
+        starter = getattr(adapter, "ensure_live_session_instance", None)
+        if starter is None:
+            return self.get_live_session_instance(session_id)
+        return await starter(session_id)
+
+    # --- Phase-2: targeted single-MCP control (forwarded to the deep adapter) ---
+    async def apply_mcp_change(self, name: str, action: str, *, enabled: bool = True) -> bool:
+        """Apply a single-MCP change without a full config reload.
+
+        action ∈ {"add", "remove", "toggle"}.
+        - add: register the MCP (spawn stdio / connect SSE-HTTP)
+        - remove: unregister (disconnect)
+        - toggle: enable=register / disable=unregister
+
+        Returns True if the adapter applied it. The adapter reads the merged
+        get_mcp_servers() list (config.yaml + state.json), so a state.json
+        write done just before this call is visible.
+        """
+        adapter = self._adapter
+        if adapter is None:
+            return False
+        if action == "add" or (action == "toggle" and enabled):
+            return bool(await adapter.register_mcp_by_name(name))
+        if action == "remove" or (action == "toggle" and not enabled):
+            return bool(await adapter.unregister_mcp_by_name(name))
+        return False
+
+    async def reconcile_session_mcp(
+        self,
+        session_id: str | None,
+        needed: list[str] | None,
+        *,
+        model_name: str | None = None,
+        history_before_request_id: str | None = None,
+        runtime_binding: dict[str, Any] | None = None,
+        moa_enabled: bool | None = None,
+        model_selection: Any = None,
+        moa_can_access: Any = None,
+        retain_moa_snapshot: bool = False,
+    ) -> None:
+        """Reconcile this session's MCP set to ``needed`` (idempotent diff).
+
+        Session-level enable driven by chat.send: callers should pass the union
+        of ``params.mcp`` and connectors from ``agent_template_name`` /
+        ``plugin_names`` (see ``compute_chat_send_mcp_needed``). ``None`` /
+        ``[]`` both clear the session's selection. See
+        ``JiuWenSwarmDeepAdapter.reconcile_session_mcp`` for the diff logic.
+        ``history_before_request_id`` keeps a lazily-created session adapter
+        from restoring the current chat.send as disk history.
+        """
+        adapter = self._adapter
+        if adapter is None:
+            return
+        reconcile = getattr(adapter, "reconcile_session_mcp", None)
+        if reconcile is None:
+            # Adapter doesn't support session-level MCP (e.g. a stub/mock
+            # adapter) — session-level enable is a no-op for it.
+            return
+        parameters = {}
+        accepts_kwargs = False
+        try:
+            parameters = inspect.signature(reconcile).parameters
+        except (TypeError, ValueError):
+            # Preserve the previous fallback for opaque callables. Production
+            # adapters are Python methods and take the inspected branch below.
+            supported_kwargs = {"model_name": model_name}
+        else:
+            accepts_kwargs = any(
+                parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters.values()
+            )
+            supported_kwargs = {}
+            if "model_name" in parameters or accepts_kwargs:
+                supported_kwargs["model_name"] = model_name
+            if "history_before_request_id" in parameters or accepts_kwargs:
+                supported_kwargs["history_before_request_id"] = (
+                    history_before_request_id
+                )
+            if "runtime_binding" in parameters or accepts_kwargs:
+                supported_kwargs["runtime_binding"] = runtime_binding
+            if model_selection is not None and ("model_selection" in parameters or accepts_kwargs):
+                supported_kwargs["model_selection"] = model_selection
+            if moa_enabled is not None and ("moa_enabled" in parameters or accepts_kwargs):
+                supported_kwargs["moa_enabled"] = moa_enabled
+            if moa_can_access is not None and ("moa_can_access" in parameters or accepts_kwargs):
+                supported_kwargs["moa_can_access"] = moa_can_access
+            if retain_moa_snapshot and ("retain_moa_snapshot" in parameters or accepts_kwargs):
+                supported_kwargs["retain_moa_snapshot"] = True
+        await reconcile(session_id, needed, **supported_kwargs)
+
+    @staticmethod
+    def _resolve_runtime_binding_for_request(
+        adapter: AgentAdapter,
+        request: AgentRequest,
+        session_id: str,
+    ) -> dict[str, Any] | None:
+        """Resolve one chat's runtime before any session-child side effects."""
+        if request.req_method is not ReqMethod.CHAT_SEND:
+            return None
+        resolver = getattr(adapter, "resolve_runtime_binding", None)
+        if not callable(resolver):
+            return None
+        params = request.params if isinstance(request.params, dict) else {}
+        runtime_binding = resolver(session_id, params)
+        request.trusted_runtime_binding = runtime_binding
+        return runtime_binding
+
+    def sync_mcp_credentials(self) -> bool:
+        """Sync connected MCPs' tokens into os.environ (skill scripts).
+
+        Forwarded to the deep adapter. os.environ is process-global, so a
+        single live agent's sync covers the whole process; called from the
+        connect/disconnect handlers after a state.json write. Returns False
+        when no adapter is live yet (cold-start race) so the caller can fall
+        through to another live agent.
+        """
+        adapter = self._adapter
+        if adapter is None:
+            return False
+        sync = getattr(adapter, "_sync_mcp_credentials_environment", None)
+        if sync is None:
+            return False
+        return bool(sync())
+
+    def clear_mcp_credentials(self, name: str) -> bool:
+        """Clear a disconnected MCP's token env vars.
+
+        Returns False when no adapter is live yet so the caller can fall
+        through to another live agent.
+        """
+        adapter = self._adapter
+        if adapter is None:
+            return False
+        clear = getattr(adapter, "_clear_mcp_credentials_environment", None)
+        if clear is None:
+            return False
+        clear(name)
+        return True
+
+    async def refresh_skill_rails(self) -> None:
+        """Reload SkillUseRail so newly installed/uninstalled MCP bundled
+        skills surface to the agent without a full reload.
+
+        Called from the connect/disconnect handlers after skill_installer
+        copies/removes skill dirs. Without this the agent's SkillUseRail keeps
+        its cached skill set and the MCP's skills stay invisible even though
+        the files are on disk.
+        """
+        adapter = self._adapter
+        if adapter is None:
+            return
+        refresh = getattr(adapter, "refresh_skill_rails", None)
+        if refresh is not None:
+            await refresh()
+
+    async def apply_package_change_to_session_adapters(
+        self,
+        operation: str,
+        config_path: str,
+    ) -> None:
+        """Propagate a harness package load/unload to all live session adapters.
+        """
+        adapter = self._adapter
+        if adapter is None:
+            return
+        method = getattr(adapter, "apply_package_change_to_session_adapters", None)
+        if method is None:
+            return
+        await method(operation, config_path)
+
+    async def apply_rsi_harness_install(
+        self,
+        operation: str,
+        *,
+        config_path: str,
+        installation_id: str,
+    ) -> dict[str, Any]:
+        """Apply an RSI-published Harness through the adapter-owned LoadRecord."""
+
+        adapter = self._adapter
+        if adapter is None:
+            return {"status": "SKIPPED", "resources": []}
+        method = getattr(adapter, "apply_rsi_harness_install", None)
+        if method is None:
+            return {"status": "SKIPPED", "resources": []}
+        return await method(
+            operation,
+            config_path=config_path,
+            installation_id=installation_id,
+        )
+
+    async def _unload_live_equipment(self, kind: str, package_id: str) -> None:
+        """Unload a catalog package from live session adapters before delete.
+
+        Missing adapter is a no-op (nothing loaded). Unload errors propagate
+        so uninstall does not delete the package.
+        """
+        adapter = getattr(self, "_adapter", None)
+        unload = getattr(adapter, "unload_equipment_if_loaded", None)
+        if unload is None:
+            return
+        await unload(kind, package_id)
+
+    async def compress_context(
+            self,
+            session_id: str,
+            session: Any = None,
+            *,
+            return_state: bool = False,
+            processor_types: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """主动触发上下文压缩。
+
+        Args:
+            session_id: 会话ID
+            session: Session 对象（可选）
+            processor_types: 可选的上下文压缩处理器白名单
+
+        Returns:
+            包含压缩结果的字典:
+            - result: "busy" | "compressed" | "noop"
+            - stats: 压缩统计信息（仅当 result == "compressed" 时）
+        """
+        adapter = self._adapter
+        if adapter is None:
+            raise ValueError("Agent adapter not available")
+        return await adapter.compress_context(
+            session_id=session_id,
+            session=session,
+            return_state=return_state,
+            processor_types=processor_types,
+        )
+
+    async def get_context_usage(self, session_id: str) -> dict[str, Any]:
+        """获取当前上下文窗口占用统计。
+
+        - 上下文窗口总量与当前占用量
+        - 系统提示词、对话消息、工具定义各自的 token 消耗
+        - 上下文窗口占用百分比
+
+        Args:
+            session_id: 会话ID
+
+        Returns:
+            包含上下文使用情况统计的字典
+        """
+        adapter = self._adapter
+        if adapter is None:
+            raise ValueError("Agent adapter not available")
+        return await adapter.get_context_usage(session_id=session_id)
+
+    async def get_context_usage_event(
+        self,
+        session_id: str,
+        *,
+        request_id: str,
+    ) -> dict[str, Any] | None:
+        """Build a local usage event after an out-of-band context change."""
+        adapter = self._adapter
+        if adapter is None:
+            raise ValueError("Agent adapter not available")
+        build_event = getattr(adapter, "get_context_usage_event", None)
+        if not callable(build_event):
+            return None
+        return await build_event(session_id=session_id, request_id=request_id)
+
+    async def generate_recap(
+        self,
+        session_id: str,
+        current_mode: str | None = None,
+    ) -> dict[str, Any]:
+        """生成会话快速回顾（read-only，不修改对话历史）。
+
+        取最近30条消息 → fast model → 1-2句摘要。
+
+        Args:
+            session_id: 会话ID
+            current_mode: 触发 recap 时的 canonical runtime mode。
+
+        Returns:
+            包含 recap 结果的字典:
+            - status: "ok" | "no_turn" | "aborted" | "failed"
+            - summary: 摘要文本（仅当 status == "ok" 时）
+            - error: 错误信息（仅当 status == "failed" 时）
+        """
+        adapter = self._adapter
+        if adapter is None:
+            raise ValueError("Agent adapter not available")
+        return await adapter.generate_recap(
+            session_id=session_id,
+            current_mode=current_mode,
+        )
+
+    async def compact_partial(
+        self,
+        session_id: str,
+        turn_index: int,
+        direction: str = "from",
+    ) -> dict[str, Any]:
+        """部分对话压缩 — 对指定 turn 之前或之后的消息进行 LLM 摘要。
+
+        Args:
+            session_id: 会话ID
+            turn_index: 基准 turn 号
+            direction: "from" (摘要 turn 及之后) 或 "up_to" (摘要 turn 之前)
+
+        Returns:
+            包含压缩结果的字典:
+            - status: "ok" | "no_turn" | "failed"
+            - summary: 摘要文本（仅当 status == "ok" 时）
+            - summarized_count: 被摘要的消息数
+            - error: 错误信息（仅当 status == "failed" 时）
+        """
+        adapter = self._adapter
+        if adapter is None:
+            raise ValueError("Agent adapter not available")
+        return await adapter.compact_partial(
+            session_id=session_id,
+            turn_index=turn_index,
+            direction=direction,
+        )
+
+    async def generate_btw_answer(self, session_id: str, question: str) -> dict[str, Any]:
+        """回答 /btw 侧问题：独立、无工具、单轮 LLM 查询。
+
+        将最近对话上下文 + 用户问题发送给模型，模型仅基于已有上下文回答，
+        不使用工具、不修改对话历史。
+
+        Args:
+            session_id: 会话ID
+            question: 用户侧问题
+
+        Returns:
+            包含 btw 结果的字典:
+            - status: "ok" | "no_context" | "failed"
+            - answer: 回答文本（仅当 status == "ok" 时）
+            - error: 错误信息（仅当 status == "failed" 时）
+        """
+        adapter = self._adapter
+        if adapter is None:
+            raise ValueError("Agent adapter not available")
+        return await adapter.generate_btw_answer(session_id=session_id, question=question)
+
+    # ---------- 资源清理 ----------
+
+    async def cancel_session_tasks(self, session_id: str) -> None:
+        """Cancel and join request tasks without treating idle caches as work."""
+        cancel = getattr(self._adapter, "cancel_session_tasks", None)
+        if callable(cancel):
+            await cancel(session_id)
+
+    async def cleanup_session_runtime(self, session_id: str) -> bool:
+        """Release in-memory runtime owned by one session while keeping persisted history."""
+        processor_cleaned = await self._session_manager.close_session(session_id)
+        adapter = self._adapter
+        if adapter is None:
+            return processor_cleaned
+        cleanup_fn = getattr(adapter, "cleanup_session_adapter", None)
+        if not callable(cleanup_fn):
+            return processor_cleaned
+        adapter_cleaned = bool(await cleanup_fn(session_id))
+        return processor_cleaned or adapter_cleaned
+
+    def has_session_runtime(self, session_id: str | None = None) -> bool:
+        """Return whether this facade still owns session-scoped runtime."""
+        if self._session_manager.has_session_runtime(session_id):
+            return True
+        adapter = self._adapter
+        if adapter is None:
+            return False
+        has_runtime = getattr(adapter, "has_session_runtime", None)
+        if not callable(has_runtime):
+            return True
+        if session_id is None:
+            return bool(has_runtime())
+        return bool(has_runtime(session_id))
+
+    def has_active_goal(self, session_id: str) -> bool:
+        """Inspect existing Goal work without creating or attaching a session."""
+        checker = getattr(self._adapter, "has_active_goal", None)
+        return bool(callable(checker) and checker(session_id))
+
+    def has_auto_permission_session(self, session_id: str | None) -> bool:
+        adapter = self._adapter
+        checker = getattr(adapter, "has_auto_permission_session", None)
+        return bool(callable(checker) and checker(session_id))
+
+    def validate_auto_permission_workspace_request(self, request: AgentRequest) -> None:
+        adapter = self._adapter
+        validator = getattr(
+            adapter, "validate_auto_permission_workspace_request", None
+        )
+        if callable(validator):
+            validator(request)
+
+    async def cancel_inflight_work(
+        self,
+        log_prefix: str = "[gateway disconnect] ",
+        *,
+        exclude_session_ids: set[str] | None = None,
+    ) -> None:
+        """Gateway 与 AgentServer 的 WebSocket 断开时调用：取消 session 流式任务并中止 adapter 内层循环。"""
+        protected = set(exclude_session_ids or ())
+        await self._session_manager.cancel_all_session_tasks(
+            log_prefix,
+            exclude_session_ids=protected,
+        )
+        adapter = self._adapter
+        if adapter is None:
+            return
+        abort_fn = getattr(adapter, "abort_on_gateway_disconnect", None)
+        if not callable(abort_fn):
+            return
+        try:
+            await abort_fn(exclude_session_ids=protected)
+        except Exception:
+            logger.exception("[JiuWenSwarm] adapter.abort_on_gateway_disconnect failed")
+
+    async def cleanup(self) -> None:
+        """清理资源，准备销毁实例.
+
+        每次 initialize 重建 agent 时调用。
+        不清理记忆数据（记忆数据保留在文件系统中）。
+        """
+        logger.info("[JiuWenSwarm] cleanup: 清理资源")
+        await self._session_manager.close_all_sessions()
+
+        if self._adapter is not None:
+            try:
+                if hasattr(self._adapter, "cleanup"):
+                    await self._adapter.cleanup()
+            except Exception as e:
+                logger.warning("[JiuWenSwarm] Adapter cleanup failed: %s", e)
+            self._adapter = None
+
+        logger.info("[JiuWenSwarm] cleanup: 完成")

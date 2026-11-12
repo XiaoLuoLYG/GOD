@@ -44,6 +44,8 @@ Windows PowerShell:
 
 `start` is the normal one-command path. It is idempotent, so running it again reuses services that are already up.
 
+If you are updating a running JiuwenClaw-based installation, run `stop` before updating your checkout. The first launch on JiuwenSwarm reuses your existing named runtime workspace and copies its agent data into the new layout.
+
 On first run, GOD will:
 
 1. Create `.env` from `.env.example`.

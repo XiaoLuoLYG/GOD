@@ -1,0 +1,2719 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
+
+"""Serve built frontend static files with optional reverse proxy.
+
+Supports ``--dotenv <path>`` for multi-instance isolation.
+"""
+
+from __future__ import annotations
+
+import argparse
+import errno
+import hmac
+import http.client
+import json
+import logging
+import mimetypes
+import os
+import re
+import select
+import signal
+import socket
+import ssl
+import sys
+import threading
+import time
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Mapping
+from urllib.parse import ParseResult, parse_qs, quote, unquote, urlencode, urlparse
+
+# --- Early --dotenv parsing (before jiuwenswarm imports) ---
+from jiuwenswarm.dotenv_early import parse_dotenv_early
+parse_dotenv_early("jiuwenswarm-web")
+
+# AgentServer HTTP bridge 基址解析与上传执行统一收口在 common/client 公共模块，
+# 供 Web 静态服务 / IM 附件落盘钩子 / Web media.persist 大图分流共用（避免各处
+# 重复推导）。此处保留私有别名兼容既有调用点，并 re-export 扩展点。
+from jiuwenswarm.common.client.agent_http_bridge import (
+    resolve_agent_http_base,
+    resolve_agent_http_base_for_token,
+    resolve_agent_upload_base,
+    set_agent_http_base_resolver,  # noqa: F401  — re-exported 扩展点
+)
+
+_resolve_agent_http_base = resolve_agent_http_base
+_resolve_agent_upload_base = resolve_agent_upload_base
+
+from jiuwenswarm.common.projectless_workspace import get_projectless_tasks_dir
+
+if TYPE_CHECKING:
+    from jiuwenswarm.channels.web.share_image_export import (
+        ShareImageExportManager,
+        ShareImageRenderAuth,
+    )
+
+_share_image_export_manager: ShareImageExportManager | None = None
+_share_image_export_manager_lock = threading.Lock()
+
+
+class _BadRequestError(ValueError):
+    """Client-supplied input the web handler cannot process.
+
+    Raised for values that must be rejected with ``400`` instead of letting the
+    exception escape the request handler (which drops the connection without a
+    response and logs a traceback for every malformed request).
+    """
+
+
+def _get_share_image_export_manager() -> ShareImageExportManager:
+    """Create the share-image job registry on first use to keep startup lazy."""
+    global _share_image_export_manager
+    if _share_image_export_manager is None:
+        with _share_image_export_manager_lock:
+            if _share_image_export_manager is None:
+                from jiuwenswarm.channels.web.share_image_export import (
+                    ShareImageExportManager,
+                )
+
+                _share_image_export_manager = ShareImageExportManager()
+    return _share_image_export_manager
+
+
+def _get_user_workspace_dir() -> Path:
+    """Resolve the Web process workspace without importing the agent runtime."""
+    configured = os.getenv("JIUWENSWARM_DATA_DIR", "").strip()
+    if configured:
+        return Path(configured)
+    user_home = os.getenv("JIUWENSWARM_HOME", "").strip()
+    return (Path(user_home) if user_home else Path.home()) / ".jiuwenswarm"
+
+
+def _get_agent_root_dir() -> Path:
+    return _get_user_workspace_dir() / "agent"
+
+
+def _get_agent_sessions_dir() -> Path:
+    return _get_agent_root_dir() / "sessions"
+
+
+def _get_logs_dir() -> Path:
+    return _get_agent_root_dir() / ".logs"
+
+
+def _get_ssl_verify() -> bool:
+    """Load TLS policy only when a proxied HTTPS request needs it."""
+    from jiuwenswarm.agents.harness.common.tools.ssl_config import get_ssl_verify
+
+    return get_ssl_verify()
+
+
+def _get_insecure_ssl_context() -> ssl.SSLContext:
+    from jiuwenswarm.agents.harness.common.tools.ssl_config import (
+        get_insecure_ssl_context,
+    )
+
+    return get_insecure_ssl_context()
+
+
+def _format_ws_diagnostics(
+    *parts: Mapping[str, Any] | None,
+    **fields: Any,
+) -> str:
+    from jiuwenswarm.common.ws_diagnostics import format_ws_diagnostics
+
+    return format_ws_diagnostics(*parts, **fields)
+
+
+def _describe_ws_exception(exc: BaseException) -> dict[str, Any]:
+    from jiuwenswarm.common.ws_diagnostics import describe_ws_exception
+
+    return describe_ws_exception(exc)
+
+
+def _parse_single_byte_range(
+    range_header: str,
+    file_size: int,
+) -> tuple[int, int] | None:
+    """Parse one HTTP byte range for the legacy local-download fallback.
+
+    The AgentServer owns the same helper for its HTTP endpoint.  The Web static
+    server still needs it when a single-user AgentServer is temporarily down
+    and the verified shared-directory fallback serves the file itself.
+    """
+    if file_size == 0 or not range_header.startswith("bytes=") or "," in range_header:
+        return None
+    range_value = range_header[6:]
+    if "-" not in range_value:
+        return None
+    start_text, end_text = range_value.split("-", 1)
+    if not start_text:
+        if not end_text.isascii() or not end_text.isdecimal():
+            return None
+        suffix_length = int(end_text)
+        if suffix_length <= 0:
+            return None
+        return max(0, file_size - suffix_length), file_size - 1
+    if not start_text.isascii() or not start_text.isdecimal():
+        return None
+    if end_text and (not end_text.isascii() or not end_text.isdecimal()):
+        return None
+    start = int(start_text)
+    end = int(end_text) if end_text else file_size - 1
+    if start >= file_size or end < start:
+        return None
+    return start, min(end, file_size - 1)
+
+
+def _get_agent_teams_root(project_root: Path) -> Path:
+    """Return the team state root without importing the agent runtime.
+
+    ``configure_agent_teams_home(project_root)`` in AgentServer resolves this
+    exact directory.  The static server only performs bounded file operations
+    under it, so importing OpenJiuwen solely to calculate the same path adds
+    startup work without providing any Web-side behaviour.
+    """
+    return (project_root / ".agent_teams").resolve()
+
+
+def _get_package_dir() -> Path:
+    """Get the jiuwenswarm/channels/web package directory."""
+    # app_web.py is at jiuwenswarm/channels/web/app_web.py
+    # So parent is jiuwenswarm/channels/web/
+    return Path(__file__).resolve().parent
+
+
+def _default_dist_dir() -> Path:
+    """Return default dist directory for frontend static files.
+
+    The version-controlled frontend build ships alongside the code in all
+    three run modes, so the package-internal dist is the only correct
+    source of truth:
+    - source dev: <repo>/jiuwenswarm/channels/web/frontend/dist
+      (overwritten by ``npm run build``, loaded live)
+    - whl install: <site-packages>/jiuwenswarm/channels/web/frontend/dist
+    - frozen exe: <_MEIPASS>/jiuwenswarm/channels/web/frontend/dist
+
+    A user-data dist (e.g. ``~/.jiuwenswarm/channels/web/frontend/dist``)
+    is never code, is not maintained by any build/upgrade flow, and once
+    stale silently overrides the shipped version — causing the
+    "backend upgraded but frontend still old" mismatch. Do not load it.
+    """
+    package_dir = _get_package_dir()
+    dist_dir = package_dir / "frontend" / "dist"
+    return dist_dir
+
+
+def _normalize_lang_suffix(name: str) -> str:
+    """将 xxxx_zh.MD / xxxx_en.MD 规范为 xxxx.MD（去除 _zh/_en 后缀）。"""
+    stem, suffix = name.rpartition(".")[0], name.rpartition(".")[2]
+    suffix_lower = suffix.lower()
+    if suffix_lower in ("md", "mdx"):
+        stem_lower = stem.lower()
+        if stem_lower.endswith("_zh"):
+            stem = stem[:-3]
+        elif stem_lower.endswith("_en"):
+            stem = stem[:-3]
+    return f"{stem}.{suffix}" if stem else name
+
+
+def _generate_agent_data(project_root: Path) -> None:
+    """Generate agent/workspace/agent-data.json from agent tree."""
+    agent_root = (project_root / "agent").resolve()
+    workspace_root = (agent_root / "workspace").resolve()
+    output_path = (workspace_root / "agent-data.json").resolve()
+    root_folder_key = "__root__"
+
+    if not agent_root.exists():
+        raise FileNotFoundError("agent directory not found")
+    if not agent_root.is_dir():
+        raise NotADirectoryError("agent is not a directory")
+
+    folder_data: dict[str, list[dict[str, str | bool]]] = {}
+    seen_paths: dict[str, set[str]] = {}  # folder_key -> normalized paths，用于去重
+    for entry in sorted(workspace_root.rglob("*")):
+        if not entry.is_file() or entry.name.startswith("."):
+            continue
+        # Skip files in hidden directories (e.g., .agent_history)
+        if any(part.startswith(".") for part in entry.relative_to(workspace_root).parts):
+            continue
+        relative_folder_path = entry.parent.relative_to(agent_root).as_posix()
+        folder_key = root_folder_key if relative_folder_path == "." else relative_folder_path
+
+        display_name = _normalize_lang_suffix(entry.name)
+        display_path = (
+            f"agent/{relative_folder_path}/{display_name}".replace("/.", "/").replace("//", "/")
+            if relative_folder_path != "."
+            else f"agent/{display_name}"
+        )
+        seen = seen_paths.setdefault(folder_key, set())
+        if display_path in seen:
+            continue  # 同一文件夹内 _zh 与 _en 并存时只保留先出现的
+        seen.add(display_path)
+
+        folder_data.setdefault(folder_key, []).append(
+            {
+                "name": display_name,
+                "path": display_path,
+                "isMarkdown": entry.suffix.lower() in {".md", ".mdx"},
+            }
+        )
+
+    sorted_folder_data = {
+        folder_key: sorted(files, key=lambda item: item["path"])
+        for folder_key, files in sorted(folder_data.items(), key=lambda item: item[0])
+    }
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(sorted_folder_data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _uses_agentos_routing() -> bool:
+    """Whether this static service is paired with an AgentOS Gateway.
+
+    The static server owns no per-user route context.  Its historical local
+    file APIs are therefore valid only for the shared-directory deployment;
+    in AgentOS they must never silently read the Gateway deployment directory.
+    """
+    try:
+        from jiuwenswarm.common.config import get_config_raw
+
+        gateway = (get_config_raw() or {}).get("gateway") or {}
+        client = gateway.get("agent_client") or {}
+        return str(client.get("type") or "").strip().lower() == "agentos_router"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+class _SpaStaticHandler(SimpleHTTPRequestHandler):
+    """Static file handler with SPA fallback to index.html."""
+
+    extensions_map = {
+        **SimpleHTTPRequestHandler.extensions_map,
+        ".css": "text/css; charset=utf-8",
+        ".js": "text/javascript; charset=utf-8",
+        ".mjs": "text/javascript; charset=utf-8",
+        ".json": "application/json; charset=utf-8",
+        ".svg": "image/svg+xml",
+        ".wasm": "application/wasm",
+    }
+
+    api_target = ""
+    ws_target = ""
+    ws_disable_compress = False
+    # (projects.json mtime, resolved project_dir list)
+    _registered_project_dir_cache: tuple[float, list[Path]] | None = None
+
+    # --- 桌面对话页面限制: 启动 token + HttpOnly Cookie ---
+    # 仅保护 SPA 文档入口; 静态资源/API/WS 保持原有访问规则。
+    # 桌面窗口首次导航经 ?dt=<token> 换取 HttpOnly Cookie。
+    # 源码 web 模式不设置该值, 行为与之前完全一致。
+    desktop_token = ""
+    # Cookie 名按端口区分: 同 host 多桌面实例(端口偏移)互不覆盖。
+    desktop_cookie_name = "__wsdt"
+    _DESKTOP_TOKEN_QUERY_PARAM = "dt"
+
+    project_root = _get_user_workspace_dir()
+    workspace_root = _get_agent_root_dir()
+    agent_teams_root = _get_agent_teams_root(project_root)
+    logs_root = _get_logs_dir()
+    auto_harness_root = project_root / "auto-harness"
+    # Projectless tasks (no bound project_dir) write their generated media under
+    # <Documents>/JiuwenSwarm/<date>/chat-<n>/outputs/, outside workspace_root —
+    # without this, any @-referenced or inline-rendered media from a projectless
+    # task 403s here even though the file exists.
+    projectless_tasks_root = get_projectless_tasks_dir()
+    logger = logging.getLogger(__name__)
+
+    _HOP_BY_HOP_HEADERS = {
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "transfer-encoding",
+        "upgrade",
+    }
+    _UNTRUSTED_FORWARDED_HOST_HEADERS = {
+        "forwarded",
+        "x-forwarded-host",
+        "x-forwarded-server",
+        "x-jiuwenswarm-original-host",
+        "x-original-host",
+    }
+    _WS_LOG_MAX_CHARS = 2000
+    _HTTP_PROXY_TIMEOUT = 30
+    _SHARE_IMAGE_UPLOAD_IDLE_TIMEOUT = 60 * 60
+    _WS_CONNECT_TIMEOUT = 10
+    _WS_HANDSHAKE_TIMEOUT = 10
+    _WS_SELECT_TIMEOUT = 60
+    _WS_RECV_BUFFER = 65536
+    _WS_HANDSHAKE_MAX_SIZE = 65536
+    _WS_HANDSHAKE_RECV_SIZE = 4096
+    _DEFAULT_HTTPS_PORT = 443
+    _DEFAULT_HTTP_PORT = 80
+
+    def guess_type(self, path: str) -> str:
+        suffix = Path(path).suffix.lower()
+        if suffix in self.extensions_map:
+            return self.extensions_map[suffix]
+
+        guessed, _ = mimetypes.guess_type(path)
+        if guessed:
+            return guessed
+
+        return "application/octet-stream"
+
+    class _WsTextFrameParser:
+        """Parse websocket text frames from a byte stream."""
+
+        def __init__(self) -> None:
+            self._buffer = bytearray()
+            self._fragmented_text = bytearray()
+            self._awaiting_continuation = False
+
+        def feed(self, data: bytes) -> list[str]:
+            self._buffer.extend(data)
+            messages: list[str] = []
+            while True:
+                if len(self._buffer) < 2:
+                    break
+
+                first = self._buffer[0]
+                second = self._buffer[1]
+                fin = bool(first & 0x80)
+                rsv = first & 0x70
+                opcode = first & 0x0F
+                masked = bool(second & 0x80)
+                payload_len = second & 0x7F
+                idx = 2
+
+                if payload_len == 126:
+                    if len(self._buffer) < idx + 2:
+                        break
+                    payload_len = int.from_bytes(self._buffer[idx:idx + 2], "big")
+                    idx += 2
+                elif payload_len == 127:
+                    if len(self._buffer) < idx + 8:
+                        break
+                    payload_len = int.from_bytes(self._buffer[idx:idx + 8], "big")
+                    idx += 8
+
+                mask_key = b""
+                if masked:
+                    if len(self._buffer) < idx + 4:
+                        break
+                    mask_key = bytes(self._buffer[idx:idx + 4])
+                    idx += 4
+
+                frame_end = idx + payload_len
+                if len(self._buffer) < frame_end:
+                    break
+
+                payload = bytes(self._buffer[idx:frame_end])
+                del self._buffer[:frame_end]
+
+                if masked:
+                    payload = bytes(
+                        b ^ mask_key[i % 4]
+                        for i, b in enumerate(payload)
+                    )
+
+                if rsv:
+                    continue
+
+                if opcode in (0x8, 0x9, 0xA):
+                    continue
+
+                if opcode == 0x1:
+                    if fin:
+                        messages.append(payload.decode("utf-8", errors="replace"))
+                    else:
+                        self._fragmented_text = bytearray(payload)
+                        self._awaiting_continuation = True
+                    continue
+
+                if opcode == 0x0 and self._awaiting_continuation:
+                    self._fragmented_text.extend(payload)
+                    if fin:
+                        messages.append(
+                            bytes(self._fragmented_text).decode("utf-8", errors="replace")
+                        )
+                        self._fragmented_text.clear()
+                        self._awaiting_continuation = False
+                    continue
+
+                if opcode == 0x2:
+                    self._fragmented_text.clear()
+                    self._awaiting_continuation = False
+                    continue
+
+                self._fragmented_text.clear()
+                self._awaiting_continuation = False
+
+            return messages
+
+    @classmethod
+    def _truncate_for_ws_log(cls, text: str) -> str:
+        if len(text) <= cls._WS_LOG_MAX_CHARS:
+            return text
+        return f"{text[:cls._WS_LOG_MAX_CHARS]}...<truncated:{len(text) - cls._WS_LOG_MAX_CHARS}>"
+
+    @classmethod
+    def _format_ws_part(cls, value: Any) -> str:
+        if isinstance(value, str):
+            return cls._truncate_for_ws_log(value)
+        try:
+            text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        except TypeError:
+            text = str(value)
+        return cls._truncate_for_ws_log(text)
+
+    def _log_ws_business_message(self, direction: str, raw_message: str) -> None:
+        try:
+            payload = json.loads(raw_message)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(payload, dict):
+            return
+
+        msg_type = payload.get("type")
+        if msg_type == "req":
+            self.logger.info(
+                "[ws][%s][req] id=%s method=%s params=%s",
+                direction,
+                self._format_ws_part(payload.get("id")),
+                self._format_ws_part(payload.get("method")),
+                self._format_ws_part(payload.get("params")),
+            )
+            return
+        if msg_type == "res":
+            self.logger.info(
+                "[ws][%s][res] id=%s ok=%s payload=%s error=%s code=%s",
+                direction,
+                self._format_ws_part(payload.get("id")),
+                self._format_ws_part(payload.get("ok")),
+                self._format_ws_part(payload.get("payload")),
+                self._format_ws_part(payload.get("error")),
+                self._format_ws_part(payload.get("code")),
+            )
+            return
+        if msg_type == "event":
+            self.logger.info(
+                "[ws][%s][event] event=%s seq=%s stream_id=%s payload=%s",
+                direction,
+                self._format_ws_part(payload.get("event")),
+                self._format_ws_part(payload.get("seq")),
+                self._format_ws_part(payload.get("stream_id")),
+                self._format_ws_part(payload.get("payload")),
+            )
+
+    def _is_api_route(self) -> bool:
+        return urlparse(self.path).path.startswith("/api")
+
+    def _is_ws_route(self) -> bool:
+        return urlparse(self.path).path.startswith("/ws")
+
+    def _is_file_api_route(self) -> bool:
+        return urlparse(self.path).path.startswith("/file-api/")
+
+    def _is_share_api_route(self) -> bool:
+        return urlparse(self.path).path.startswith("/share-api/")
+
+    def _is_skill_sync_route(self) -> bool:
+        return urlparse(self.path).path.startswith("/skill-sync/")
+
+    def _is_websocket_upgrade(self) -> bool:
+        upgrade = self.headers.get("Upgrade", "")
+        connection = self.headers.get("Connection", "")
+        return "websocket" in upgrade.lower() and "upgrade" in connection.lower()
+
+    @staticmethod
+    def _is_malformed_raw_host(raw_host: str) -> bool:
+        """Return whether a raw Host header value is unusable before parsing."""
+        if not raw_host or len(raw_host) > 512:
+            return True
+        if not raw_host.isascii() or raw_host.endswith(":"):
+            return True
+        has_control_character = any(
+            character.isspace() or ord(character) < 32 or ord(character) == 127
+            for character in raw_host
+        )
+        if has_control_character:
+            return True
+        return any(
+            separator in raw_host
+            for separator in ("/", "\\", "?", "#", "@", ",")
+        )
+
+    @staticmethod
+    def _has_unexpected_host_parts(parsed_host: ParseResult) -> bool:
+        """Return whether a parsed Host authority carries non-authority parts."""
+        if parsed_host.username is not None or parsed_host.password is not None:
+            return True
+        return bool(
+            parsed_host.path
+            or parsed_host.params
+            or parsed_host.query
+            or parsed_host.fragment
+        )
+
+    def _clean_outer_host(self) -> str | None:
+        """Return one canonical browser-facing Host value for proxying."""
+        host_values = self.headers.get_all("Host") or []
+        if len(host_values) != 1:
+            return None
+        raw_host = str(host_values[0] or "").strip()
+        if self._is_malformed_raw_host(raw_host):
+            return None
+        try:
+            parsed_host = urlparse(f"//{raw_host}")
+            hostname = parsed_host.hostname
+            port = parsed_host.port
+        except ValueError:
+            return None
+        if hostname is None or self._has_unexpected_host_parts(parsed_host):
+            return None
+        normalized_hostname = hostname.lower().rstrip(".")
+        if (
+            not normalized_hostname
+            or not normalized_hostname.isascii()
+            or "%" in normalized_hostname
+        ):
+            return None
+        if ":" in normalized_hostname:
+            normalized_host = f"[{normalized_hostname}]"
+        else:
+            if re.fullmatch(r"[a-z0-9._-]+", normalized_hostname) is None:
+                return None
+            normalized_host = normalized_hostname
+        if port is not None:
+            normalized_host = f"{normalized_host}:{port}"
+        return normalized_host
+
+    def _write_proxy_error(self, status: int, error: str) -> None:
+        """Write a non-cacheable JSON proxy rejection."""
+        data = json.dumps(
+            {"error": error, "code": "BAD_PROXY_REQUEST"},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(data)
+
+    def _proxy_http(self) -> None:
+        outer_host = self._clean_outer_host()
+        if outer_host is None:
+            self._write_proxy_error(400, "invalid Host header")
+            return
+        parsed = urlparse(self.api_target)
+        if parsed.scheme == "https":
+            ssl_ctx = None if _get_ssl_verify() else _get_insecure_ssl_context()
+            conn: http.client.HTTPConnection = http.client.HTTPSConnection(
+                parsed.hostname,
+                parsed.port or self._DEFAULT_HTTPS_PORT,
+                timeout=self._HTTP_PROXY_TIMEOUT,
+                context=ssl_ctx,
+            )
+        else:
+            conn = http.client.HTTPConnection(
+                parsed.hostname,
+                parsed.port or self._DEFAULT_HTTP_PORT,
+                timeout=self._HTTP_PROXY_TIMEOUT,
+            )
+
+        try:
+            body = b""
+            if self.command not in ("GET", "HEAD"):
+                length = int(self.headers.get("Content-Length", "0") or "0")
+                body = self.rfile.read(length) if length > 0 else b""
+
+            forward_headers: dict[str, str] = {}
+            for key, value in self.headers.items():
+                normalized_key = key.lower()
+                if normalized_key in self._HOP_BY_HOP_HEADERS:
+                    continue
+                if normalized_key == "host":
+                    continue
+                if normalized_key in self._UNTRUSTED_FORWARDED_HOST_HEADERS:
+                    continue
+                forward_headers[key] = value
+            forward_headers["Host"] = outer_host
+
+            conn.request(self.command, self.path, body=body, headers=forward_headers)
+            resp = conn.getresponse()
+            resp_body = resp.read()
+
+            self.send_response(resp.status, resp.reason)
+            for key, value in resp.getheaders():
+                if key.lower() in self._HOP_BY_HOP_HEADERS:
+                    continue
+                self.send_header(key, value)
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(resp_body)
+        except Exception as exc:  # noqa: BLE001
+            self.log_error("proxy http error: %s", exc)
+            self._write_proxy_error(502, "proxy http error")
+        finally:
+            conn.close()
+
+    def _proxy_websocket_tunnel(self) -> None:
+        parsed = urlparse(self.ws_target)
+        if parsed.scheme not in ("ws", "wss", "http", "https"):
+            self.send_error(500, "ws proxy target must be ws/wss/http/https")
+            return
+
+        upstream_host = parsed.hostname or "127.0.0.1"
+        upstream_port = parsed.port or (
+            self._DEFAULT_HTTPS_PORT if parsed.scheme in ("wss", "https") else self._DEFAULT_HTTP_PORT
+        )
+
+        # Desktop 先开放静态 Web、后启动 Gateway。若浏览器首次 WS upgrade
+        # 恰好落在 Gateway 端口尚未监听的窗口，旧逻辑立即返回 502，随后只能
+        # 等前端的重连退避；这会在 WebChannel 已经可用后额外留下约一轮退避。
+        # 保持当前浏览器连接一小段时间，端口一旦就绪即继续握手，既不改变
+        # 正常已就绪路径，也避免把后端启动竞争暴露给前端。
+        upstream: socket.socket | None = None
+        connect_error: OSError | None = None
+        connect_deadline = time.monotonic() + min(float(self._WS_CONNECT_TIMEOUT), 8.0)
+        while upstream is None:
+            try:
+                upstream = socket.create_connection(
+                    (upstream_host, upstream_port),
+                    timeout=min(0.25, self._WS_CONNECT_TIMEOUT),
+                )
+            except OSError as exc:
+                connect_error = exc
+                if time.monotonic() >= connect_deadline:
+                    break
+                time.sleep(0.05)
+
+        if upstream is None:
+            self.log_error(
+                "proxy ws connect failed: %s",
+                _format_ws_diagnostics(
+                    {
+                        "client": self.client_address,
+                        "upstream_host": upstream_host,
+                        "upstream_port": upstream_port,
+                        "scheme": parsed.scheme,
+                    },
+                    _describe_ws_exception(
+                        connect_error or OSError("upstream connection did not complete")
+                    ),
+                ),
+            )
+            self.send_error(502, "proxy ws connect failed")
+            return
+
+        # The 0.25s timeout above only paces connect retries. Keeping it for the
+        # handshake made every reconnect fail with 502 whenever the gateway loop
+        # needed more than 250ms to answer the Upgrade.
+        upstream.settimeout(self._WS_HANDSHAKE_TIMEOUT)
+        try:
+            if parsed.scheme in ("wss", "https"):
+                ctx = ssl.create_default_context() if _get_ssl_verify() else _get_insecure_ssl_context()
+                upstream = ctx.wrap_socket(upstream, server_hostname=upstream_host)
+            request_lines = [f"{self.command} {self.path} HTTP/1.1"]
+            for key, value in self.headers.items():
+                # Optional debug mode: disable websocket compression so frames stay
+                # plain text and can be parsed for req/res/event logging.
+                if self.ws_disable_compress and key.lower() == "sec-websocket-extensions":
+                    continue
+                if key.lower() == "host":
+                    request_lines.append(f"Host: {upstream_host}:{upstream_port}")
+                else:
+                    request_lines.append(f"{key}: {value}")
+            if not any(line.lower().startswith("host:") for line in request_lines[1:]):
+                request_lines.append(f"Host: {upstream_host}:{upstream_port}")
+            raw_req = ("\r\n".join(request_lines) + "\r\n\r\n").encode("utf-8")
+            upstream.sendall(raw_req)
+
+            response_head = b""
+            while b"\r\n\r\n" not in response_head:
+                chunk = upstream.recv(self._WS_HANDSHAKE_RECV_SIZE)
+                if not chunk:
+                    break
+                response_head += chunk
+                if len(response_head) > self._WS_HANDSHAKE_MAX_SIZE:
+                    break
+            if not response_head:
+                self.log_error(
+                    "proxy ws handshake failed: %s",
+                    _format_ws_diagnostics(
+                        {
+                            "client": self.client_address,
+                            "upstream_host": upstream_host,
+                            "upstream_port": upstream_port,
+                            "reason": "empty response",
+                        }
+                    ),
+                )
+                self.send_error(502, "proxy ws handshake failed: empty response")
+                return
+
+            self.connection.sendall(response_head)
+
+            if b" 101 " not in response_head.split(b"\r\n", 1)[0]:
+                status_line = response_head.split(b"\r\n", 1)[0].decode("latin-1", errors="replace")
+                self.logger.info(
+                    "[ws][handshake] upstream returned non-101, tunnel closed: %s",
+                    _format_ws_diagnostics(
+                        {
+                            "client": self.client_address,
+                            "upstream_host": upstream_host,
+                            "upstream_port": upstream_port,
+                            "status": status_line,
+                        }
+                    ),
+                )
+                return
+
+            self.logger.info(
+                "[ws][handshake] tunnel established %s <-> %s:%s",
+                self.client_address[0], upstream_host, upstream_port,
+            )
+            self.connection.setblocking(False)
+            upstream.setblocking(False)
+            sockets = [self.connection, upstream]
+            client_parser = self._WsTextFrameParser()
+            server_parser = self._WsTextFrameParser()
+            while True:
+                readable, _, errored = select.select(sockets, [], sockets, self._WS_SELECT_TIMEOUT)
+                if errored:
+                    self.log_error(
+                        "proxy ws socket error, closing tunnel: %s",
+                        _format_ws_diagnostics(
+                            {
+                                "client": self.client_address,
+                                "upstream_host": upstream_host,
+                                "upstream_port": upstream_port,
+                                "errored": [
+                                    "client" if sock is self.connection else "upstream"
+                                    for sock in errored
+                                ],
+                            }
+                        ),
+                    )
+                    break
+                if not readable:
+                    continue
+                for sock in readable:
+                    direction = "frontend->backend" if sock is self.connection else "backend->frontend"
+                    try:
+                        data = sock.recv(self._WS_RECV_BUFFER)
+                    except OSError as recv_exc:
+                        self.log_error(
+                            "proxy ws recv failed, closing tunnel: %s",
+                            _format_ws_diagnostics(
+                                {
+                                    "client": self.client_address,
+                                    "upstream_host": upstream_host,
+                                    "upstream_port": upstream_port,
+                                    "direction": direction,
+                                },
+                                _describe_ws_exception(recv_exc),
+                            ),
+                        )
+                        data = b""
+                    if not data:
+                        self.logger.info(
+                            "[ws][tunnel] peer closed: %s",
+                            _format_ws_diagnostics(
+                                {
+                                    "client": self.client_address,
+                                    "upstream_host": upstream_host,
+                                    "upstream_port": upstream_port,
+                                    "direction": direction,
+                                }
+                            ),
+                        )
+                        return
+                    target = upstream if sock is self.connection else self.connection
+                    if sock is self.connection:
+                        for text_message in client_parser.feed(data):
+                            self._log_ws_business_message("frontend->backend", text_message)
+                    else:
+                        for text_message in server_parser.feed(data):
+                            self._log_ws_business_message("backend->frontend", text_message)
+                    # 非阻塞 socket 写入：循环增量 send，缓冲区满时等待可写后继续，
+                    # 跨平台覆盖 Windows WSAEWOULDBLOCK (10035) 与 POSIX EAGAIN/EWOULDBLOCK。
+                    pending = data
+                    while pending:
+                        try:
+                            sent = target.send(pending)
+                        except OSError as e:
+                            would_block = (
+                                getattr(e, "winerror", None) == 10035
+                                or e.errno in (errno.EAGAIN, errno.EWOULDBLOCK)
+                            )
+                            if not would_block:
+                                raise
+                            _, writable, _ = select.select([], [target], [], 1.0)
+                            if not writable:
+                                # 长时间不可写，对端疑似卡死，关闭隧道避免空转
+                                self.log_error(
+                                    "proxy ws write stalled, closing tunnel: %s",
+                                    _format_ws_diagnostics(
+                                        {
+                                            "client": self.client_address,
+                                            "upstream_host": upstream_host,
+                                            "upstream_port": upstream_port,
+                                            "direction": direction,
+                                            "pending_bytes": len(pending),
+                                        }
+                                    ),
+                                )
+                                return
+                            continue
+                        pending = pending[sent:]
+        except Exception as exc:  # noqa: BLE001
+            self.log_error(
+                "proxy ws error: %s",
+                _format_ws_diagnostics(
+                    {
+                        "client": self.client_address,
+                        "upstream_host": upstream_host,
+                        "upstream_port": upstream_port,
+                    },
+                    _describe_ws_exception(exc),
+                ),
+            )
+            try:
+                self.send_error(502, "proxy ws error")
+            except Exception:  # noqa: BLE001
+                pass
+        finally:
+            try:
+                upstream.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _send_desktop_forbidden(self) -> None:
+        """桌面锁定: 拒绝未认证请求的 403 提示页。"""
+        body = (
+            "<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+            "<title>禁止访问</title></head>"
+            "<body style=\"font-family:system-ui,sans-serif;background:#0f172a;"
+            "color:#e2e8f0;display:flex;align-items:center;justify-content:center;"
+            "height:100vh;margin:0\">"
+            "<div style=\"text-align:center\">"
+            "<h1 style=\"font-size:22px;font-weight:600\">禁止访问</h1>"
+            "<p style=\"color:#94a3b8;margin-top:12px\">"
+            "此服务仅限桌面端访问，请使用桌面应用打开。</p>"
+            "</div></body></html>"
+        ).encode("utf-8")
+        self.send_response(403)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def _check_desktop_access(self) -> bool:
+        """桌面锁定校验。返回 True 表示请求已被响应(403/302), 调用方应终止处理。
+
+        - 源码 web 模式 (desktop_token 为空) 恒返回 False, 不做任何校验;
+        - 首次导航携带匹配的 ?dt=<token>: 下发 HttpOnly Cookie 并 302 到
+          去掉 dt 的干净 URL (token 不留在地址栏/前端路由里);
+        - 仅在返回 SPA 文档时调用; 无有效 Cookie 的页面访问返回 403。
+        """
+        if not self.desktop_token:
+            return False
+
+        parsed = urlparse(self.path)
+        query = parse_qs(parsed.query)
+        values = query.get(self._DESKTOP_TOKEN_QUERY_PARAM, [])
+        if values:
+            provided = str(values[0])
+            # bytes 比较: compare_digest 的 str 形式要求 ASCII-only,
+            # 恶意非 ASCII 输入会抛 TypeError 导致连接崩溃。
+            if provided and hmac.compare_digest(
+                provided.encode("utf-8"), self.desktop_token.encode("utf-8")
+            ):
+                remaining = {
+                    key: val
+                    for key, val in query.items()
+                    if key != self._DESKTOP_TOKEN_QUERY_PARAM
+                }
+                location = parsed.path or "/"
+                if remaining:
+                    location += "?" + urlencode(remaining, doseq=True)
+                self.send_response(302)
+                self.send_header("Location", location)
+                self.send_header("Cache-Control", "no-store")
+                self.send_header(
+                    "Set-Cookie",
+                    f"{self.desktop_cookie_name}="
+                    f"{quote(self.desktop_token, safe='')}; "
+                    "Path=/; HttpOnly; SameSite=Lax",
+                )
+                self.end_headers()
+            else:
+                self._send_desktop_forbidden()
+            return True
+
+        cookie_token = self._get_auth_cookie(self.desktop_cookie_name)
+        if cookie_token and hmac.compare_digest(
+            cookie_token.encode("utf-8"), self.desktop_token.encode("utf-8")
+        ):
+            return False
+
+        self._send_desktop_forbidden()
+        return True
+
+    def _dispatch_proxy(self) -> bool:
+        if self._is_api_route():
+            self._proxy_http()
+            return True
+        if self._is_ws_route():
+            if self._is_websocket_upgrade():
+                self._proxy_websocket_tunnel()
+            else:
+                self.send_error(400, "expected websocket upgrade")
+            return True
+        return False
+
+    @staticmethod
+    def _is_markdown(path_obj: Path) -> bool:
+        ext = path_obj.suffix.lower()
+        return ext in {".md", ".mdx"}
+
+    @classmethod
+    def _registered_project_dirs(cls) -> list[Path]:
+        """Directories the user chose as projects, so canvas previews can read them."""
+        projects_file = Path(cls.workspace_root) / "projects.json"
+        try:
+            mtime = projects_file.stat().st_mtime
+        except OSError:
+            return []
+        cache = cls._registered_project_dir_cache
+        if cache is not None and cache[0] == mtime:
+            return cache[1]
+        try:
+            payload = json.loads(projects_file.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return []
+        projects = payload.get("projects") if isinstance(payload, dict) else None
+        dirs: list[Path] = []
+        if isinstance(projects, list):
+            for item in projects:
+                if not isinstance(item, dict):
+                    continue
+                raw = str(item.get("project_dir") or "").strip()
+                if not raw:
+                    continue
+                try:
+                    resolved = Path(raw).expanduser().resolve()
+                except (OSError, RuntimeError):
+                    continue
+                if resolved.is_absolute():
+                    dirs.append(resolved)
+        cls._registered_project_dir_cache = (mtime, dirs)
+        return dirs
+
+    @staticmethod
+    def _is_path_under(root: Path, target: Path) -> bool:
+        try:
+            return os.path.commonpath([str(root), str(target)]) == str(root)
+        except ValueError:
+            return False
+
+    @classmethod
+    def _is_path_under_allowed_root(cls, target: Path) -> bool:
+        target_resolved = target.resolve()
+        return (
+            cls._is_path_under(Path(cls.workspace_root), target_resolved)
+            or cls._is_path_under(Path(cls.agent_teams_root), target_resolved)
+            or cls._is_path_under(Path(cls.logs_root), target_resolved)
+            or cls._is_path_under(Path(cls.auto_harness_root), target_resolved)
+            or cls._is_path_under(Path(cls.projectless_tasks_root), target_resolved)
+            or any(cls._is_path_under(root, target_resolved) for root in cls._registered_project_dirs())
+        )
+
+    def _resolve_project_path(self, rel_path: str) -> Path:
+        """Resolve ``rel_path`` under ``project_root``.
+
+        NUL is rejected explicitly instead of relying on ``Path.resolve()``
+        raising: only POSIX raises ``ValueError`` for an embedded NUL byte,
+        while Windows behaves differently across Python versions (3.11
+        truncates silently at the NUL, 3.13 returns the path unchanged).  Other
+        malformed inputs still surface as ``OSError`` / ``ValueError`` from
+        ``resolve()``.  Both are mapped to ``_BadRequestError`` so the request
+        is answered with ``400`` instead of crashing the handler thread.
+        """
+        if "\x00" in rel_path:
+            raise _BadRequestError("invalid_path")
+        try:
+            return (self.project_root / rel_path).resolve()
+        except (OSError, ValueError) as exc:
+            raise _BadRequestError("invalid_path") from exc
+
+    def _write_json(self, status: int, payload: dict | None) -> None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(data)
+
+    @staticmethod
+    def _parse_query(query: str) -> dict[str, str]:
+        parsed: dict[str, str] = {}
+        if not query:
+            return parsed
+        for pair in query.split("&"):
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+            else:
+                k, v = pair, ""
+            parsed[unquote(k)] = unquote(v)
+        return parsed
+
+    def _get_auth_cookie(self, name: str) -> str:
+        """从 Cookie 头读取指定名称的 HttpOnly cookie (桌面锁 __wsdt 等)。"""
+        raw = self.headers.get("Cookie", "")
+        if not raw:
+            return ""
+        for part in raw.split(";"):
+            part = part.strip()
+            if not part or "=" not in part:
+                continue
+            k, v = part.split("=", 1)
+            if k.strip() == name:
+                return unquote(v)
+        return ""
+
+    def _resolve_session_title(self, session_dir: Path, history: list[dict[str, Any]]) -> str:
+        metadata_path = session_dir / "metadata.json"
+        if metadata_path.exists():
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                title = metadata.get("title") if isinstance(metadata, dict) else None
+                if isinstance(title, str) and title.strip():
+                    return title.strip()
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+                pass
+        for record in history:
+            if record.get("role") == "user":
+                content = record.get("content")
+                if isinstance(content, str) and content.strip():
+                    return content.strip().replace("\n", " ")[:80]
+        return session_dir.name
+
+    def _build_share_snapshot(
+        self,
+        *,
+        session_id: str,
+    ) -> tuple[dict[str, Any], str]:
+        sessions_root = _get_agent_sessions_dir().resolve()
+        session_dir = (sessions_root / session_id).resolve()
+        try:
+            if os.path.commonpath([str(sessions_root), str(session_dir)]) != str(sessions_root):
+                raise FileNotFoundError("history_not_found")
+        except ValueError as exc:
+            raise FileNotFoundError("history_not_found") from exc
+
+        from jiuwenswarm.server.runtime.session.session_history import (
+            history_exists,
+            load_history_records,
+        )
+
+        if not session_dir.exists() or not history_exists(session_id):
+            raise FileNotFoundError("history_not_found")
+        try:
+            history_raw = load_history_records(session_id)
+        except Exception as exc:
+            raise ValueError("invalid_history_json") from exc
+        if not isinstance(history_raw, list):
+            raise ValueError("invalid_history_shape")
+
+        history = [item for item in history_raw if isinstance(item, dict)]
+        exported_at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        filename = f"jiuwenswarm-share-{timestamp}.png"
+        snapshot = {
+            "session_id": session_id,
+            "metadata": {
+                "title": self._resolve_session_title(session_dir, history),
+                "exported_at": exported_at,
+                "filename": filename,
+            },
+            "records": history_raw,
+        }
+        return snapshot, filename
+
+    def _handle_share_api_get(self, parsed) -> None:
+        if _uses_agentos_routing():
+            self._write_json(503, {"error": "agentserver_file_rpc_required"})
+            return
+        if parsed.path == "/share-api/jobs":
+            query = self._parse_query(parsed.query)
+            session_id = (query.get("session_id") or "").strip()
+            if not session_id:
+                self._write_json(400, {"error": "missing_session_id"})
+                return
+            status = _get_share_image_export_manager().get_active_status(session_id)
+            self._write_json(200, status)
+            return
+        job_match = re.fullmatch(
+            r"/share-api/jobs/([a-f0-9]{32})(?:/(snapshot|download))?",
+            parsed.path,
+        )
+        if job_match:
+            job_id, resource = job_match.groups()
+            if resource is None:
+                status = _get_share_image_export_manager().get_status(job_id)
+                if status is None:
+                    self._write_json(404, {"error": "job_not_found"})
+                    return
+                self._write_json(200, status)
+                return
+
+            if resource == "snapshot":
+                file_path = _get_share_image_export_manager().get_snapshot_path(job_id)
+                filename = "snapshot.json"
+                content_type = "application/json; charset=utf-8"
+            else:
+                result = _get_share_image_export_manager().get_result(job_id)
+                if result is None:
+                    status = _get_share_image_export_manager().get_status(job_id)
+                    self._write_json(
+                        404 if status is None else 409,
+                        {"error": "job_not_found" if status is None else "job_not_completed"},
+                    )
+                    return
+                file_path, filename = result
+                content_type = "application/zip" if filename.lower().endswith(".zip") else "image/png"
+
+            if file_path is None or not file_path.is_file():
+                self._write_json(404, {"error": "job_file_not_found"})
+                return
+            try:
+                stream = file_path.open("rb")
+            except OSError:
+                self._write_json(404, {"error": "job_file_not_found"})
+                return
+            try:
+                is_download = resource == "download" and self.command != "HEAD"
+                manager = _get_share_image_export_manager()
+                attempt_id = self._parse_query(parsed.query).get("download_attempt_id")
+                accepted_download = False
+                try:
+                    file_size = os.fstat(stream.fileno()).st_size
+                    if is_download:
+                        accepted_download = manager.mark_browser_download_started(job_id, attempt_id)
+                        if not accepted_download:
+                            self._write_json(409, {"error": "share_export_download_attempt_invalid"})
+                            return
+                    self.send_response(200)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(file_size))
+                    self.send_header("Cache-Control", "no-store")
+                    if resource == "download":
+                        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+                    self.end_headers()
+                    if self.command != "HEAD":
+                        remaining = file_size
+                        while remaining:
+                            chunk = stream.read(min(remaining, 1024 * 1024))
+                            if not chunk:
+                                raise OSError("share_export_download_incomplete")
+                            written = self.wfile.write(chunk)
+                            if written is not None and written != len(chunk):
+                                raise OSError("share_export_download_incomplete")
+                            remaining -= len(chunk)
+                        self.wfile.flush()
+                        if is_download:
+                            manager.mark_browser_download_finished(job_id, succeeded=True, attempt_id=attempt_id)
+                except OSError as exc:
+                    if accepted_download:
+                        manager.mark_browser_download_finished(job_id, succeeded=False, attempt_id=attempt_id)
+                    elif not is_download:
+                        raise exc
+            finally:
+                stream.close()
+            return
+
+        if parsed.path != "/share-api/snapshot":
+            self._write_json(404, {"error": "not_found"})
+            return
+        query = self._parse_query(parsed.query)
+        session_id = query.get("session_id", "").strip()
+        if not session_id:
+            self._write_json(400, {"error": "missing_session_id"})
+            return
+        try:
+            snapshot, filename = self._build_share_snapshot(
+                session_id=session_id,
+            )
+        except FileNotFoundError:
+            self._write_json(404, {"error": "history_not_found"})
+            return
+        except ValueError as exc:
+            self._write_json(400, {"error": str(exc)})
+            return
+        self._write_json(200, {"filename": filename, "snapshot": snapshot})
+
+    def _handle_share_api_post(self, parsed) -> None:
+        if _uses_agentos_routing():
+            self._write_json(503, {"error": "agentserver_file_rpc_required"})
+            return
+        result_match = re.fullmatch(r"/share-api/jobs/([a-f0-9]{32})/browser-result", parsed.path)
+        if result_match:
+            previous_timeout = self.connection.gettimeout()
+            try:
+                self.connection.settimeout(self._SHARE_IMAGE_UPLOAD_IDLE_TIMEOUT)
+                size = int(self.headers.get("Content-Length", "0"))
+                filename = self._parse_query(parsed.query).get("filename", "")
+                status = _get_share_image_export_manager().store_browser_result(
+                    result_match[1], self.headers.get("X-Share-Export-Token", ""), filename, self.rfile, size,
+                )
+            except TimeoutError:
+                self.close_connection = True
+                self._write_json(408, {"error": "share_export_upload_failed"})
+                return
+            except (FileNotFoundError, PermissionError, ValueError, RuntimeError) as exc:
+                self.close_connection = True
+                code = 404 if isinstance(exc, FileNotFoundError) else 403 if isinstance(exc, PermissionError) else 400
+                self._write_json(code, {"error": str(exc)})
+                return
+            except OSError:
+                self.close_connection = True
+                self._write_json(500, {"error": "share_export_upload_failed"})
+                return
+            finally:
+                self.connection.settimeout(previous_timeout)
+            self._write_json(200, status)
+            return
+        client_match = re.fullmatch(r"/share-api/jobs/([a-f0-9]{32})/browser", parsed.path)
+        if parsed.path != "/share-api/jobs" and client_match is None:
+            self._write_json(404, {"error": "not_found"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+        except ValueError:
+            self._write_json(400, {"error": "invalid_content_length"})
+            return
+        if length < 0:
+            self._write_json(400, {"error": "invalid_content_length"})
+            return
+        if length > 64 * 1024:
+            self._write_json(413, {"error": "request_too_large"})
+            return
+        try:
+            body = json.loads(self._read_request_body().decode("utf-8") or "{}")
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self._write_json(400, {"error": "invalid_json"})
+            return
+        if client_match is not None:
+            if not isinstance(body, dict):
+                self._write_json(400, {"error": "invalid_json"})
+                return
+            try:
+                status = _get_share_image_export_manager().update_browser_job(client_match[1], body)
+            except (FileNotFoundError, PermissionError, ValueError) as exc:
+                code = 404 if isinstance(exc, FileNotFoundError) else 403 if isinstance(exc, PermissionError) else 400
+                self._write_json(code, {"error": str(exc)})
+                return
+            self._write_json(200, status)
+            return
+        session_id = body.get("session_id", "") if isinstance(body, dict) else ""
+        if not isinstance(session_id, str) or not session_id.strip():
+            self._write_json(400, {"error": "missing_session_id"})
+            return
+        session_id = session_id.strip()
+        if isinstance(body, dict) and "job_id" in body:
+            job_id = body["job_id"]
+            if not isinstance(job_id, str) or not re.fullmatch(r"[a-f0-9]{32}", job_id):
+                self._write_json(400, {"error": "share_export_job_id_invalid"})
+                return
+            status = _get_share_image_export_manager().get_status(job_id, include_client_token=True)
+            if status is None or status["session_id"] != session_id:
+                self._write_json(404, {"error": "job_not_found"})
+                return
+            self._write_json(200, {**status, "reused": True})
+            return
+        active_status = _get_share_image_export_manager().get_active_status(session_id, include_client_token=True)
+        if active_status is not None:
+            self._write_json(200, {**active_status, "reused": True})
+            return
+        locale = body.get("locale", "zh") if isinstance(body, dict) else "zh"
+        normalized_locale = locale.strip() if isinstance(locale, str) and locale.strip() else "zh"
+        try:
+            snapshot, filename = self._build_share_snapshot(session_id=session_id)
+        except FileNotFoundError:
+            self._write_json(404, {"error": "history_not_found"})
+            return
+        except ValueError as exc:
+            self._write_json(400, {"error": str(exc)})
+            return
+
+        port = int(self.server.server_address[1])
+        # 桌面模式: 长图任务使用独立的 Playwright 无头 BrowserContext, 不共享
+        # 桌面 WebView 的 Cookie, 必须把当前实例的 desktop cookie 名与 token
+        # 交给渲染器注入, 否则 /share-export-runner 返回 403。普通 web 模式
+        # desktop_token 为空, 不构造认证信息, 行为保持不变。
+        render_auth: ShareImageRenderAuth | None = None
+        if self.desktop_token:
+            from jiuwenswarm.channels.web.share_image_export import ShareImageRenderAuth
+
+            render_auth = ShareImageRenderAuth(
+                cookie_name=self.desktop_cookie_name,
+                cookie_value=self.desktop_token,
+            )
+        browser_options = None
+        renderer = "server"
+        if body.get("allow_browser_render") is True:
+            from jiuwenswarm.channels.web.share_image_export import available_share_browser
+            browser_options = available_share_browser()
+            if browser_options is None:
+                renderer = "browser"
+        status = _get_share_image_export_manager().create_job(
+            session_id=session_id,
+            snapshot=snapshot,
+            filename=filename,
+            locale=normalized_locale,
+            base_url=f"http://127.0.0.1:{port}",
+            render_auth=render_auth,
+            renderer=renderer,
+            browser_options=browser_options,
+        )
+        self._write_json(200 if status.get("reused") else 202, status)
+
+    def _handle_file_api_get(self, parsed) -> None:
+        path = parsed.path
+        query = self._parse_query(parsed.query)
+
+        # All non-token file APIs below access ``project_root`` directly.
+        # That root belongs to the Gateway deployment in AgentOS, not to the
+        # routed user's mounted AgentServer directory.  Do not provide a
+        # deployment-directory fallback while the E2A file RPC endpoint is
+        # being used by AgentOS clients.
+        if _uses_agentos_routing() and path in {
+            "/file-api/list-markdown",
+            "/file-api/list-files",
+            "/file-api/raw-file",
+            "/file-api/file-content",
+        }:
+            self._write_json(503, {"error": "agentserver_file_rpc_required"})
+            return
+
+        if path == "/file-api/list-markdown":
+            dir_arg = query.get("dir", "")
+            if not dir_arg:
+                self._write_json(400, {"error": "missing_dir"})
+                return
+            full_dir = self._resolve_project_path(dir_arg)
+            if not self._is_path_under_allowed_root(full_dir):
+                self._write_json(403, {"error": "forbidden_dir"})
+                return
+            if not full_dir.exists() or not full_dir.is_dir():
+                self._write_json(200, {"files": []})
+                return
+            files = []
+            for entry in sorted(full_dir.iterdir(), key=lambda p: p.name.lower()):
+                if not entry.is_file() or not self._is_markdown(entry):
+                    continue
+                files.append(
+                    {
+                        "name": entry.name,
+                        "path": str(entry.relative_to(self.project_root)),
+                    }
+                )
+            self._write_json(200, {"files": files})
+            return
+
+        if path == "/file-api/list-files":
+            dir_arg = query.get("dir", "")
+            if not dir_arg:
+                self._write_json(400, {"error": "missing_dir"})
+                return
+            full_dir = self._resolve_project_path(dir_arg)
+            if not self._is_path_under_allowed_root(full_dir):
+                self._write_json(403, {"error": "forbidden_dir"})
+                return
+            if not full_dir.exists() or not full_dir.is_dir():
+                self._write_json(200, {"files": []})
+                return
+            files = []
+            entries = sorted(
+                full_dir.iterdir(),
+                key=lambda p: (not p.is_dir(), p.name.lower()),
+            )
+            for entry in entries:
+                files.append(
+                    {
+                        "name": entry.name,
+                        "path": str(entry.relative_to(self.project_root)),
+                        "isMarkdown": self._is_markdown(entry) if entry.is_file() else False,
+                        "isDirectory": entry.is_dir(),
+                    }
+                )
+            self._write_json(200, {"files": files})
+            return
+
+        if path == "/file-api/raw-file":
+            file_arg = query.get("path", "")
+            if not file_arg:
+                self._write_json(400, {"error": "missing_file_path"})
+                return
+            full_path = self._resolve_project_path(file_arg)
+            if not self._is_path_under_allowed_root(full_path):
+                self._write_json(403, {"error": "forbidden_path"})
+                return
+            if not full_path.is_file():
+                self._write_json(404, {"error": "file_not_found"})
+                return
+
+            mime_type, _ = mimetypes.guess_type(full_path.name)
+            self.send_response(200)
+            self.send_header("Content-Type", mime_type or "application/octet-stream")
+            self.send_header("Content-Length", str(full_path.stat().st_size))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            if self.command != "HEAD":
+                with full_path.open("rb") as file_obj:
+                    while True:
+                        chunk = file_obj.read(65536)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+            return
+
+        if path == "/file-api/file-content":
+            file_arg = query.get("path", "")
+            encoding_arg = query.get("encoding", "utf-8")
+            if not file_arg:
+                self._write_json(400, {"error": "missing_file_path"})
+                return
+            full_path = self._resolve_project_path(file_arg)
+            if not self._is_path_under_allowed_root(full_path):
+                self._write_json(403, {"error": "forbidden_path"})
+                return
+            if not full_path.exists():
+                if file_arg.replace("\\", "/") == "agent/workspace/agent-data.json":
+                    try:
+                        _generate_agent_data(self.project_root)
+                    except Exception as exc:  # noqa: BLE001
+                        self._write_json(500, {"error": "generate_failed", "detail": str(exc)})
+                        return
+                if not full_path.exists():
+                    self._write_json(404, {"error": "file_not_found", "fullPath": str(full_path)})
+                    return
+
+            def read_file_with_encoding(file_path: Path, encoding: str) -> tuple[str, str]:
+                if encoding == "auto":
+                    import charset_normalizer
+                    raw_data = file_path.read_bytes()
+                    detected = charset_normalizer.from_bytes(raw_data).best()
+                    if detected is None:
+                        detected_encoding = "utf-8"
+                    else:
+                        detected_encoding = detected.encoding or "utf-8"
+                    try:
+                        return raw_data.decode(detected_encoding), detected_encoding
+                    except (UnicodeDecodeError, LookupError) as decode_exc:
+                        for try_encoding in ["gbk", "gb2312", "big5", "shift_jis", "euc_kr"]:
+                            try:
+                                return raw_data.decode(try_encoding), try_encoding
+                            except (UnicodeDecodeError, LookupError):
+                                continue
+                        raise OSError("Unable to decode file with any known encoding") from decode_exc
+                else:
+                    return file_path.read_text(encoding=encoding), encoding
+
+            try:
+                data, used_encoding = read_file_with_encoding(full_path, encoding_arg)
+            except (LookupError, UnicodeDecodeError) as exc:
+                self._write_json(400, {"error": "invalid_encoding", "detail": str(exc)})
+                return
+            except OSError as exc:
+                self._write_json(500, {"error": str(exc)})
+                return
+            body = data.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("X-Original-Encoding", used_encoding)
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+            return
+
+        if path == "/file-api/download":
+            self._handle_file_download(query)
+            return
+
+        if path == "/file-api/ws-debug-config":
+            self._write_json(
+                200,
+                {
+                    "wsDisableCompress": bool(type(self).ws_disable_compress),
+                },
+            )
+            return
+
+        self._write_json(404, {"error": "not_found"})
+
+    def _handle_file_download(self, query: dict[str, str]) -> None:
+        """处理 ``/file-api/download``（Phase 2 迁移：代理目标 AgentServer）。
+
+        - Gateway 侧保留 token 校验作为第一道防线；本进程 secret 能校验通过的
+          token（单机同目录 / 部署侧签发）保持原有下载范围；
+        - 内容与路径判定由目标 AgentServer 在其注入目录执行。若 token 能由
+          单用户本地 secret 验证，则 AgentServer 不可达时可安全回退到同一用户
+          目录的本地读取；AgentOS token 无法由 Gateway 验证，因此始终不回退。
+        """
+        token = query.get("token", "")
+        if not token:
+            self._write_json(400, {"error": "missing_token"})
+            return
+
+        # AgentOS 的浏览器入口是本静态服务（通常 5173），而实际能够按用户
+        # sandbox 下载文件的是 WebChannel（api_target，通常 19000）。send_file
+        # 已在 URL 中附带 user_id；直接将同一请求转发到 WebChannel，避免再按
+        # 单机 AgentServer HTTP bridge（18092）解析并错误返回 503。
+        if _uses_agentos_routing() and query.get("user_id", "").strip():
+            self._proxy_http()
+            return
+
+        try:
+            from jiuwenswarm.agents.harness.common.tools.web_file_download import (
+                PURPOSE_SKILL_CONTENT_IMAGE,
+                validate_file_download_token,
+            )
+            from jiuwenswarm.server.runtime.skill.skill_content_images import (
+                extract_request_session_id,
+                resolve_skill_content_image_file,
+                validate_skill_content_image_payload,
+            )
+            from jiuwenswarm.server.runtime.skill.skill_files import SkillFilesError
+        except ImportError:
+            self._write_json(500, {"error": "download_module_unavailable"})
+            return
+
+        # Delivered artifacts remain valid even when legacy tokens contain exp.
+        # Signature verification is still mandatory; scoped image tokens below
+        # retain their original lifetime and session constraints.
+        payload = validate_file_download_token(token, check_expiry=False)
+        # Skill 正文图片 token intentionally does not carry an absolute path.
+        # In the legacy shared-directory layout it must therefore be resolved
+        # through the skill manifest before entering the generic file bridge.
+        if payload is not None and str(payload.get("purpose") or "") == PURPOSE_SKILL_CONTENT_IMAGE:
+            if validate_file_download_token(token, check_expiry=True) is None:
+                self._write_json(403, {"error": "invalid_or_expired_token"})
+                return
+            request_sid = extract_request_session_id(query=query, headers=self.headers)
+            error = validate_skill_content_image_payload(
+                payload, request_session_id=request_sid
+            )
+            if error:
+                self._write_json(403, {"error": error})
+                return
+            version_value = payload.get("version")
+            version = str(version_value).strip() if version_value else None
+            try:
+                file_path, _ = resolve_skill_content_image_file(
+                    name=str(payload.get("name") or ""),
+                    version=version,
+                    relative_path=str(payload.get("relative_path") or ""),
+                )
+            except SkillFilesError as exc:
+                code = str(exc.code or "")
+                self._write_json(
+                    404 if code in {"SKILL_NOT_FOUND", "SKILL_VERSION_NOT_FOUND"} else 403,
+                    {
+                        "error": "file_not_found"
+                        if code in {"SKILL_NOT_FOUND", "SKILL_VERSION_NOT_FOUND"}
+                        else "forbidden_path",
+                        "code": code,
+                    },
+                )
+                return
+            self._serve_verified_local_download(str(file_path), inline=True)
+            return
+        verified_download_name: str | None = None
+        if payload is not None:
+            # 本进程 secret 能校验并不意味着 token 的路径位于 Gateway 宿主机。
+            # AgentOS 的部署与用户 AgentServer 可能共用下载密钥；此时 token
+            # 仍可被 Gateway 验证，但 ``path`` 是用户容器内路径，必须先按 token
+            # 携带的 bridge 地址代理给目标 AgentServer，不能在这里误判 404。
+            file_path = str(payload.get("path") or "")
+            if payload.get("kind") == "verified_asset_v1":
+                verified_download_name = str(payload.get("name") or "")
+            has_target_bridge = bool(
+                str(payload.get("download_http_base") or "").strip()
+            )
+            if not file_path or (not has_target_bridge and not os.path.isfile(file_path)):
+                self._write_json(404, {"error": "file_not_found"})
+                return
+
+            # Legacy Gateway and AgentServer deliberately share this verified
+            # directory.  Do not proxy these downloads to the AgentServer WS
+            # port: it is not an HTTP file server.  Routed tokens carry their
+            # explicit bridge address and continue through the proxy below.
+            if not has_target_bridge:
+                raw_inline = query.get("inline")
+                if isinstance(raw_inline, list):
+                    raw_inline = raw_inline[0] if raw_inline else ""
+                inline = str(raw_inline or "").strip().lower() in {"1", "true"}
+                _SpaStaticHandler._serve_verified_local_download(
+                    self,
+                    file_path,
+                    inline=inline,
+                    download_name=verified_download_name,
+                )
+                return
+
+        # 代理到目标 AgentServer（AgentOS 下 token 由用户 AgentServer secret 签发，
+        # Gateway 校验必然失败，仍转发由 AgentServer 做最终校验与路径判定）。
+        raw_inline = query.get("inline")
+        if isinstance(raw_inline, list):
+            raw_inline = raw_inline[0] if raw_inline else ""
+        inline = str(raw_inline or "").strip().lower() in {"1", "true"}
+        if self._proxy_file_download(token, inline=inline):
+            return
+
+        # In the legacy single-user layout Gateway and AgentServer share the
+        # same verified user directory.  Preserve the pre-AgentOS availability
+        # contract only when that local file is actually present.  A token for
+        # a routed AgentServer may be locally verifiable when deployments reuse
+        # the same secret, but it must never fall back to the Gateway directory.
+        if payload is not None and os.path.isfile(file_path):
+            _SpaStaticHandler._serve_verified_local_download(
+                self,
+                file_path,
+                inline=inline,
+                download_name=verified_download_name,
+            )
+            return
+
+        self.logger.warning("[file-api/download] 目标 AgentServer 不可达: token=%s...", token[:8])
+        self._write_json(503, {"error": "agent_server_unavailable"})
+
+    def _serve_verified_local_download(
+        self,
+        file_path: str,
+        *,
+        inline: bool,
+        download_name: str | None = None,
+    ) -> None:
+        """Stream a token-verified legacy single-user file with Range support."""
+        try:
+            file_size = os.path.getsize(file_path)
+            file_name = os.path.basename(str(download_name or "").replace("\\", "/"))
+            if not file_name:
+                file_name = os.path.basename(file_path)
+            mime_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+            byte_range = None
+            range_header = self.headers.get("Range")
+            if range_header:
+                byte_range = _parse_single_byte_range(range_header, file_size)
+                if byte_range is None:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{file_size}")
+                    self.end_headers()
+                    return
+            start, end = byte_range or (0, max(0, file_size - 1))
+            content_length = 0 if file_size == 0 else end - start + 1
+            self.send_response(206 if byte_range is not None else 200)
+            self.send_header("Content-Type", mime_type)
+            self.send_header("Content-Length", str(content_length))
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header(
+                "Content-Disposition",
+                f"{'inline' if inline else 'attachment'}; filename*=UTF-8''{quote(file_name, safe='')}",
+            )
+            self.send_header("Cache-Control", "no-store")
+            if byte_range is not None:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
+            self.end_headers()
+            if self.command != "HEAD":
+                with open(file_path, "rb") as file_handle:
+                    file_handle.seek(start)
+                    remaining = content_length
+                    while remaining > 0:
+                        chunk = file_handle.read(min(65536, remaining))
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        remaining -= len(chunk)
+        except Exception as exc:  # noqa: BLE001
+            self.log_error("file download error: %s", exc)
+            self._write_json(500, {"error": "download_failed", "detail": str(exc)})
+
+    def _proxy_file_download(self, token: str, *, inline: bool = False) -> bool:
+        """把下载请求代理到目标 AgentServer 的 HTTP 端点并流式回传。
+
+        - 透传 ``inline`` 查询参数与 ``Range`` 请求头（AgentServer 侧解析）；
+        - 透传上游全部相关响应头（Content-Type/Length/Disposition、
+          Accept-Ranges/Content-Range、Cache-Control）与状态码（200/206/416）；
+        - 上游 4xx/5xx（如 AgentServer 校验 token 失败 403、文件缺失 404）
+          原样透传，避免误报 503；仅网络级不可达返回 False（→ 503）。
+        """
+        try:
+            import urllib.error
+            import urllib.request
+            import shutil
+
+            base = resolve_agent_http_base_for_token(
+                token, endpoint="download"
+            ) or _resolve_agent_http_base()
+            query_parts = [f"token={quote(token, safe='')}"]
+            if inline:
+                query_parts.append("inline=1")
+            url = f"{base}/file-api/download?{'&'.join(query_parts)}"
+            headers: dict[str, str] = {}
+            range_header = self.headers.get("Range")
+            if range_header:
+                headers["Range"] = range_header
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=60) as upstream:  # noqa: S310
+                status = int(getattr(upstream, "status", 200))
+                self.send_response(status)
+                for header_name in (
+                    "Content-Type",
+                    "Content-Length",
+                    "Content-Disposition",
+                    "Accept-Ranges",
+                    "Content-Range",
+                    "Cache-Control",
+                ):
+                    value = upstream.headers.get(header_name)
+                    if value:
+                        self.send_header(header_name, value)
+                self.end_headers()
+                if self.command != "HEAD":
+                    shutil.copyfileobj(upstream, self.wfile, length=65536)
+            return True
+        except urllib.error.HTTPError as exc:
+            # 上游返回 4xx/5xx（403 token 无效/越界、404 缺失、416 非法 Range 等）：
+            # 透传状态码与 body，保持错误语义不混淆为 503。
+            body = b""
+            try:
+                body = exc.read()
+            except Exception:  # noqa: BLE001
+                body = b""
+            try:
+                self.send_response(int(exc.code))
+                self.send_header(
+                    "Content-Type",
+                    exc.headers.get("Content-Type", "application/json; charset=utf-8")
+                    if exc.headers
+                    else "application/json; charset=utf-8",
+                )
+                self.send_header("Content-Length", str(len(body)))
+                if exc.headers and exc.headers.get("Content-Range"):
+                    self.send_header("Content-Range", exc.headers.get("Content-Range"))
+                self.end_headers()
+                if self.command != "HEAD":
+                    self.wfile.write(body)
+            except Exception:  # noqa: BLE001
+                pass
+            return True
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("[file-api/download] 代理转发失败: %s", exc)
+            return False
+
+    def _handle_file_upload_proxy(self, parsed) -> None:
+        """处理 ``POST /file-api/upload``（Phase 2 HTTP bridge 上传代理）。
+
+        读取客户端上传 body 后转发到目标 AgentServer 的上传端点（不落盘
+        Gateway），由 AgentServer 校验 upload token 并落盘注入目录。
+        AgentServer 不可达 → 503 可重试错误（方案 §8 禁止本地 fallback）。
+        """
+        query = parse_qs(parsed.query)
+        token = (query.get("token") or [""])[0]
+        if not token:
+            self._write_json(400, {"error": "missing_token"})
+            return
+        try:
+            content_length = int(self.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            self._write_json(400, {"error": "invalid_content_length"})
+            return
+        if content_length <= 0:
+            self._write_json(400, {"error": "empty_body"})
+            return
+
+        # The legacy Gateway and AgentServer share one verified user directory.
+        # Its upload token has no routed HTTP base, so persist it locally rather
+        # than forwarding to the AgentServer's nonexistent HTTP upload listener.
+        if not _uses_agentos_routing():
+            try:
+                from jiuwenswarm.agents.harness.common.tools.web_file_download import (
+                    validate_file_download_token,
+                )
+                from jiuwenswarm.common.utils import (
+                    get_user_workspace_dir as _get_user_workspace_dir,
+                )
+
+                payload = validate_file_download_token(token)
+                target_rel_path = str((payload or {}).get("path") or "").strip()
+                if payload is not None and target_rel_path and not payload.get("upload_http_base"):
+                    root = Path(_get_user_workspace_dir()).resolve()
+                    target = (root / target_rel_path).resolve()
+                    if root not in target.parents:
+                        self._write_json(403, {"error": "forbidden_path"})
+                        return
+                    body = self.rfile.read(content_length)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(body)
+                    self._write_json(200, {"path": str(target), "size": len(body)})
+                    return
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning("[file-api/upload] local legacy persist failed: %s", exc)
+                self._write_json(500, {"error": "upload_failed"})
+                return
+
+        import urllib.error
+        import urllib.request
+
+        base = resolve_agent_http_base_for_token(
+            token, endpoint="upload"
+        ) or _resolve_agent_upload_base()
+        url = f"{base}/file-api/upload?token={quote(token, safe='')}"
+        body = self.rfile.read(content_length)
+        req = urllib.request.Request(
+            url,
+            data=body,
+            method="POST",
+            headers={"Content-Type": "application/octet-stream", "Content-Length": str(len(body))},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=300) as upstream:  # noqa: S310
+                status = int(getattr(upstream, "status", 200))
+                raw = upstream.read()
+        except urllib.error.HTTPError as exc:
+            # 上游校验/落盘失败（403 越界、400 非法 token 等）：透传状态码与 body
+            raw = b""
+            try:
+                raw = exc.read()
+            except Exception:  # noqa: BLE001
+                raw = b""
+            status = int(exc.code)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.warning("[file-api/upload] 代理转发失败: %s", exc)
+            self._write_json(503, {"error": "agent_server_unavailable"})
+            return
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(raw)
+
+    def _handle_skill_sync_post(self, parsed) -> None:
+        """POST /skill-sync/{diff,package,apply}：Server/Client 分离部署技能同步."""
+        try:
+            from jiuwenswarm.server.runtime.skill import skill_sync_http
+            from jiuwenswarm.server.runtime.skill.skill_manager import SkillRpcError
+        except ImportError as exc:
+            self.log_error("skill sync module unavailable: %s", exc)
+            self._write_json(
+                500,
+                {
+                    "code": "SKILL_SYNC_PACKAGE_FAILED",
+                    "message": "skill-sync 模块不可用",
+                    "error": "skill-sync 模块不可用",
+                },
+            )
+            return
+
+        authorization = self.headers.get("Authorization", "")
+        # 读 body 前完成鉴权与 Content-Length 预检（未鉴权连接不得
+        # 强制服务器读入任意大小的 body；apply 超限直接 413）
+        content_length_raw = self.headers.get("Content-Length", "")
+        try:
+            content_length = int(content_length_raw) if content_length_raw else 0
+        except ValueError:
+            # 与 skill_sync_http_error_body 一致的三字段结构（code/message/
+            # error），按 code 解析的客户端不失配
+            self._write_json(
+                400,
+                skill_sync_http.skill_sync_http_error_body(
+                    "SKILL_SYNC_INVALID_PAYLOAD", "Content-Length 不是有效整数"
+                ),
+            )
+            return
+        try:
+            skill_sync_http.precheck_skill_sync_request(
+                authorization=authorization,
+                path=parsed.path,
+                content_length=content_length,
+            )
+        except SkillRpcError as exc:
+            status = skill_sync_http.skill_sync_http_error_status(exc.code)
+            self._write_json(
+                status, skill_sync_http.skill_sync_http_error_body(exc.code, exc.message)
+            )
+            return
+        except Exception as exc:  # noqa: BLE001
+            # 预检兜底：任何未预期异常（如畸形 header 触发的解析错误）
+            # 都不得冒泡到 BaseHTTPRequestHandler 打印 traceback 断连
+            self.log_error("skill-sync precheck failed: %s", exc)
+            self._write_json(
+                400,
+                skill_sync_http.skill_sync_http_error_body(
+                    "SKILL_SYNC_INVALID_PAYLOAD", "请求预检失败"
+                ),
+            )
+            return
+
+        if parsed.path == "/skill-sync/diff":
+            status, payload = skill_sync_http.handle_sync_diff_http(
+                authorization=authorization,
+                body=self._read_request_body(),
+            )
+            self._write_json(status, payload)
+            return
+
+        if parsed.path == "/skill-sync/package":
+            status, payload = skill_sync_http.handle_sync_package_http(
+                authorization=authorization,
+                body=self._read_request_body(),
+                send_file=self._send_skill_sync_zip,
+            )
+            if payload is not None:
+                self._write_json(status, payload)
+            return
+
+        if parsed.path == "/skill-sync/apply":
+            status, payload = skill_sync_http.handle_sync_apply_http(
+                authorization=authorization,
+                content_type=self.headers.get("Content-Type", ""),
+                body=self._read_request_body(),
+                content_length=content_length,
+            )
+            self._write_json(status, payload)
+            return
+
+        self._write_json(404, {"error": "not_found"})
+
+    def _send_skill_sync_zip(
+        self, zip_path: Path, filename: str, sha256: str, size: int
+    ) -> None:
+        """整包临时文件回写响应头后流式发送（X-Package-Sha256 覆盖整个 body）."""
+        self.send_response(200)
+        self.send_header("Content-Type", "application/zip")
+        self.send_header(
+            "Content-Disposition", f'attachment; filename="{filename}"'
+        )
+        self.send_header("X-Package-Sha256", sha256)
+        self.send_header("Content-Length", str(size))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if self.command == "HEAD":
+            return
+        with zip_path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                self.wfile.write(chunk)
+
+    def _handle_file_api_post(self, parsed) -> None:
+        if parsed.path == "/file-api/skills/upload-temp":
+            self._handle_skills_upload_temp()
+            return
+        if parsed.path == "/file-api/external-cli/custom-agents":
+            self._handle_custom_agent_upload()
+            return
+        if parsed.path == "/file-api/skills/import":
+            self._handle_skills_import_upload()
+            return
+        if parsed.path == "/file-api/skills/create-from-knowledge":
+            self._handle_skills_create_from_knowledge()
+            return
+
+        if _uses_agentos_routing() and parsed.path in {
+            "/file-api/rebuild-agent-data",
+            "/file-api/file-content",
+        }:
+            self._write_json(503, {"error": "agentserver_file_rpc_required"})
+            return
+        if parsed.path == "/file-api/rebuild-agent-data":
+            try:
+                _generate_agent_data(self.project_root)
+            except Exception as exc:  # noqa: BLE001
+                self._write_json(500, {"error": "rebuild_failed", "detail": str(exc)})
+                return
+
+            self._write_json(200, {"ok": True})
+            return
+
+        if parsed.path == "/file-api/upload":
+            if self._is_designer_upload(parsed):
+                self._handle_designer_upload()
+            else:
+                self._handle_file_upload_proxy(parsed)
+            return
+
+        if parsed.path == "/file-api/file-content":
+            length = self._parse_content_length()
+            raw = self.rfile.read(length) if length > 0 else b""
+            try:
+                payload = json.loads(raw.decode("utf-8") if raw else "{}")
+            except json.JSONDecodeError:
+                self._write_json(400, {"error": "invalid_json"})
+                return
+
+            request_path = payload.get("path")
+            request_content = payload.get("content")
+            if not isinstance(request_path, str) or not request_path.strip():
+                self._write_json(400, {"error": "missing_file_path"})
+                return
+            if not isinstance(request_content, str):
+                self._write_json(400, {"error": "missing_file_content"})
+                return
+
+            full_path = self._resolve_project_path(request_path)
+            if not self._is_path_under_allowed_root(full_path):
+                self._write_json(403, {"error": "forbidden_path"})
+                return
+            if not self._is_markdown(full_path):
+                self._write_json(400, {"error": "only_markdown_supported"})
+                return
+            if not full_path.exists():
+                self._write_json(404, {"error": "file_not_found"})
+                return
+
+            try:
+                full_path.write_text(request_content, encoding="utf-8")
+            except OSError as exc:
+                self._write_json(500, {"error": str(exc)})
+                return
+            self._write_json(200, {"ok": True})
+            return
+
+        if parsed.path == "/file-api/ws-debug-config":
+            length = self._parse_content_length()
+            raw = self.rfile.read(length) if length > 0 else b""
+            try:
+                payload = json.loads(raw.decode("utf-8") if raw else "{}")
+            except json.JSONDecodeError:
+                self._write_json(400, {"error": "invalid_json"})
+                return
+
+            ws_disable_compress = payload.get("wsDisableCompress")
+            if not isinstance(ws_disable_compress, bool):
+                self._write_json(400, {"error": "invalid_ws_disable_compress"})
+                return
+
+            type(self).ws_disable_compress = ws_disable_compress
+            self.logger.info(
+                "[jiuwenswarm-web] ws disable compress updated: %s",
+                ws_disable_compress,
+            )
+            self._write_json(200, {"ok": True, "wsDisableCompress": ws_disable_compress})
+            return
+
+        self._write_json(404, {"error": "not_found"})
+
+    def _parse_content_length(self) -> int:
+        raw = self.headers.get("Content-Length", "0") or "0"
+        try:
+            return int(raw)
+        except (TypeError, ValueError) as exc:
+            raise _BadRequestError("invalid_content_length") from exc
+
+    def _read_request_body(self) -> bytes:
+        length = self._parse_content_length()
+        return self.rfile.read(length) if length > 0 else b""
+
+    def _handle_skills_upload_temp(self) -> None:
+        from jiuwenswarm.server.runtime.skill.skills_multipart_http import (
+            handle_skills_upload_temp_http,
+        )
+
+        status, payload = handle_skills_upload_temp_http(
+            content_type=self.headers.get("Content-Type", ""),
+            body=self._read_request_body(),
+        )
+        self._write_json(status, payload)
+
+    def _handle_custom_agent_upload(self) -> None:
+        from jiuwenswarm.channels.web.custom_agent_upload_http import (
+            MAX_CUSTOM_AGENT_UPLOAD_BYTES,
+            handle_custom_agent_upload_http,
+        )
+
+        # Custom agents install into this machine's user workspace, which a
+        # routed multi-user AgentServer does not share.
+        if _uses_agentos_routing():
+            self._write_json(503, {"error": "custom agents are not supported in AgentOS mode"})
+            return
+        if self._parse_content_length() > MAX_CUSTOM_AGENT_UPLOAD_BYTES:
+            self._write_json(413, {"error": "upload too large"})
+            return
+        status, payload = handle_custom_agent_upload_http(
+            content_type=self.headers.get("Content-Type", ""),
+            body=self._read_request_body(),
+        )
+        self._write_json(status, payload)
+
+    def _is_designer_upload(self, parsed) -> bool:
+        if parse_qs(parsed.query).get("token"):
+            return False
+        return "multipart/form-data" in self.headers.get("Content-Type", "").lower()
+
+    def _discard_request_body(self, length: int) -> None:
+        # Answering before the body is consumed resets the connection, which
+        # the browser reports as "Failed to fetch" instead of the JSON error.
+        remaining = length
+        while remaining > 0:
+            chunk = self.rfile.read(min(remaining, 1024 * 1024))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+
+    def _handle_designer_upload(self) -> None:
+        from jiuwenswarm.channels.web.designer_upload_http import (
+            MAX_DESIGNER_UPLOAD_REQUEST_BYTES,
+            handle_designer_upload_http,
+        )
+
+        length = self._parse_content_length()
+        # A routed AgentServer keeps uploads in a per-user sandbox this process cannot write.
+        if _uses_agentos_routing():
+            self._discard_request_body(length)
+            self._write_json(503, {"error": "agentserver_file_rpc_required"})
+            return
+        if length > MAX_DESIGNER_UPLOAD_REQUEST_BYTES:
+            self._discard_request_body(length)
+            self._write_json(413, {"error": "file_too_large", "files": [], "errors": [{"error": "file_too_large"}]})
+            return
+        status, payload = handle_designer_upload_http(
+            content_type=self.headers.get("Content-Type", ""),
+            body=self.rfile,
+            length=length,
+            workspace_root=Path(self.workspace_root),
+        )
+        self._write_json(status, payload)
+
+    def _handle_skills_import_upload(self) -> None:
+        try:
+            from jiuwenswarm.server.runtime.skill.skills_multipart_http import (
+                handle_skills_import_http,
+            )
+        except ImportError as exc:
+            self.log_error("skills import module unavailable: %s", exc)
+            self._write_json(500, {"code": "SKILL_INVALID_PACKAGE", "message": "import 模块不可用", "error": "import 模块不可用"})
+            return
+        content_type = self.headers.get("Content-Type", "")
+        body = self._read_request_body()
+        status, payload = handle_skills_import_http(
+            content_type=content_type,
+            body=body,
+            use_local_manager=True,
+        )
+        self._write_json(status, payload)
+
+    def _handle_skills_create_from_knowledge(self) -> None:
+        try:
+            from jiuwenswarm.server.runtime.skill.skills_multipart_http import (
+                handle_skills_create_from_knowledge_http,
+            )
+        except ImportError as exc:
+            self.log_error("skills create-from-knowledge module unavailable: %s", exc)
+            self._write_json(
+                500,
+                {
+                    "code": "SKILL_INVALID_PACKAGE",
+                    "message": "create-from-knowledge 模块不可用",
+                    "error": "create-from-knowledge 模块不可用",
+                },
+            )
+            return
+        content_type = self.headers.get("Content-Type", "")
+        body = self._read_request_body()
+        status, payload = handle_skills_create_from_knowledge_http(
+            content_type=content_type,
+            body=body,
+        )
+        self._write_json(status, payload)
+
+    def do_GET(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        if parsed.path == "/oauth/hub/callback":
+            from jiuwenswarm.channels.web.hub_oauth import complete
+
+            query = {key: values[0] for key, values in parse_qs(parsed.query, keep_blank_values=True).items()}
+            status, _ = complete(query)
+            self.send_response(303 if status == 200 else status)
+            if status == 200:
+                self.send_header("Location", "/oauth/hub/done")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if parsed.path == "/oauth/hub/done":
+            body = (
+                '<!doctype html><html lang="zh-CN"><meta charset="utf-8">'
+                '<title>授权已完成</title><script>window.close()</script>'
+                '<p>授权已完成。如果此标签页没有自动关闭，请手动关闭并返回 JiuwenSwarm。</p>'
+                '</html>'
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self._is_share_api_route():
+            self._handle_share_api_get(parsed)
+            return
+        if self._is_file_api_route():
+            try:
+                self._handle_file_api_get(parsed)
+            except _BadRequestError as exc:
+                self._write_json(400, {"error": str(exc)})
+            return
+        if self._dispatch_proxy():
+            return
+        super().do_GET()
+
+    def do_POST(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        if parsed.path in {"/marketplace-oauth/hub/start", "/marketplace-oauth/hub/result"}:
+            from jiuwenswarm.channels.web.hub_oauth import result, start
+
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 4096:
+                    raise ValueError("invalid length")
+                payload = json.loads(self.rfile.read(length))
+                if not isinstance(payload, dict):
+                    raise ValueError("invalid payload")
+            except ValueError:
+                self._write_json(400, {"error": "invalid_request"})
+                return
+            if parsed.path.endswith("/start"):
+                status, response = start(payload.get("provider", ""), self.headers.get("Host", ""))
+            else:
+                status, response = result(payload.get("flow", ""), payload.get("claim", ""))
+            data = json.dumps(response, ensure_ascii=False).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if self._is_share_api_route():
+            self._handle_share_api_post(parsed)
+            return
+        # 技能同步接口为独立 /skill-sync/* 路径（不属 /file-api 命名空间），
+        # 必须在 do_POST 顶层接入而非 _handle_file_api_post（设计文档第 7 节）。
+        if self._is_skill_sync_route():
+            self._handle_skill_sync_post(parsed)
+            return
+        if self._is_file_api_route():
+            try:
+                self._handle_file_api_post(parsed)
+            except _BadRequestError as exc:
+                self._write_json(400, {"error": str(exc)})
+            return
+        if self._dispatch_proxy():
+            return
+        self.send_error(405, "method not allowed")
+
+    def do_PUT(self) -> None:  # noqa: N802
+        if self._dispatch_proxy():
+            return
+        self.send_error(405, "method not allowed")
+
+    def do_PATCH(self) -> None:  # noqa: N802
+        if self._dispatch_proxy():
+            return
+        self.send_error(405, "method not allowed")
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        if self._dispatch_proxy():
+            return
+        self.send_error(405, "method not allowed")
+
+    def do_OPTIONS(self) -> None:  # noqa: N802
+        if self._dispatch_proxy():
+            return
+        self.send_error(405, "method not allowed")
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        if self._is_share_api_route():
+            self._handle_share_api_get(parsed)
+            return
+        if self._is_file_api_route():
+            try:
+                self._handle_file_api_get(parsed)
+            except _BadRequestError as exc:
+                self._write_json(400, {"error": str(exc)})
+            return
+        if self._dispatch_proxy():
+            return
+        super().do_HEAD()
+
+    def log_message(self, format: str, *args) -> None:  # noqa: A002
+        self.logger.info("%s - %s", self.address_string(), self._redact_desktop_token(format % args))
+
+    def log_error(self, format: str, *args) -> None:  # noqa: A002
+        self.logger.error("%s - %s", self.address_string(), self._redact_desktop_token(format % args))
+
+    def _redact_desktop_token(self, message: str) -> str:
+        message = re.sub(r"([?&]dt=)[^&\s\"#]*", r"\1[REDACTED]", message)
+        message = re.sub(r"([?&]oauth_session=)[^&\s\"#]*", r"\1[REDACTED]", message)
+        if self.desktop_token:
+            message = message.replace(quote(self.desktop_token, safe=""), "[REDACTED]")
+            message = message.replace(self.desktop_token, "[REDACTED]")
+        return message
+
+    # Vite 产物文件名携带内容哈希（assets/<name>-<hash>.<ext>），内容变更即
+    # 换文件名，可安全长缓存（immutable 让浏览器跳过条件请求）；index.html
+    # 与 SPA fallback 引用的是哈希名，必须每次回源验证才能拿到新版本引用。
+    _IMMUTABLE_ASSET_RE = re.compile(r"^assets/.+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$")
+    _IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable"
+    _REVALIDATE_CACHE_CONTROL = "no-cache"
+
+    @classmethod
+    def _cache_control_for_static(cls, rel_path: str) -> str:
+        if cls._IMMUTABLE_ASSET_RE.match(rel_path):
+            return cls._IMMUTABLE_CACHE_CONTROL
+        return cls._REVALIDATE_CACHE_CONTROL
+
+    def end_headers(self) -> None:
+        # 缓存策略在 send_head 里决定、这里统一落头：super().send_head() 内部
+        # 就会调用 end_headers，之后再追加头已来不及。非静态路径不设置该
+        # 标记，API/代理响应仍走各自的 no-store。
+        cache_control = getattr(self, "_static_cache_control", None)
+        if cache_control:
+            self._static_cache_control = None
+            self.send_header("Cache-Control", cache_control)
+        super().end_headers()
+
+    def send_head(self):
+        # 内嵌 NUL 必须在 resolve() 之前显式拦截：POSIX 上 Path.resolve() 会抛
+        # ValueError，但 Windows 上各 Python 版本行为不一致（3.11 静默在 NUL 处截断、
+        # 3.12 抛异常、3.13 原样返回含 NUL 的路径），靠捕获异常无法跨平台覆盖。
+        # 跨盘符（/D:/x）则由下面的 os.path.commonpath 抛 ValueError。两类都要转成
+        # 400：handle_one_request 只捕获 TimeoutError，异常会穿透到 socketserver，
+        # 连接被直接关掉且客户端收不到任何 HTTP 响应。
+        parsed = urlparse(self.path)
+        req_path = unquote(parsed.path)
+        if "\x00" in req_path:
+            self._static_cache_control = None
+            self._write_json(400, {"error": "invalid_path"})
+            return None
+
+        try:
+            rel_path = req_path.lstrip("/") or "index.html"
+
+            base_dir = Path(self.directory or os.getcwd()).resolve()
+            target = (base_dir / rel_path).resolve()
+            in_base = os.path.commonpath([str(base_dir), str(target)]) == str(base_dir)
+        except (OSError, ValueError):
+            self._static_cache_control = None
+            self._write_json(400, {"error": "invalid_path"})
+            return None
+
+        # 使用实际静态解析结果判定 SPA 入口, 覆盖 /、index.html 及路由回退。
+        # 现存静态资源及其他 HTML 产物不需要桌面 Cookie。
+        spa_index = (base_dir / "index.html").resolve()
+        serves_spa = not (in_base and target.exists()) or target == spa_index
+        if in_base and target.is_dir():
+            serves_spa = (target / "index.html").resolve() == spa_index
+        if serves_spa and self._check_desktop_access():
+            return None
+
+        if in_base and target.exists():
+            self._static_cache_control = self._cache_control_for_static(rel_path)
+            return super().send_head()
+
+        self._static_cache_control = self._REVALIDATE_CACHE_CONTROL
+        self.path = "/index.html"
+        return super().send_head()
+
+
+def _normalize_api_target(value: str) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"api target must be http/https: {value}")
+    return value.rstrip("/")
+
+
+def _normalize_ws_target(value: str) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme in ("http", "https"):
+        value = value.replace("http://", "ws://", 1).replace("https://", "wss://", 1)
+        parsed = urlparse(value)
+    if parsed.scheme not in ("ws", "wss"):
+        raise ValueError(f"ws target must be ws/wss/http/https: {value}")
+    return value.rstrip("/")
+
+
+def _setup_logger(logs_root: Path, log_level: str) -> logging.Logger:
+    logs_root.mkdir(parents=True, exist_ok=True)
+    lg = logging.getLogger(__name__)
+    lg.setLevel(getattr(logging, log_level.upper(), logging.INFO))
+    lg.propagate = True
+    for h in lg.handlers[:]:
+        h.close()
+        lg.removeHandler(h)
+
+    formatter = logging.Formatter(
+        fmt="%(asctime)s.%(msecs)03d %(levelname)s %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    # ws-dev.log 会原样记录前端↔后端业务报文（含 config.validate 等 method 的
+    # model_params，其中带 api_key/api_base 等敏感字段），必须挂脱敏 filter，
+    # 否则 api_key 明文落盘。propagate 到根 logger 的 handler 虽已脱敏，
+    # 但本 handler 自身需独立挂载，才能保证 ws-dev.log 也脱敏。
+    from jiuwenswarm.common.utils import SensitiveDataFilter
+
+    privacy_filter = SensitiveDataFilter()
+
+    file_handler = logging.FileHandler(logs_root / "ws-dev.log", mode="w", encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    file_handler.addFilter(privacy_filter)
+    lg.addHandler(file_handler)
+    return lg
+
+
+def _wait_for_gateway(ws_target: str, logger: logging.Logger) -> None:
+    """Wait for the gateway WebSocket target to become available."""
+    parsed = urlparse(ws_target)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or (443 if parsed.scheme in ("wss", "https") else 80)
+    logger.info("[jiuwenswarm-web] waiting for gateway %s:%s ...", host, port)
+    if _wait_for_tcp_port(host, port, timeout=15.0, max_attempts=15):
+        logger.info("[jiuwenswarm-web] gateway available")
+    else:
+        logger.warning("[jiuwenswarm-web] gateway not available after 15 seconds")
+
+
+def _wait_for_tcp_port(
+    host: str,
+    port: int,
+    *,
+    timeout: float,
+    max_attempts: int,
+) -> bool:
+    """Small Web-only probe; avoid importing the full runtime utility module."""
+    deadline = time.monotonic() + timeout
+    attempts = 0
+    while attempts < max_attempts and time.monotonic() < deadline:
+        attempts += 1
+        try:
+            with socket.create_connection((host, port), timeout=0.25):
+                return True
+        except OSError:
+            if attempts < max_attempts:
+                time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
+    return False
+
+
+def main() -> None:
+    from jiuwenswarm.dotenv_early import get_parsed_dotenv
+
+    # Check if --name bootstrap .env was loaded successfully
+    # (parse_dotenv_early() already processed it at module import time)
+    # This is just a fallback check for error handling
+    _early_name = None
+    for i, arg in enumerate(sys.argv):
+        if arg == "--name" and i + 1 < len(sys.argv):
+            _early_name = sys.argv[i + 1]
+
+    if _early_name and get_parsed_dotenv() is None:
+        # Early parsing failed - error was already printed
+        raise SystemExit(1)
+
+    # Read defaults from environment variables (for multi-instance support)
+    # FRONTEND_PORT is used for this HTTP static server
+    # WEB_PORT is the WebChannel websocket endpoint that this server proxies to
+    default_host = os.getenv("FRONTEND_HOST", "localhost")
+    default_port = int(os.getenv("FRONTEND_PORT", "5173"))
+    web_port = os.getenv("WEB_PORT", "19000")  # WebChannel websocket port (proxy target)
+    default_proxy = os.getenv("GATEWAY_URL", f"http://127.0.0.1:{web_port}")
+
+    parser = argparse.ArgumentParser(description="Serve JiuwenSwarm frontend static files.")
+    parser.add_argument("--host", default=default_host, help="Host to bind.")
+    parser.add_argument("--port", type=int, default=default_port, help="Port to bind.")
+    parser.add_argument(
+        "--dist",
+        default=str(_default_dist_dir()),
+        help="Path to frontend dist directory.",
+    )
+    parser.add_argument(
+        "--proxy-target",
+        default=default_proxy,
+        help="Backend base URL for proxy (used as default for api/ws).",
+    )
+    parser.add_argument(
+        "--api-target",
+        default="",
+        help="Override backend target for /api (http/https).",
+    )
+    parser.add_argument(
+        "--ws-target",
+        default="",
+        help="Override backend target for /ws (ws/wss/http/https).",
+    )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        help="Log level for static web server. e.g. DEBUG/INFO/WARNING/ERROR",
+    )
+    parser.add_argument(
+        "--ws-disable-compress",
+        action="store_true",
+        help="Disable websocket compression for easier ws req/res/event debug logging.",
+    )
+    parser.add_argument(
+        "--desktop-token",
+        default=None,
+        metavar="TOKEN",
+        help="Desktop lock token: enable desktop-only access control "
+        "(default: JIUWENSWARM_DESKTOP_TOKEN env, empty = disabled).",
+    )
+    parser.add_argument(
+        "--name",
+        metavar="<name>",
+        help="Start a named instance from instances.yaml.",
+    )
+    parser.add_argument(
+        "--dotenv",
+        metavar="<path>",
+        help="Load environment from .env file (processed at startup, not used here).",
+    )
+    args = parser.parse_args()
+
+    dist_dir = Path(args.dist).expanduser().resolve()
+    if not dist_dir.exists():
+        raise SystemExit(f"dist directory not found: {dist_dir}")
+    if not dist_dir.is_dir():
+        raise SystemExit(f"dist path is not a directory: {dist_dir}")
+
+    try:
+        proxy_target = args.proxy_target.strip()
+        api_target = _normalize_api_target(args.api_target.strip() or proxy_target)
+        ws_target = _normalize_ws_target(args.ws_target.strip() or proxy_target)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+
+    project_root = _get_user_workspace_dir()
+    workspace_root = (project_root / "agent").resolve()
+    agent_teams_root = _get_agent_teams_root(project_root)
+    logs_root = _get_logs_dir().resolve()
+    # Start with the process logger.  The file handler and diagnostic hook are
+    # installed in a post-listen worker below, so static HTML/CSS/JS can be
+    # served without waiting for the agent-runtime logging module to import.
+    logger = logging.getLogger(__name__)
+
+    class _ConfiguredHandler(_SpaStaticHandler):
+        pass
+
+    _ConfiguredHandler.api_target = api_target
+    _ConfiguredHandler.ws_target = ws_target
+    _ConfiguredHandler.ws_disable_compress = args.ws_disable_compress
+    # 桌面锁定: 桌面端经 JIUWENSWARM_DESKTOP_TOKEN env 注入一次性 token;
+    # 源码 web 模式为空 = 不启用, 浏览器访问行为与之前完全一致。
+    desktop_token = (
+        args.desktop_token
+        if args.desktop_token is not None
+        else os.getenv("JIUWENSWARM_DESKTOP_TOKEN", "")
+    ).strip()
+    _ConfiguredHandler.desktop_token = desktop_token
+    _ConfiguredHandler.desktop_cookie_name = f"__wsdt{args.port}"
+    _ConfiguredHandler.project_root = project_root
+    _ConfiguredHandler.workspace_root = workspace_root
+    _ConfiguredHandler.agent_teams_root = agent_teams_root
+    _ConfiguredHandler.logs_root = logs_root
+    _ConfiguredHandler.logger = logger
+    handler = partial(_ConfiguredHandler, directory=str(dist_dir))
+    server = ThreadingHTTPServer((args.host, args.port), handler)
+
+    # Windows has no SIGUSR1, so avoid importing debug_dump (which itself
+    # imports the runtime utility module) in the EXE's critical Web path.
+    # On Unix the handler must be registered from the main thread.
+    if hasattr(signal, "SIGUSR1"):
+        from jiuwenswarm.common.debug_dump import install_async_dump_handler
+
+        install_async_dump_handler("web")
+
+    _web_info_file: Path | None = None
+
+    def _finish_after_listen() -> None:
+        """Complete optional observability after the static listener is live."""
+        nonlocal logger, _web_info_file
+        try:
+            logger = _setup_logger(logs_root, args.log_level)
+            _ConfiguredHandler.logger = logger
+        except Exception as exc:  # noqa: BLE001 - preserve serving on logging failure
+            logger.warning("Failed to configure web file logging: %s", exc)
+
+        logger.info("[jiuwenswarm-web] serving %s", dist_dir)
+        logger.info("[jiuwenswarm-web] http://%s:%s", args.host, args.port)
+        logger.info("[jiuwenswarm-web] /api -> %s", api_target)
+        logger.info("[jiuwenswarm-web] /ws  -> %s", ws_target)
+        logger.info("[jiuwenswarm-web] ws disable compress: %s", args.ws_disable_compress)
+        logger.info(
+            "[jiuwenswarm-web] desktop lock: %s",
+            "enabled" if desktop_token else "disabled",
+        )
+        logger.info("[jiuwenswarm-web] /file-api roots -> %s, %s, %s", workspace_root, agent_teams_root, logs_root)
+
+        _web_info_path = (_get_user_workspace_dir() / ".updates").resolve()
+        _web_info_path.mkdir(parents=True, exist_ok=True)
+        _web_info_file = _web_info_path / "web_process.json"
+        try:
+            _web_info_file.write_text(
+                json.dumps({"pid": os.getpid(), "argv": sys.argv[:]}, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to write web process info: %s", exc)
+
+        # Gateway 未就绪不阻塞静态页服务；前端会自行重连。
+        threading.Thread(
+            target=_wait_for_gateway,
+            args=(ws_target, logger),
+            name="web-wait-gateway",
+            daemon=True,
+        ).start()
+
+    threading.Thread(
+        target=_finish_after_listen,
+        name="web-post-listen-setup",
+        daemon=True,
+    ).start()
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        try:
+            if _web_info_file is not None:
+                _web_info_file.unlink(missing_ok=True)
+        except Exception as exc:
+            logger.warning("Failed to remove web process info: %s", exc)
+        server.server_close()
+        logger.info("[jiuwenswarm-web] server closed")
+
+
+if __name__ == "__main__":
+    main()

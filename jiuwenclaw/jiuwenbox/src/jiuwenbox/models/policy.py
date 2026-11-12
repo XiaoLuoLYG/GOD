@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 import enum
+import ipaddress
 import os
 from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from jiuwenbox.supervisor.daemon_ipc import SANDBOX_IP_ENV
 
 
 def _expand_path(value: str) -> str:
@@ -56,12 +59,275 @@ def _normalize_octal_permissions(value: object, *, label: str) -> str | None:
     return text.zfill(4)
 
 
+_MEMORY_UNIT_MULTIPLIERS: dict[str, int] = {
+    "": 1,
+    "B": 1,
+    "K": 1024,
+    "KB": 1024,
+    "KIB": 1024,
+    "M": 1024 ** 2,
+    "MB": 1024 ** 2,
+    "MIB": 1024 ** 2,
+    "G": 1024 ** 3,
+    "GB": 1024 ** 3,
+    "GIB": 1024 ** 3,
+    "T": 1024 ** 4,
+    "TB": 1024 ** 4,
+    "TIB": 1024 ** 4,
+}
+
+_CPU_DEFAULT_PERIOD_US = 100_000  # 100ms, matches cgroup v2 default
+_CPU_MIN_PERIOD_US = 1_000
+_CPU_MAX_PERIOD_US = 1_000_000
+_CPU_MAX_CORES = 4096
+_PIDS_MAX_VALUE = (1 << 31) - 1
+
+
+def _parse_memory_max(value: object) -> int | None:
+    """Parse user-facing ``memory_max`` literal into bytes.
+
+    Accepts:
+      - ``None`` -> no limit.
+      - positive ``int`` -> raw bytes.
+      - ``str`` of the form ``<int><unit?>`` where unit is one of
+        ``B / K / KB / KiB / M / MB / MiB / G / GB / GiB / T / TB / TiB``
+        (binary multipliers, case-insensitive). Decimal magnitudes
+        (e.g. ``"1.5G"``) are explicitly rejected.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        # ``bool`` is a subclass of ``int``; reject it explicitly so
+        # ``cgroup: {memory_max: true}`` never silently becomes 1 byte.
+        raise ValueError(
+            "memory_max must be an integer byte count or a '<N><K|M|G|T>' "
+            "suffixed string, not a boolean"
+        )
+    if isinstance(value, int):
+        bytes_value = value
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            raise ValueError("memory_max cannot be an empty string")
+        # Split numeric prefix from suffix.
+        idx = 0
+        while idx < len(text) and (text[idx].isdigit() or (idx == 0 and text[idx] == "+")):
+            idx += 1
+        number_part = text[:idx]
+        suffix_part = text[idx:].strip().upper()
+        if not number_part:
+            raise ValueError(
+                f"memory_max must start with a non-negative integer, got {value!r}"
+            )
+        try:
+            magnitude = int(number_part)
+        except ValueError as exc:
+            raise ValueError(
+                f"memory_max numeric prefix is not an integer: {value!r}"
+            ) from exc
+        multiplier = _MEMORY_UNIT_MULTIPLIERS.get(suffix_part)
+        if multiplier is None:
+            raise ValueError(
+                f"memory_max has unknown unit suffix {suffix_part!r}; "
+                "expected one of B/K/KB/KiB/M/MB/MiB/G/GB/GiB/T/TB/TiB"
+            )
+        bytes_value = magnitude * multiplier
+    else:
+        raise ValueError(
+            f"memory_max must be int or str, got {type(value).__name__}"
+        )
+    if bytes_value <= 0:
+        raise ValueError("memory_max must be > 0")
+    return bytes_value
+
+
+def _parse_cpu_max(value: object) -> tuple[int, int] | None:
+    """Parse user-facing ``cpu_max`` literal into ``(quota_us, period_us)``.
+
+    Accepts:
+      - ``None`` or string ``"max"`` -> no limit.
+      - ``int`` / ``float`` -> fractional cores (period fixed at
+        ``_CPU_DEFAULT_PERIOD_US``, quota = ``round(cores * period)``).
+      - ``str`` numeric (e.g. ``"0.5"``) -> same as float.
+      - ``str`` ``"<quota> <period>"`` (two positive integers, microseconds)
+        -> directly passed through.
+      - ``tuple`` / ``list`` of exactly two positive ints -> passed through
+        as ``(quota_us, period_us)``. This case exists so the value
+        survives a round-trip through ``model_dump(mode="json")`` (which
+        turns the stored tuple into a list) and back through
+        ``SecurityPolicy.model_validate`` (e.g. when the sandbox policy is
+        reloaded from disk by the supervisor).
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError(
+            "cpu_max must be a number (fractional cores) or '<quota> <period>' "
+            "string, not a boolean"
+        )
+    if isinstance(value, (tuple, list)):
+        if len(value) != 2:
+            raise ValueError(
+                f"cpu_max sequence form must have exactly 2 elements "
+                f"(quota_us, period_us), got {len(value)}"
+            )
+        quota_raw, period_raw = value
+        if isinstance(quota_raw, bool) or isinstance(period_raw, bool):
+            raise ValueError(
+                "cpu_max (quota_us, period_us) must be ints, not bool"
+            )
+        if not (isinstance(quota_raw, int) and isinstance(period_raw, int)):
+            raise ValueError(
+                f"cpu_max (quota_us, period_us) must be ints, "
+                f"got ({type(quota_raw).__name__}, {type(period_raw).__name__})"
+            )
+        quota = int(quota_raw)
+        period = int(period_raw)
+        if quota <= 0:
+            raise ValueError("cpu_max quota must be > 0")
+        if not (_CPU_MIN_PERIOD_US <= period <= _CPU_MAX_PERIOD_US):
+            raise ValueError(
+                f"cpu_max period must be in [{_CPU_MIN_PERIOD_US}, "
+                f"{_CPU_MAX_PERIOD_US}] microseconds"
+            )
+        if quota > period * _CPU_MAX_CORES:
+            raise ValueError(
+                f"cpu_max quota {quota} implies more than {_CPU_MAX_CORES} cores"
+            )
+        return (quota, period)
+    if isinstance(value, (int, float)):
+        cores = float(value)
+        if cores <= 0:
+            raise ValueError("cpu_max must be > 0 cores")
+        if cores > _CPU_MAX_CORES:
+            raise ValueError(
+                f"cpu_max cores {cores} exceeds sanity limit {_CPU_MAX_CORES}"
+            )
+        quota = max(1, int(round(cores * _CPU_DEFAULT_PERIOD_US)))
+        return (quota, _CPU_DEFAULT_PERIOD_US)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            raise ValueError("cpu_max cannot be an empty string")
+        if text.lower() == "max":
+            return None
+        parts = text.split()
+        if len(parts) == 2:
+            try:
+                quota = int(parts[0])
+                period = int(parts[1])
+            except ValueError as exc:
+                raise ValueError(
+                    f"cpu_max '<quota> <period>' must be two integers, got {value!r}"
+                ) from exc
+            if quota <= 0:
+                raise ValueError("cpu_max quota must be > 0")
+            if not (_CPU_MIN_PERIOD_US <= period <= _CPU_MAX_PERIOD_US):
+                raise ValueError(
+                    f"cpu_max period must be in [{_CPU_MIN_PERIOD_US}, "
+                    f"{_CPU_MAX_PERIOD_US}] microseconds"
+                )
+            if quota > period * _CPU_MAX_CORES:
+                raise ValueError(
+                    f"cpu_max quota {quota} implies more than {_CPU_MAX_CORES} cores"
+                )
+            return (quota, period)
+        if len(parts) == 1:
+            try:
+                cores = float(parts[0])
+            except ValueError as exc:
+                raise ValueError(
+                    f"cpu_max string must parse as cores or '<quota> <period>': {value!r}"
+                ) from exc
+            return _parse_cpu_max(cores)
+        raise ValueError(
+            f"cpu_max string must be cores or '<quota> <period>', got {value!r}"
+        )
+    raise ValueError(
+        f"cpu_max must be number or string, got {type(value).__name__}"
+    )
+
+
+def _parse_pids_max(value: object) -> int | None:
+    """Parse ``pids_max`` literal into a positive int (or None)."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("pids_max must be a positive integer, not a boolean")
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            raise ValueError("pids_max cannot be an empty string")
+        if text.lower() == "max":
+            return None
+        try:
+            int_value = int(text)
+        except ValueError as exc:
+            raise ValueError(
+                f"pids_max must be 'max' or a positive integer, got {value!r}"
+            ) from exc
+    elif isinstance(value, int):
+        int_value = value
+    else:
+        raise ValueError(
+            f"pids_max must be int or str, got {type(value).__name__}"
+        )
+    if int_value < 1:
+        raise ValueError("pids_max must be >= 1")
+    if int_value > _PIDS_MAX_VALUE:
+        raise ValueError(
+            f"pids_max must be <= {_PIDS_MAX_VALUE}"
+        )
+    return int_value
+
+
 class BindMount(BaseModel):
     host_path: str
     sandbox_path: str
     mode: Literal["ro", "rw"] = "ro"
 
+    @field_validator("host_path", mode="before")
+    @classmethod
+    def reject_wildcard_host_path(cls, value: object) -> object:
+        # Historically some policy yamls used ``host_path: "*"`` as a
+        # "mount everything under root" placeholder, but bwrap has no such
+        # semantics and the entry was silently a no-op. We now reject this
+        # explicitly so misconfigurations surface at policy load time and
+        # point users at ``bind_root_entries`` which supports that intent.
+        if isinstance(value, str) and value.strip() == "*":
+            raise ValueError(
+                "bind_mounts.host_path cannot be literal '*'; "
+                "use filesystem_policy.bind_root_entries to mount all "
+                "immediate entries under a host directory"
+            )
+        return value
+
     @field_validator("host_path", "sandbox_path", mode="before")
+    @classmethod
+    def expand_paths(cls, value: object) -> object:
+        if isinstance(value, str):
+            return _expand_path(value)
+        return value
+
+
+class BindRootEntries(BaseModel):
+    """Mount every immediate child entry of ``host_root`` into the sandbox.
+
+    For each file or directory directly under ``host_root`` (no recursion past
+    the first level), a bind mount is added at
+    ``f"{sandbox_path}/{child_name}"`` with the configured ``mode``. Hidden
+    entries (names starting with ``.``) are excluded by default; pass
+    ``include_hidden: true`` to keep them. ``exclude`` accepts fnmatch globs
+    applied against the child basename.
+    """
+
+    host_root: str
+    sandbox_path: str
+    mode: Literal["ro", "rw"] = "ro"
+    include_hidden: bool = False
+    exclude: list[str] = Field(default_factory=list)
+
+    @field_validator("host_root", "sandbox_path", mode="before")
     @classmethod
     def expand_paths(cls, value: object) -> object:
         if isinstance(value, str):
@@ -121,6 +387,7 @@ class FilesystemPolicy(BaseModel):
     read_only: list[str] = Field(default_factory=list)
     read_write: list[str] = Field(default_factory=list)
     bind_mounts: list[BindMount] = Field(default_factory=list)
+    bind_root_entries: list[BindRootEntries] = Field(default_factory=list)
     device: list[DeviceMount] = Field(default_factory=list)
 
     @field_validator("directories", mode="before")
@@ -193,10 +460,50 @@ class NetworkRulePolicy(BaseModel):
     blocked_ports: list[int] = Field(default_factory=list)
 
 
+class ProxyBasicAuth(BaseModel):
+    """HTTP Basic credentials for a proxy route.
+
+    ``password`` is inline (dev/test only; like ``api_key`` it is stored in the
+    policy YAML in plaintext). ``password_file`` is the production-recommended
+    source: a server-side readable file (Kubernetes Secret / Docker Secret /
+    Linux restricted file) whose content is read at route-assembly time. The
+    resolved password lives only in the in-memory runtime route and is never
+    serialized back to YAML or returned by any API.
+
+    Fields are intentionally all optional with defaults and no raising
+    validators live here: every structural check (non-empty username, exactly
+    one password source, file existence/readability, CR/LF/NUL injection
+    prevention) is performed at route-assembly time in
+    :func:`build_proxy_route`, which raises ``ValueError`` with a generic
+    message. This keeps the password out of Pydantic ``ValidationError`` reprs
+    (which echo raw input) and therefore out of API 400 responses and startup
+    logs.
+    """
+
+    username: str = ""
+    password: str = ""
+    password_file: str = ""
+
+    @field_validator("password_file", mode="before")
+    @classmethod
+    def expand_password_file_path(cls, value: object) -> object:
+        if isinstance(value, str) and value:
+            return _expand_path(value)
+        return value
+
+    def __repr__(self) -> str:
+        # Never expose the password in reprs / tracebacks.
+        return (
+            f"ProxyBasicAuth(username={self.username!r}, password=***, "
+            f"password_file={self.password_file!r})"
+        )
+
+
 class ProxyRouteEntry(BaseModel):
     path_prefix: str  # Required - no default (must be single-level, non-root)
     target_endpoint: str = "https://api.openai.com"
     api_key: str = ""
+    basic_auth: ProxyBasicAuth | None = None
     skip_cert_verify: bool = False
 
     @field_validator("path_prefix", mode="after")
@@ -307,7 +614,6 @@ class InferencePrivacyProxyPolicy(BaseModel):
     @field_validator("listen_host", mode="after")
     @classmethod
     def validate_listen_host(cls, value: str | None, info) -> str | None:
-        import ipaddress
         listen_port = info.data.get("listen_port", 0)
         if listen_port <= 0:
             return value
@@ -320,10 +626,372 @@ class InferencePrivacyProxyPolicy(BaseModel):
         return value.strip()
 
 
+class NetworkUplinkPolicy(BaseModel):
+    subnet: str = ""
+    nat: bool = True
+    interface: str = ""
+
+    @field_validator("subnet", mode="after")
+    @classmethod
+    def validate_subnet(cls, value: str) -> str:
+        if not value.strip():
+            return ""
+        try:
+            network = ipaddress.ip_network(value, strict=False)
+        except ValueError as exc:
+            raise ValueError(f"uplink.subnet must be a valid CIDR: {value}") from exc
+        if network.version != 4:
+            raise ValueError("uplink.subnet must be an IPv4 CIDR")
+        if network.prefixlen > 24:
+            raise ValueError("uplink.subnet prefix must be /24 or shorter")
+        return str(network)
+
+
 class NetworkPolicy(BaseModel):
     mode: NetworkMode = NetworkMode.ISOLATED
+    uplink: NetworkUplinkPolicy = Field(default_factory=NetworkUplinkPolicy)
     egress: NetworkRulePolicy = Field(default_factory=NetworkRulePolicy)
     ingress: NetworkRulePolicy = Field(default_factory=NetworkRulePolicy)
+
+
+class CgroupPolicy(BaseModel):
+    """Per-sandbox cgroup resource limits.
+
+    All three fields default to ``None`` which means *no limit applied*. If
+    every field is ``None`` (also true when the user omits ``cgroup``
+    entirely or passes ``cgroup: {}``), ``ProcessRuntime`` skips cgroup
+    setup completely, so this field is safe to leave alone on hosts that
+    don't expose a writable cgroup hierarchy.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    memory_max: int | None = None
+    cpu_max: tuple[int, int] | None = None
+    pids_max: int | None = None
+
+    @field_validator("memory_max", mode="before")
+    @classmethod
+    def normalize_memory_max(cls, value: object) -> int | None:
+        return _parse_memory_max(value)
+
+    @field_validator("cpu_max", mode="before")
+    @classmethod
+    def normalize_cpu_max(cls, value: object) -> tuple[int, int] | None:
+        return _parse_cpu_max(value)
+
+    @field_validator("pids_max", mode="before")
+    @classmethod
+    def normalize_pids_max(cls, value: object) -> int | None:
+        return _parse_pids_max(value)
+
+    def is_empty(self) -> bool:
+        """Return True when no field is set, i.e. cgroup setup should be skipped."""
+        return (
+            self.memory_max is None
+            and self.cpu_max is None
+            and self.pids_max is None
+        )
+
+
+class TimeoutPolicy(BaseModel):
+    """jiuwenbox 服务端的空闲沙箱淘汰配置.
+
+    本字段仅在 server 启动时加载的根 policy (``SandboxManager.policy``) 上生效,
+    用于驱动后台 reaper task; per-sandbox policy 上的同名字段不会影响沙箱隔离
+    (不下传到 bwrap / landlock / cgroup), 仅用于配置回显。
+
+    Fields:
+        idle_timeout: 沙箱最大空闲时长 (秒). ``None`` 或 ``<= 0`` 表示禁用淘汰
+            (默认禁用, 与未配置 timeout 字段时行为完全一致)。
+        idle_check_interval: reaper 轮询间隔 (秒). 必须 ``> 0``。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    idle_timeout: float | None = None
+    idle_check_interval: float = 60.0
+
+    @field_validator("idle_timeout", mode="before")
+    @classmethod
+    def normalize_idle_timeout(cls, value: object) -> float | None:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            raise ValueError("idle_timeout must be a number, not a boolean")
+        if isinstance(value, (int, float)):
+            number = float(value)
+        elif isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            try:
+                number = float(text)
+            except ValueError as exc:
+                raise ValueError(
+                    f"idle_timeout must parse as a number of seconds, got {value!r}"
+                ) from exc
+        else:
+            raise ValueError(
+                f"idle_timeout must be number or string, got {type(value).__name__}"
+            )
+        if number <= 0:
+            # Treat 0 / negative as "disabled" so users can flip the feature
+            # off without removing the whole key from their YAML.
+            return None
+        return number
+
+    @field_validator("idle_check_interval", mode="before")
+    @classmethod
+    def normalize_idle_check_interval(cls, value: object) -> float:
+        if value is None:
+            return 60.0
+        if isinstance(value, bool):
+            raise ValueError(
+                "idle_check_interval must be a positive number, not a boolean"
+            )
+        if isinstance(value, (int, float)):
+            number = float(value)
+        elif isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return 60.0
+            try:
+                number = float(text)
+            except ValueError as exc:
+                raise ValueError(
+                    f"idle_check_interval must parse as a number of seconds, "
+                    f"got {value!r}"
+                ) from exc
+        else:
+            raise ValueError(
+                f"idle_check_interval must be number or string, "
+                f"got {type(value).__name__}"
+            )
+        if number <= 0:
+            raise ValueError("idle_check_interval must be > 0")
+        return number
+
+
+CONCH_NETWORK_MAX_DESTINATIONS = 1024
+CONCH_INGRESS_DENY_ALL_CIDR = "0.0.0.0/0"
+
+
+def _normalize_conch_ipv4(value: object, *, field_name: str) -> str:
+    """Normalize a Conch network destination to IPv4 address or CIDR text."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} entries must be non-empty IPv4 addresses or CIDRs")
+    text = value.strip()
+    try:
+        if "/" in text:
+            network = ipaddress.ip_network(text, strict=False)
+            if network.version != 4:
+                raise ValueError(f"{field_name} only supports IPv4 addresses or CIDRs")
+            return str(network)
+        address = ipaddress.ip_address(text)
+        if address.version != 4:
+            raise ValueError(f"{field_name} only supports IPv4 addresses or CIDRs")
+        return str(address)
+    except ValueError as exc:
+        raise ValueError(
+            f"{field_name} contains unsupported destination {text!r}; "
+            "only IPv4 addresses and CIDRs are supported"
+        ) from exc
+
+
+class ConchFilesystemPolicy(BaseModel):
+    """Conch-only filesystem mounts (mapped to SDK volume_mounts)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bind_mounts: list[BindMount] = Field(default_factory=list)
+
+
+class ConchDirectionPolicy(BaseModel):
+    """IP-only direction policy; mirrors NetworkRulePolicy without domains/ports."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    default: Literal["allow", "deny"] = "allow"
+    allowed_ips: list[str] = Field(default_factory=list)
+    blocked_ips: list[str] = Field(default_factory=list)
+
+    @field_validator("allowed_ips", "blocked_ips", mode="before")
+    @classmethod
+    def normalize_ip_lists(cls, value: object, info) -> object:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError(f"{info.field_name} must be a list of IPv4 addresses or CIDRs")
+        return [
+            _normalize_conch_ipv4(item, field_name=info.field_name)
+            for item in value
+        ]
+
+
+class ConchNetworkPolicy(BaseModel):
+    """Conch network filter policy (mapped to Conch SandboxNetworkConfig)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ingress: ConchDirectionPolicy = Field(default_factory=ConchDirectionPolicy)
+    egress: ConchDirectionPolicy = Field(default_factory=ConchDirectionPolicy)
+
+    @model_validator(mode="after")
+    def enforce_destination_limit(self) -> ConchNetworkPolicy:
+        total = (
+            len(self.ingress.allowed_ips)
+            + len(self.ingress.blocked_ips)
+            + len(self.egress.allowed_ips)
+            + len(self.egress.blocked_ips)
+        )
+        # Account for the synthetic deny-all CIDR injected at mapping time.
+        if (
+            self.ingress.default == "deny"
+            and not self.ingress.allowed_ips
+            and CONCH_INGRESS_DENY_ALL_CIDR not in self.ingress.blocked_ips
+        ):
+            total += 1
+        if total > CONCH_NETWORK_MAX_DESTINATIONS:
+            raise ValueError(
+                f"conch.network supports at most {CONCH_NETWORK_MAX_DESTINATIONS} "
+                f"destinations across ingress/egress lists, got {total}"
+            )
+        return self
+
+
+class ConchPolicy(BaseModel):
+    """Conch backend policy; ignored by the bwrap ProcessRuntime path."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    template_name: str = ""
+    vcpu_num: int | None = None
+    vcpu_max: int | None = None
+    ram_mb: int | None = None
+    # Optional guest identity; resolved on the host to uid/gid at create time.
+    # Pair required: both set or both omitted. Distinct from process.run_as_*.
+    run_as_user: str | None = None
+    run_as_group: str | None = None
+    env: dict[str, str] = Field(default_factory=dict)
+    filesystem_policy: ConchFilesystemPolicy = Field(default_factory=ConchFilesystemPolicy)
+    network: ConchNetworkPolicy = Field(default_factory=ConchNetworkPolicy)
+
+    @field_validator("template_name", mode="before")
+    @classmethod
+    def normalize_template_name(cls, value: object) -> str:
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            raise ValueError("conch.template_name must be a string")
+        return value.strip()
+
+    @field_validator("vcpu_num", "vcpu_max", "ram_mb", mode="before")
+    @classmethod
+    def normalize_optional_positive_int(cls, value: object, info) -> int | None:
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool):
+            raise ValueError(f"conch.{info.field_name} must be an integer, not a boolean")
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            try:
+                number = int(text)
+            except ValueError as exc:
+                raise ValueError(
+                    f"conch.{info.field_name} must be an integer, got {value!r}"
+                ) from exc
+        elif isinstance(value, int):
+            number = value
+        elif isinstance(value, float) and value.is_integer():
+            number = int(value)
+        else:
+            raise ValueError(
+                f"conch.{info.field_name} must be an integer, got {type(value).__name__}"
+            )
+        if number < 1:
+            raise ValueError(f"conch.{info.field_name} must be >= 1, got {number}")
+        return number
+
+    @field_validator("run_as_user", "run_as_group", mode="before")
+    @classmethod
+    def normalize_optional_run_as_name(cls, value: object, info) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            raise ValueError(
+                f"conch.{info.field_name} must be a string or non-negative integer, "
+                "not a boolean"
+            )
+        if isinstance(value, int):
+            if value < 0:
+                raise ValueError(
+                    f"conch.{info.field_name} must be a non-negative integer, got {value}"
+                )
+            return str(value)
+        if isinstance(value, float) and value.is_integer():
+            number = int(value)
+            if number < 0:
+                raise ValueError(
+                    f"conch.{info.field_name} must be a non-negative integer, got {value}"
+                )
+            return str(number)
+        if isinstance(value, str):
+            text = value.strip()
+            return text or None
+        raise ValueError(
+            f"conch.{info.field_name} must be a string or non-negative integer, "
+            f"got {type(value).__name__}"
+        )
+
+    @field_validator("env", mode="before")
+    @classmethod
+    def normalize_env(cls, value: object) -> dict[str, str]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("conch.env must be a mapping of string keys to string values")
+        normalized: dict[str, str] = {}
+        for key, item in value.items():
+            if not isinstance(key, str) or not key:
+                raise ValueError("conch.env keys must be non-empty strings")
+            if item is None:
+                raise ValueError(f"conch.env[{key!r}] must be a string, got None")
+            if isinstance(item, bool) or not isinstance(item, (str, int, float)):
+                raise ValueError(
+                    f"conch.env[{key!r}] must be a string, got {type(item).__name__}"
+                )
+            normalized[key] = str(item)
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_vcpu_bounds(self) -> ConchPolicy:
+        if self.vcpu_max is not None and self.vcpu_num is None:
+            raise ValueError(
+                "conch.vcpu_max requires conch.vcpu_num to be set"
+            )
+        if (
+            self.vcpu_num is not None
+            and self.vcpu_max is not None
+            and self.vcpu_max < self.vcpu_num
+        ):
+            raise ValueError(
+                f"conch.vcpu_max must be >= conch.vcpu_num "
+                f"({self.vcpu_num}), got {self.vcpu_max}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_run_as_pair(self) -> ConchPolicy:
+        user_set = self.run_as_user is not None
+        group_set = self.run_as_group is not None
+        if user_set != group_set:
+            raise ValueError(
+                "conch.run_as_user and conch.run_as_group must both be set or both omitted"
+            )
+        return self
 
 
 class SecurityPolicy(BaseModel):
@@ -339,7 +1007,20 @@ class SecurityPolicy(BaseModel):
     landlock: LandlockPolicy = Field(default_factory=LandlockPolicy)
     syscall: SyscallPolicy = Field(default_factory=SyscallPolicy)
     network: NetworkPolicy = Field(default_factory=NetworkPolicy)
+    cgroup: CgroupPolicy = Field(default_factory=CgroupPolicy)
+    timeout: TimeoutPolicy = Field(default_factory=TimeoutPolicy)
+    conch: ConchPolicy = Field(default_factory=ConchPolicy)
     inference_privacy_proxies: InferencePrivacyProxyPolicy = Field(default_factory=InferencePrivacyProxyPolicy)
+
+    @field_validator("environment")
+    @classmethod
+    def reject_reserved_environment(
+        cls,
+        value: dict[str, str],
+    ) -> dict[str, str]:
+        if SANDBOX_IP_ENV in value:
+            raise ValueError(f"{SANDBOX_IP_ENV} is reserved by the sandbox runtime")
+        return value
 
     def tostring(self) -> str:
         """Serialize the policy to a YAML string."""

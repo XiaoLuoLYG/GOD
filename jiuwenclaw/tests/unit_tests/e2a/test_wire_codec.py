@@ -4,24 +4,37 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
 
 import pytest
+from openjiuwen.core.session.stream import OutputSchema
 
-from jiuwenclaw.common.e2a.constants import E2A_WIRE_LEGACY_AGENT_RESPONSE_KEY
-from jiuwenclaw.common.e2a.gateway_normalize import (
+from jiuwenswarm.common.e2a.constants import E2A_WIRE_LEGACY_AGENT_RESPONSE_KEY
+from jiuwenswarm.common.e2a.gateway_normalize import (
     e2a_response_from_agent_chunk,
     e2a_response_from_agent_response,
     e2a_response_to_agent_chunk,
     e2a_response_to_agent_response,
 )
-from jiuwenclaw.common.e2a.wire_codec import (
+from jiuwenswarm.common.e2a.wire_codec import (
     encode_agent_chunk_for_wire,
     encode_agent_response_for_wire,
     parse_agent_server_wire_chunk,
     parse_agent_server_wire_unary,
 )
-from jiuwenclaw.common.schema.agent import AgentResponse, AgentResponseChunk
+from jiuwenswarm.common.schema.agent import AgentResponse, AgentResponseChunk
+
+
+@pytest.mark.parametrize("source", [None, "team_background", "user"])
+def test_regular_team_delta_keeps_existing_identity_contract(source: str | None) -> None:
+    payload = {"event_type": "chat.delta", "content": "text", "request_id": "business", "rid": "round"}
+    if source is not None:
+        payload["source"] = source
+    chunk = AgentResponseChunk(request_id="frame", channel_id="web", payload=payload, is_complete=False)
+    restored = parse_agent_server_wire_chunk(encode_agent_chunk_for_wire(chunk, response_id="frame", sequence=1))
+    assert restored.request_id == "frame"
+    assert restored.payload == {key: value for key, value in payload.items() if key != "request_id"}
 
 
 def test_roundtrip_unary_ok() -> None:
@@ -54,6 +67,33 @@ def test_roundtrip_unary_error() -> None:
     assert back.payload == orig.payload
 
 
+def test_encode_unary_with_nested_output_schema_is_json_serializable() -> None:
+    orig = AgentResponse(
+        request_id="approval-answer",
+        channel_id="web",
+        ok=True,
+        payload={
+            "result": OutputSchema(
+                type="answer",
+                index=0,
+                payload={"output": "approval accepted", "result_type": "answer"},
+            )
+        },
+    )
+
+    wire = encode_agent_response_for_wire(orig, response_id="approval-answer")
+
+    json.dumps(wire, ensure_ascii=False)
+    back = parse_agent_server_wire_unary(wire)
+    assert back.payload == {
+        "result": {
+            "type": "answer",
+            "index": 0,
+            "payload": {"output": "approval accepted", "result_type": "answer"},
+        }
+    }
+
+
 def test_roundtrip_chunk_sentinel_complete() -> None:
     orig = AgentResponseChunk(
         request_id="s1",
@@ -75,6 +115,8 @@ def test_roundtrip_chunk_chat_delta() -> None:
             "event_type": "chat.delta",
             "content": "hi",
             "source_chunk_type": "llm_reasoning",
+            "rid": 7,
+            "source": "org_summary_background",
         },
         is_complete=False,
     )
@@ -84,6 +126,8 @@ def test_roundtrip_chunk_chat_delta() -> None:
     assert back.payload.get("event_type") == "chat.delta"
     assert back.payload.get("content") == "hi"
     assert back.payload.get("source_chunk_type") == "llm_reasoning"
+    assert back.payload.get("rid") == 7
+    assert back.payload.get("source") == "org_summary_background"
 
 
 def test_roundtrip_chunk_custom_event() -> None:
@@ -111,6 +155,23 @@ def test_roundtrip_chunk_chat_error() -> None:
     assert back.is_complete is True
     assert back.payload.get("event_type") == "chat.error"
     assert back.payload.get("error") == "boom"
+
+
+@pytest.mark.parametrize("details", [None, {}, {"code": "BACKEND_FAILED"}])
+def test_protocol_error_without_error_field_remains_chat_error(details) -> None:
+    wire = encode_agent_response_for_wire(
+        AgentResponse(request_id="failed", channel_id="__cron__", ok=False),
+        response_id="failed",
+    )
+    wire["body"] = {"code": "BACKEND_FAILED", "message": "backend failed"}
+    if details is not None:
+        wire["body"]["details"] = details
+
+    back = parse_agent_server_wire_chunk(wire)
+
+    assert back.is_complete is True
+    assert back.payload["event_type"] == "chat.error"
+    assert back.payload["error"] == "backend failed"
 
 
 def test_deprecated_legacy_unary_dict() -> None:
@@ -177,3 +238,49 @@ def test_inverse_raises_for_chunk_shape_on_unary_parser() -> None:
     )
     with pytest.raises(ValueError):
         parse_agent_server_wire_unary(chunk_wire)
+
+
+# ---------------------------------------------------------------------------
+# SDD-0010 — wire truncation keeps budget / token_count / child meta
+# ---------------------------------------------------------------------------
+
+def test_snapshot_keep_keys_include_budget() -> None:
+    from jiuwenswarm.server.wire_truncate import (
+        _WORKFLOW_LIST_SUMMARY_KEEP_KEYS,
+    )
+
+    assert "budget" in _WORKFLOW_LIST_SUMMARY_KEEP_KEYS
+
+
+def test_collapse_agent_keeps_token_count() -> None:
+    from jiuwenswarm.server.wire_truncate import _split_oversized_agent_fields
+
+    agent = {"id": "k1", "name": "analyst", "status": "completed", "kind": "agent",
+             "token_count": 12700, "outcome": "ok"}
+    out = _split_oversized_agent_fields(agent)
+    assert out.get("token_count") == 12700
+
+
+def test_collapse_phase_keeps_child_meta() -> None:
+    from jiuwenswarm.server.wire_truncate import _build_workflow_detail_paginated
+
+    item = {
+        "id": "wf_1", "name": "onboarding", "status": "running",
+        "agent_count": 1, "completed_agent_count": 0,
+        "started_at": "2026-08-01T10:00:00+08:00", "token_count": 12700,
+        "budget": {"total": 5, "spent": 5, "remaining": 0, "scope": "leader", "exhausted": True},
+        "phases": [{
+            "id": "p1", "name": "▸ intro #0", "status": "running",
+            "agent_count": 1, "completed_agent_count": 0,
+            "phase_type": "child", "nested_phase": "▸ intro #0",
+            "parent_phase": "review", "agents": [],
+        }],
+    }
+    out = _build_workflow_detail_paginated(item, session_id="s1")
+    wf = out["workflow"]
+    assert wf["budget"]["exhausted"] is True
+    assert wf.get("token_count") == 12700
+    ph = wf["phases"][0]
+    assert ph.get("phase_type") == "child"
+    assert ph.get("nested_phase") == "▸ intro #0"
+    assert ph.get("parent_phase") == "review"

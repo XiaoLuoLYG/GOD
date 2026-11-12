@@ -44,13 +44,28 @@ SANDBOX_LAUNCHER_PATH = f"{SANDBOX_RESERVED_DIR}/landlock-launcher.py"
 # children with ``close_fds=True`` so the inherited fd is not exposed
 # either).
 LISTENER_FD_ENV = "JIUWENBOX_CONTROL_LISTENER_FD"
+SANDBOX_IP_ENV = "SANDBOX_IP"
+
+
+def apply_sandbox_ip_env(
+    env: dict[str, str],
+    sandbox_ip: str | None,
+) -> None:
+    """Force ``SANDBOX_IP`` to the lifecycle snapshot (or remove if unavailable).
+
+    Callers must not invent a value when discovery fails; strip any prior
+    entry first so policy / create / host env cannot leave a fabricated IP.
+    """
+    env.pop(SANDBOX_IP_ENV, None)
+    if sandbox_ip:
+        env[SANDBOX_IP_ENV] = sandbox_ip
+
 
 # Daemon argv vector. ``-S`` shaves the ``import site`` cost so the daemon
 # starts faster; the daemon is stdlib-only so ``site`` is unnecessary.
 SANDBOX_DAEMON_COMMAND = ["python3", "-S", SANDBOX_DAEMON_SANDBOX_PATH]
 
 # Outgoing request types accepted by the daemon.
-REQUEST_TYPE_PING = "ping"
 REQUEST_TYPE_EXEC = "exec"
 REQUEST_TYPE_SHUTDOWN = "shutdown"
 # File-ops fast paths. Box-server uses these instead of spawning bash/
@@ -62,6 +77,9 @@ REQUEST_TYPE_SHUTDOWN = "shutdown"
 REQUEST_TYPE_WRITE_FILE = "write_file"
 REQUEST_TYPE_READ_FILE = "read_file"
 REQUEST_TYPE_LIST_DIR = "list_dir"
+REQUEST_TYPE_EXEC_BACKGROUND = "exec_background"
+REQUEST_TYPE_BG_STATUS = "bg_status"
+REQUEST_TYPE_BG_KILL = "bg_kill"
 
 PROTOCOL_VERSION = 1
 MAX_HEADER_BYTES = 1 * 1024 * 1024          # 1 MiB JSON header upper bound
@@ -121,8 +139,3 @@ def encode_request(
     if payload:
         body.update(payload)
     return json.dumps(body, ensure_ascii=False).encode("utf-8")
-
-
-def decode_request(blob: bytes) -> dict[str, Any]:
-    import json
-    return json.loads(blob.decode("utf-8"))

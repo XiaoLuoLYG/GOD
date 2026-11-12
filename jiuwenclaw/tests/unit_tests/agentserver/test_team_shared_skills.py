@@ -1,292 +1,303 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-"""Unit tests for team shared skills copying logic."""
+"""Unit tests for team Skill visibility metadata and the library reload rail.
+
+Skills live in exactly one physical library (``get_agent_skills_dir()``); a
+team owns no mirrored ``skills/`` directory. What a team or a member may see is
+decided by a ``skills-visibility.json`` document at the corresponding workspace
+root, so these tests assert on metadata content rather than on symlinks.
+"""
 
 # pylint: disable=protected-access
 
-import json
-from pathlib import Path
+import inspect
+import logging
 
-from openjiuwen.agent_teams.schema.blueprint import TeamAgentSpec
+import pytest
+from openjiuwen.agent_evolving.checkpointing import EvolutionStore
+from openjiuwen.agent_evolving.checkpointing.types import EvolutionPatch, EvolutionRecord, EvolutionTarget
+from openjiuwen.agent_teams.paths import SKILL_VISIBILITY_FILENAME
+from openjiuwen.core.single_agent.rail.base import ToolCallInputs
+from openjiuwen.agent_teams.skill import (
+    SCOPE_MEMBER,
+    SCOPE_TEAM,
+    SkillVisibility,
+    bootstrap_skill_visibility,
+    compose_skill_visibility,
+    read_skill_visibility,
+    set_skill_visibility,
+)
 
-from jiuwenclaw.agents.harness.team.team_manager import TeamManager
+from jiuwenswarm.agents.harness.team.rails.team_skill_library_reload_rail import (
+    TeamSkillLibraryReloadRail,
+)
+from jiuwenswarm.agents.harness.team import team_manager as team_manager_module
+from jiuwenswarm.agents.harness.team.team_manager import TeamManager
+from jiuwenswarm.agents.swarm import assembly
+from jiuwenswarm.server.runtime.skill.skill_manager import SkillManager
+
+test_logger = logging.getLogger("tests.team_shared_skills")
 
 
-def test_copy_global_skills_to_team_shared_dir(tmp_path, monkeypatch):
-    """Global skills should be copied to team shared directory via _copy_global_skills_to_team_shared_dir."""
-    # Create global skills directory
-    global_skills_dir = tmp_path / "global_skills"
-    global_skills_dir.mkdir(parents=True)
-    for skill_name in ("skill-a", "skill-b"):
-        skill_dir = global_skills_dir / skill_name
-        skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text(f"---\nname: {skill_name}\n---\n", encoding="utf-8")
+def _make_skill(library_dir, name: str) -> None:
+    """Create a minimal Skill directory inside the single physical library."""
+    skill_dir = library_dir / name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(f"---\nname: {name}\n---\n", encoding="utf-8")
 
-    # Create global skills_state.json
-    (global_skills_dir / "skills_state.json").write_text(
-        json.dumps({
-            "marketplaces": [{"name": "demo", "url": "https://example.com", "enabled": True}],
-            "installed_plugins": [{"name": "skill-a", "source": "demo"}],
-            "local_skills": [{"name": "skill-b", "source": "local"}],
-        }),
+
+@pytest.mark.asyncio
+async def test_team_evolution_is_visible_and_editable_from_global_skill_manager(tmp_path):
+    """A Skill evolved from the team side is the same entity the global manager edits."""
+    global_workspace = tmp_path / "agent" / "workspace"
+    global_skills_dir = global_workspace / "skills"
+    _make_skill(global_skills_dir, "shared-skill")
+    (global_skills_dir / "shared-skill" / "SKILL.md").write_text(
+        "---\nname: shared-skill\nkind: swarm-skill\n---\n\n# Shared Skill\n",
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(
-        "jiuwenclaw.agents.harness.team.team_manager.get_agent_skills_dir",
-        lambda: global_skills_dir,
+    store = EvolutionStore(str(global_skills_dir))
+    record = EvolutionRecord(
+        id="ev_shared",
+        source="execution_success",
+        timestamp="2026-08-04T00:00:00+00:00",
+        context="team run",
+        change=EvolutionPatch(
+            section="Instructions",
+            action="append",
+            content="original experience",
+            target=EvolutionTarget.BODY,
+        ),
     )
+    await store.append_record("shared-skill", record, subject_kind="swarm-skill")
 
-    # Create team workspace config
+    manager = SkillManager(workspace_dir=str(global_workspace))
+    listed = await manager.handle_skills_list({})
+    skill = next(item for item in listed["skills"] if item["name"] == "shared-skill")
+    assert skill["has_evolutions"] is True
+
+    evolution = await manager.handle_skills_evolution_get({"name": "shared-skill"})
+    assert [entry["id"] for entry in evolution["entries"]] == ["ev_shared"]
+    evolution["entries"][0]["change"]["content"] = "edited experience"
+
+    saved = await manager.handle_skills_evolution_save(
+        {"name": "shared-skill", "entries": evolution["entries"]}
+    )
+    assert saved["success"] is True
+    reloaded = await manager.handle_skills_evolution_get({"name": "shared-skill"})
+    assert reloaded["entries"][0]["change"]["content"] == "edited experience"
+
+
+def test_platform_declares_no_team_scope_skill_visibility_seeder():
+    """The team document has exactly one seeder, and it does not live here.
+
+    ``TeamWorkspaceManager.initialize`` seeds the team-scope
+    ``skills-visibility.json``; the platform side only resolves the path and
+    hands it to the rails. A second writer would be harmless only while every
+    writer agrees on an empty allow-list — the moment one of them seeds a real
+    grant, the outcome would depend on call order. This guard fails as soon as
+    a seeder is added back to team assembly or to the team lifecycle manager.
+    """
+    for module in (assembly, team_manager_module):
+        source = inspect.getsource(module)
+        test_logger.info("checking %s for a team-scope seeder", module.__name__)
+        assert "bootstrap_skill_visibility" not in source
+
+    assert not hasattr(TeamManager, "ensure_team_skill_visibility_initialized")
+    assert not hasattr(TeamManager, "ensure_team_skill_visibility_ready_for_session")
+
+
+def test_missing_team_visibility_document_imposes_no_restriction(tmp_path):
+    """A team without a seeded document constrains nothing, so no seeding is required."""
+    metadata_path = tmp_path / "team_workspace" / SKILL_VISIBILITY_FILENAME
+
+    team = read_skill_visibility(metadata_path, scope=SCOPE_TEAM, entity_id="demo_team")
+    test_logger.info("missing team document reads back as: allow=%s deny=%s", team.allow, team.deny)
+    assert team.allow == []
+    assert team.deny == []
+
+    member = SkillVisibility(scope=SCOPE_MEMBER, id="teammate")
+    enabled, disabled = compose_skill_visibility(member, team, [])
+    assert enabled == set()
+    assert disabled == set()
+
+
+def test_newly_installed_skill_is_visible_without_touching_metadata(tmp_path):
+    """A new library entry needs no metadata edit: an empty allow-list inherits it."""
     team_workspace = tmp_path / "team_workspace"
-    team_workspace.mkdir(parents=True)
-    team_shared_skills = team_workspace / "skills"
-
-    # Build TeamAgentSpec with custom workspace path
-    spec = TeamAgentSpec.model_validate(
-        {
-            "team_name": "demo_team",
-            "agents": {
-                "leader": {},
-                "teammate": {},
-            },
-            "workspace": {"root_path": str(team_workspace), "enabled": True},
-        }
+    bootstrap_skill_visibility(
+        team_workspace / SKILL_VISIBILITY_FILENAME,
+        scope=SCOPE_TEAM,
+        entity_id="demo_team",
+        allow=None,
+        bootstrapped_from="team_workspace:initialize",
     )
 
-    # Call _copy_global_skills_to_team_shared_dir method directly
-    manager = TeamManager()
-    manager._copy_global_skills_to_team_shared_dir(spec)
+    team = read_skill_visibility(
+        team_workspace / SKILL_VISIBILITY_FILENAME,
+        scope=SCOPE_TEAM,
+        entity_id="demo_team",
+    )
+    member = SkillVisibility(scope=SCOPE_MEMBER, id="teammate")
+    enabled, disabled = compose_skill_visibility(member, team, [])
 
-    # Verify marker file exists in team shared skills directory
-    assert (team_shared_skills / ".team_skills_copied").exists()
-
-    # Verify skills and skills_state.json are copied
-    assert (team_shared_skills / "skill-a" / "SKILL.md").exists()
-    assert (team_shared_skills / "skill-b" / "SKILL.md").exists()
-    assert (team_shared_skills / "skills_state.json").exists()
-
-    # Verify skills_state.json content is correct
-    shared_state = json.loads((team_shared_skills / "skills_state.json").read_text(encoding="utf-8"))
-    assert shared_state["marketplaces"] == [{"name": "demo", "url": "https://example.com", "enabled": True}]
+    # Nothing is enumerated, so nothing can go stale when "skill-new" lands later.
+    assert enabled == set()
+    assert disabled == set()
 
 
-def test_copy_global_skills_not_copied_twice(tmp_path, monkeypatch):
-    """Second call to _copy_global_skills_to_team_shared_dir should not copy again."""
+@pytest.mark.asyncio
+async def test_team_skill_library_reload_rail_reloads_after_global_skill_write(tmp_path, monkeypatch):
+    """The after-tool rail reloads Skill views only when writes touch the library."""
+    monkeypatch.setattr(
+        "jiuwenswarm.agents.harness.team.rails.team_skill_library_reload_rail.get_cwd",
+        lambda: str(tmp_path),
+    )
     global_skills_dir = tmp_path / "global_skills"
-    global_skills_dir.mkdir(parents=True)
-    skill_dir = global_skills_dir / "skill-a"
-    skill_dir.mkdir()
-    (skill_dir / "SKILL.md").write_text("---\nname: skill-a\n---\n", encoding="utf-8")
-    (global_skills_dir / "skills_state.json").write_text("{}", encoding="utf-8")
+    _make_skill(global_skills_dir, "skill-a")
+    skill_md = global_skills_dir / "skill-a" / "SKILL.md"
+    reload_calls = []
 
-    monkeypatch.setattr(
-        "jiuwenclaw.agents.harness.team.team_manager.get_agent_skills_dir",
-        lambda: global_skills_dir,
+    rail = TeamSkillLibraryReloadRail(
+        global_skills_dir=global_skills_dir,
+        reload_skill_views=lambda: reload_calls.append("reload"),
     )
-
-    team_workspace = tmp_path / "team_workspace"
-    team_workspace.mkdir(parents=True)
-    team_shared_skills = team_workspace / "skills"
-    team_shared_skills.mkdir(parents=True)
-    # Pre-create marker file to simulate already copied
-    (team_shared_skills / ".team_skills_copied").write_text("", encoding="utf-8")
-
-    spec = TeamAgentSpec.model_validate(
+    ctx = type(
+        "_Ctx",
+        (),
         {
-            "team_name": "demo_team",
-            "agents": {"leader": {}, "teammate": {}},
-            "workspace": {"root_path": str(team_workspace), "enabled": True},
-        }
+            "inputs": ToolCallInputs(
+                tool_name="write_file",
+                tool_args={"file_path": str(skill_md.relative_to(tmp_path))},
+            ),
+            "agent": None,
+        },
+    )()
+
+    await rail.after_tool_call(ctx)
+
+    assert reload_calls == ["reload"]
+
+
+@pytest.mark.asyncio
+async def test_team_skill_library_reload_rail_ignores_writes_outside_library(tmp_path, monkeypatch):
+    """Writes outside the single library must not trigger a Skill view reload."""
+    monkeypatch.setattr(
+        "jiuwenswarm.agents.harness.team.rails.team_skill_library_reload_rail.get_cwd",
+        lambda: str(tmp_path),
     )
-
-    manager = TeamManager()
-    manager._copy_global_skills_to_team_shared_dir(spec)
-
-    # Verify no new skill copied (marker file already exists)
-    assert not (team_shared_skills / "skill-a").exists()
-
-
-def test_member_configured_skills_copied_to_own_dir(tmp_path, monkeypatch):
-    """Member-configured skills should be copied to member's own skills directory."""
     global_skills_dir = tmp_path / "global_skills"
-    global_skills_dir.mkdir(parents=True)
-    for skill_name in ("skill-a", "skill-b", "skill-c"):
-        skill_dir = global_skills_dir / skill_name
-        skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text(f"---\nname: {skill_name}\n---\n", encoding="utf-8")
-    (global_skills_dir / "skills_state.json").write_text(
-        json.dumps({
-            "marketplaces": [],
-            "installed_plugins": [],
-            "local_skills": [],
-        }),
-        encoding="utf-8",
-    )
+    _make_skill(global_skills_dir, "skill-a")
+    outside_file = tmp_path / "notes" / "todo.md"
+    outside_file.parent.mkdir(parents=True)
+    outside_file.write_text("unrelated\n", encoding="utf-8")
+    reload_calls = []
 
-    monkeypatch.setattr(
-        "jiuwenclaw.agents.harness.team.team_manager.get_agent_skills_dir",
-        lambda: global_skills_dir,
+    rail = TeamSkillLibraryReloadRail(
+        global_skills_dir=global_skills_dir,
+        reload_skill_views=lambda: reload_calls.append("reload"),
     )
-    monkeypatch.setattr(
-        "jiuwenclaw.agents.harness.team.team_runtime_inheritance.build_member_rails",
-        lambda **kwargs: [],
-    )
-    monkeypatch.setattr(
-        "jiuwenclaw.agents.harness.common.plugins.rail_manager.get_rail_manager",
-        lambda: type(
-            "_DummyRailManager",
-            (),
-            {
-                "get_registered_rail_names": lambda self: [],
-                "load_rail_instance_without_enabled_check": lambda self, name: None,
-            },
-        )(),
-    )
-
-    # Create team shared directory (simulate global skills already copied)
-    team_workspace = tmp_path / "team_workspace"
-    team_workspace.mkdir(parents=True)
-    team_shared_skills = team_workspace / "skills"
-    team_shared_skills.mkdir(parents=True)
-    # Simulate global skills copied to team shared directory
-    for skill_name in ("skill-a", "skill-b", "skill-c"):
-        skill_dir = team_shared_skills / skill_name
-        skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text(f"---\nname: {skill_name}\n---\n", encoding="utf-8")
-    (team_shared_skills / ".team_skills_copied").write_text("", encoding="utf-8")
-
-    member_root = tmp_path / "member_workspace"
-    member_root.mkdir(parents=True)
-    (member_root / "skills").mkdir(parents=True)
-
-    spec = TeamAgentSpec.model_validate(
+    ctx = type(
+        "_Ctx",
+        (),
         {
-            "team_name": "demo_team",
-            "agents": {
-                "leader": {},
-                "member_a": {"skills": ["skill-a"]},  # Only configure skill-a
-            },
-            "workspace": {"root_path": str(team_workspace), "enabled": True},
-        }
+            "inputs": ToolCallInputs(
+                tool_name="write_file",
+                tool_args={"file_path": str(outside_file)},
+            ),
+            "agent": None,
+        },
+    )()
+
+    await rail.after_tool_call(ctx)
+
+    assert reload_calls == []
+
+
+def test_bootstrap_skill_visibility_seeds_member_allow_only_once(tmp_path):
+    """Config seeds a member document once; later config edits never overwrite it."""
+    member_path = tmp_path / "reviewer_workspace" / SKILL_VISIBILITY_FILENAME
+
+    first = bootstrap_skill_visibility(
+        member_path,
+        scope=SCOPE_MEMBER,
+        entity_id="reviewer",
+        allow=["skill-a"],
+        bootstrapped_from="config:agents.teammate.skills",
+    )
+    assert first.allow == ["skill-a"]
+
+    second = bootstrap_skill_visibility(
+        member_path,
+        scope=SCOPE_MEMBER,
+        entity_id="reviewer",
+        allow=["skill-b"],
+        bootstrapped_from="config:agents.teammate.skills",
     )
 
-    customizer = TeamManager.build_agent_customizer(
-        spec=spec,
-        deep_agent=type("_DeepAgent", (), {
-            "deep_config": type("_Config", (), {"sys_operation": None})(),
-            "ability_manager": type("_AbilityManager", (), {"list": lambda self: []})(),
-        })(),
-        session_id="session-1",
+    test_logger.info("member allow after second bootstrap: %s", second.allow)
+    assert second.allow == ["skill-a"]
+    assert second.bootstrapped_from == "config:agents.teammate.skills"
+
+
+def test_compose_skill_visibility_unions_allow_and_prefers_deny(tmp_path):
+    """Member and team allow-lists union; any deny wins over every allow."""
+    member_path = tmp_path / "reviewer_workspace" / SKILL_VISIBILITY_FILENAME
+    team_path = tmp_path / "team_workspace" / SKILL_VISIBILITY_FILENAME
+    set_skill_visibility(
+        member_path,
+        scope=SCOPE_MEMBER,
+        entity_id="reviewer",
+        allow=["skill-a", "skill-shared"],
+        deny=["skill-x"],
+    )
+    set_skill_visibility(
+        team_path,
+        scope=SCOPE_TEAM,
+        entity_id="demo_team",
+        allow=["skill-b", "skill-shared"],
+        deny=["skill-y"],
     )
 
-    agent = type("_Agent", (), {
-        "deep_config": type("_Config", (), {
-            "workspace": type("_Workspace", (), {"root_path": str(member_root)})(),
-            "sys_operation": None,
-        })(),
-        "ability_manager": type("_AbilityManager", (), {"list": lambda self: [], "add": lambda self, card: None})(),
-        "card": type("_Card", (), {"id": "member_a", "name": "member"})(),
-        "add_rail": lambda self, rail: None,
-    })()
+    member = read_skill_visibility(member_path, scope=SCOPE_MEMBER, entity_id="reviewer")
+    team = read_skill_visibility(team_path, scope=SCOPE_TEAM, entity_id="demo_team")
+    enabled, disabled = compose_skill_visibility(member, team, ["skill-z"])
 
-    customizer(agent, member_name="member_a", role="teammate")
-
-    # Member directory only contains configured skill-a
-    member_skills_dir = member_root / "skills"
-    assert (member_skills_dir / "skill-a").exists()
-    assert not (member_skills_dir / "skill-b").exists()
-    assert not (member_skills_dir / "skill-c").exists()
-
-    # Verify member directory's skills_state.json only contains skill-a
-    member_state = json.loads((member_skills_dir / "skills_state.json").read_text(encoding="utf-8"))
-    installed_names = [p["name"] for p in member_state["installed_plugins"]]
-    assert installed_names == ["skill-a"]
+    test_logger.info("composed enabled=%s disabled=%s", sorted(enabled), sorted(disabled))
+    assert enabled == {"skill-a", "skill-b", "skill-shared"}
+    assert disabled == {"skill-x", "skill-y", "skill-z"}
 
 
-def test_member_no_configured_skills_has_state_file(tmp_path, monkeypatch):
-    """When member has no configured skills, member directory should still have skills_state.json (empty)."""
-    global_skills_dir = tmp_path / "global_skills"
-    global_skills_dir.mkdir(parents=True)
-    for skill_name in ("skill-a", "skill-b", "skill-c"):
-        skill_dir = global_skills_dir / skill_name
-        skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text(f"---\nname: {skill_name}\n---\n", encoding="utf-8")
-    (global_skills_dir / "skills_state.json").write_text(
-        json.dumps({
-            "marketplaces": [],
-            "installed_plugins": [],
-            "local_skills": [],
-        }),
-        encoding="utf-8",
-    )
+def test_compose_skill_visibility_empty_allow_means_inherit_everything():
+    """An empty allow-list is passed through, so later library additions stay visible."""
+    member = SkillVisibility(scope=SCOPE_MEMBER, id="reviewer")
+    team = SkillVisibility(scope=SCOPE_TEAM, id="demo_team")
 
-    monkeypatch.setattr(
-        "jiuwenclaw.agents.harness.team.team_manager.get_agent_skills_dir",
-        lambda: global_skills_dir,
-    )
-    monkeypatch.setattr(
-        "jiuwenclaw.agents.harness.team.team_runtime_inheritance.build_member_rails",
-        lambda **kwargs: [],
-    )
-    monkeypatch.setattr(
-        "jiuwenclaw.agents.harness.common.plugins.rail_manager.get_rail_manager",
-        lambda: type("_DummyRailManager", (), {
-            "get_registered_rail_names": lambda self: [],
-            "load_rail_instance_without_enabled_check": lambda self, name: None,
-        })(),
-    )
+    enabled, disabled = compose_skill_visibility(member, team, None)
 
-    # Create team shared directory
-    team_workspace = tmp_path / "team_workspace"
-    team_workspace.mkdir(parents=True)
-    team_shared_skills = team_workspace / "skills"
-    team_shared_skills.mkdir(parents=True)
-    (team_shared_skills / ".team_skills_copied").write_text("", encoding="utf-8")
+    assert enabled == set()
+    assert disabled == set()
 
-    member_root = tmp_path / "member_workspace"
-    member_root.mkdir(parents=True)
-    (member_root / "skills").mkdir(parents=True)
 
-    spec = TeamAgentSpec.model_validate(
-        {
-            "team_name": "demo_team",
-            "agents": {
-                "leader": {},
-                "member_a": {},  # No skills configured
-            },
-            "workspace": {"root_path": str(team_workspace), "enabled": True},
-        }
-    )
+def test_compose_skill_visibility_without_team_uses_member_only():
+    """A member outside any team composes from its own document alone."""
+    member = SkillVisibility(scope=SCOPE_MEMBER, id="solo", allow=["skill-a"], deny=["skill-b"])
 
-    customizer = TeamManager.build_agent_customizer(
-        spec=spec,
-        deep_agent=type("_DeepAgent", (), {
-            "deep_config": type("_Config", (), {"sys_operation": None})(),
-            "ability_manager": type("_AbilityManager", (), {"list": lambda self: []})(),
-        })(),
-        session_id="session-1",
-    )
+    enabled, disabled = compose_skill_visibility(member, None, ["skill-c"])
 
-    agent = type("_Agent", (), {
-        "deep_config": type("_Config", (), {
-            "workspace": type("_Workspace", (), {"root_path": str(member_root)})(),
-            "sys_operation": None,
-        })(),
-        "ability_manager": type("_AbilityManager", (), {"list": lambda self: [], "add": lambda self, card: None})(),
-        "card": type("_Card", (), {"id": "member_a", "name": "member"})(),
-        "add_rail": lambda self, rail: None,
-    })()
+    assert enabled == {"skill-a"}
+    assert disabled == {"skill-b", "skill-c"}
 
-    customizer(agent, member_name="member_a", role="teammate")
 
-    # Member directory should not have any skill (not configured)
-    member_skills_dir = member_root / "skills"
-    assert not (member_skills_dir / "skill-a").exists()
-    assert not (member_skills_dir / "skill-b").exists()
-    assert not (member_skills_dir / "skill-c").exists()
-    # Member directory should have skills_state.json (empty)
-    assert (member_skills_dir / "skills_state.json").exists()
-    member_state = json.loads((member_skills_dir / "skills_state.json").read_text(encoding="utf-8"))
-    assert member_state["installed_plugins"] == []
-    assert member_state["local_skills"] == []
+def test_read_skill_visibility_degrades_to_permissive_on_corrupt_document(tmp_path):
+    """A corrupt document must never leave an agent with zero Skills."""
+    metadata_path = tmp_path / SKILL_VISIBILITY_FILENAME
+    metadata_path.write_text("{not json", encoding="utf-8")
+
+    visibility = read_skill_visibility(metadata_path, scope=SCOPE_MEMBER, entity_id="reviewer")
+
+    test_logger.info("degraded visibility: allow=%s deny=%s", visibility.allow, visibility.deny)
+    assert visibility.allow == []
+    assert visibility.deny == []
+    assert visibility.is_unrestricted is True
