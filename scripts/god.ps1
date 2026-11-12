@@ -526,17 +526,20 @@ function Ensure-EnvFile {
 
 function Test-PortOpen {
   param([int]$Port)
-  foreach ($connectHost in @("127.0.0.1", "::1", "localhost")) {
-    $client = New-Object System.Net.Sockets.TcpClient
+  foreach ($address in @([System.Net.IPAddress]::Loopback, [System.Net.IPAddress]::IPv6Loopback)) {
+    $client = $null
     try {
-      $async = $client.BeginConnect($connectHost, $Port, $null, $null)
+      $client = [System.Net.Sockets.TcpClient]::new($address.AddressFamily)
+      $async = $client.BeginConnect($address, $Port, $null, $null)
       if ($async.AsyncWaitHandle.WaitOne(350)) {
         $client.EndConnect($async)
         return $true
       }
     } catch {
     } finally {
-      $client.Close()
+      if ($null -ne $client) {
+        $client.Close()
+      }
     }
   }
   return $false

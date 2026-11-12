@@ -17,16 +17,16 @@ jobs:
       matrix:
         include:
           - label: Final PR 107 / OpenAI compatible / normal PATH
-            ref: 0faebf3c2f915b4479ff71ff1f80a4cd752ba2d1
+            ref: a2178b146e7296a1d07b39b12e2da8dc726b975b
             mode: external
           - label: Final PR 107 / JiuwenClaw / normal PATH
-            ref: 0faebf3c2f915b4479ff71ff1f80a4cd752ba2d1
+            ref: a2178b146e7296a1d07b39b12e2da8dc726b975b
             mode: runtime
           - label: Final combined / OpenAI compatible / normal PATH
-            ref: d2e1c3828ac099f0767e604084f1c9af976a2c7b
+            ref: 6422dce2d19b6f09177c346fd57fd890a42a778b
             mode: external
           - label: Final combined / JiuwenSwarm migration / normal PATH
-            ref: d2e1c3828ac099f0767e604084f1c9af976a2c7b
+            ref: 6422dce2d19b6f09177c346fd57fd890a42a778b
             mode: migration
     steps:
       - name: Enable long Git paths

@@ -205,6 +205,23 @@ foreach ($sample in $cases.GetEnumerator()) {
   }
 }
 Write-Host 'PASS exact PowerShell wrapper sends BOM-free en, zh, and yes/en to native uv subprocesses'
+$portProbe = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-PortOpen' }, $true)
+if ($null -eq $portProbe) { throw 'Test-PortOpen was not found' }
+. ([ScriptBlock]::Create($portProbe.Extent.Text))
+foreach ($loopback in @([System.Net.IPAddress]::Loopback, [System.Net.IPAddress]::IPv6Loopback)) {
+  $listener = [System.Net.Sockets.TcpListener]::new($loopback, 0)
+  try {
+    if ($loopback.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetworkV6) {
+      $listener.Server.DualMode = $false
+    }
+    $listener.Start()
+    $port = $listener.LocalEndpoint.Port
+    if (-not (Test-PortOpen $port)) { throw "Test-PortOpen missed a live listener on $($loopback):$port" }
+    Write-Host "PASS Test-PortOpen detects a $($loopback.AddressFamily)-only Windows loopback listener on $port"
+  } finally {
+    $listener.Stop()
+  }
+}
 """
     subprocess.run(PS[:-2] + ["-Command", native_path_test], cwd=ROOT, check=True)
     assert not (ROOT / ".env").exists() and not (STATE / "current_experiment.json").exists()
@@ -283,8 +300,10 @@ Write-Host 'PASS exact PowerShell wrapper sends BOM-free en, zh, and yes/en to n
         status_matches(status, "Control room", 5174, "up")
         assert re.search(rf"Experiment:\s+{EXP} / experiment_1", status)
         expected = MODE != "external"
-        for port in RUNTIME_PORTS:
+        runtime_labels = ("Agent runtime", "Agent runtime web", "Agent runtime gateway", "Agent runtime UI")
+        for label, port in zip(runtime_labels, RUNTIME_PORTS, strict=True):
             assert is_open(port) == expected, f"unexpected runtime port state: {port}"
+            status_matches(status, label, port, "up" if expected else "down")
         if MODE == "external":
             assert not (ROOT / "jiuwenclaw" / ".venv").exists(), "external selection installed the runtime"
             assert not (STATE / "pids" / "runtime.pid").exists()
