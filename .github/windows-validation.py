@@ -181,6 +181,26 @@ def run():
                AGENTSOCIETY_LIVE_INTERACTION_TIMEOUT="75", LIVE_WORKSPACE_PATH=str(WORKSPACE),
                RUNTIME_INSTANCE=INSTANCE, RUNTIME_LANGUAGE="en", GOD_EXTRA_STOP_PORTS="29193",
                JIUWENSWARM_HOME=str(ROOT / "swarm-home"), PYTHONUTF8="1")
+    inherited_path_check = r"""
+$machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+$user = [Environment]::GetEnvironmentVariable('Path', 'User')
+$local = Join-Path $HOME '.local\bin'
+foreach ($appendCount in 0..3) {
+  Write-Host "Runner PATH length after $appendCount launcher-style appends: $($env:Path.Length)"
+  cmd.exe /d /c node --version
+  Write-Host "Nested cmd.exe node lookup exit: $LASTEXITCODE"
+  $env:Path = ((@($env:Path, $machine, $user, $local) | Where-Object { $_ }) -join ';')
+}
+exit 0
+"""
+    subprocess.run(PS[:-2] + ["-Command", inherited_path_check], cwd=ROOT, check=True)
+    tools = ("node.exe", "npm.cmd", "uv.exe", "git.exe", "python.exe", "powershell.exe")
+    paths = [Path(shutil.which(tool)).parent for tool in tools]
+    windows = Path(os.environ["SystemRoot"])
+    paths.extend([windows / "System32", windows, windows / "System32" / "Wbem"])
+    env["PATH"] = os.pathsep.join(str(path) for path in dict.fromkeys(paths))
+    print(f"Short process-only tool PATH length: {len(env['PATH'])}", flush=True)
+    subprocess.run(["cmd.exe", "/d", "/c", "node", "--version"], cwd=ROOT, env=env, check=True)
     legacy = ROOT / "legacy runtime workspace"
     if MODE == "migration":
         registry = Path.home() / ".jiuwenclaw" / "instances.yaml"
