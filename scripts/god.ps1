@@ -964,6 +964,7 @@ function Invoke-NativeCommand {
   )
   begin {
     $previousEap = $ErrorActionPreference
+    $previousOutputEncoding = $OutputEncoding
     $ErrorActionPreference = "Continue"
     $pipelineInput = New-Object System.Collections.Generic.List[object]
   }
@@ -976,6 +977,9 @@ function Invoke-NativeCommand {
     try {
       $hasInput = $pipelineInput.Count -gt 0
       $inputText = if ($hasInput) { ($pipelineInput | ForEach-Object { [string]$_ }) -join [Environment]::NewLine } else { $null }
+      if ($hasInput) {
+        $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+      }
       if ($LogPath) {
         if ($hasInput) {
           $inputText | & $FilePath @ArgumentList 2>&1 | Out-File -FilePath $LogPath -Append -Encoding utf8
@@ -991,6 +995,7 @@ function Invoke-NativeCommand {
       }
     } finally {
       $ErrorActionPreference = $previousEap
+      $OutputEncoding = $previousOutputEncoding
     }
   }
 }
