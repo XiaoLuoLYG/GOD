@@ -53,4 +53,21 @@ jobs:
           UV_NO_PROGRESS: '1'
           LITELLM_LOCAL_MODEL_COST_MAP: 'True'
           DO_NOT_TRACK: '1'
-        run: python -u harness/.github/windows-validation.py src '${{ matrix.mode }}'
+        run: |
+          if ($env:GITHUB_ACTIONS -ne 'true' -or '${{ runner.environment }}' -ne 'github-hosted') {
+            throw 'The PATH fixture is limited to disposable GitHub-hosted Windows machines.'
+          }
+          $originalMachinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          $originalUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          try {
+            $windows = $env:SystemRoot
+            $systemPaths = "$windows\System32;$windows;$windows\System32\Wbem;$windows\System32\WindowsPowerShell\v1.0"
+            [Environment]::SetEnvironmentVariable('Path', $systemPaths, 'Machine')
+            [Environment]::SetEnvironmentVariable('Path', $null, 'User')
+            Write-Host 'Using a short Machine/User PATH fixture for this disposable Windows runner.'
+            python -u harness/.github/windows-validation.py src '${{ matrix.mode }}'
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            [Environment]::SetEnvironmentVariable('Path', $originalMachinePath, 'Machine')
+            [Environment]::SetEnvironmentVariable('Path', $originalUserPath, 'User')
+          }
