@@ -1,0 +1,145 @@
+from pathlib import Path
+
+import yaml
+
+
+def test_default_model_config_does_not_set_context_window():
+    repo_root = Path(__file__).resolve().parents[2]
+    config_file = repo_root / "jiuwenswarm" / "resources" / "config.yaml"
+
+    data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+
+    model_config = data["models"]["defaults"][0]["model_config_obj"]
+    assert "context_window" not in model_config
+
+
+def test_default_model_group_routing_timeout_matches_single_model():
+    repo_root = Path(__file__).resolve().parents[2]
+    config_file = repo_root / "jiuwenswarm" / "resources" / "config.yaml"
+    models = yaml.safe_load(config_file.read_text(encoding="utf-8"))["models"]
+
+    assert models["group_routing_timeout_seconds"] == "${JIUWENSWARM_MODEL_GROUP_TIMEOUT_SECONDS:-360}"
+    assert models["defaults"][0]["model_client_config"]["timeout"] == 360
+    assert models["group_stream_first_chunk_timeout_seconds"] == "${JIUWENSWARM_MODEL_GROUP_STREAM_FIRST_CHUNK_TIMEOUT_SECONDS:-300}"
+    assert models["group_stream_idle_timeout_seconds"] == "${JIUWENSWARM_MODEL_GROUP_STREAM_IDLE_TIMEOUT_SECONDS:-120}"
+
+
+def test_default_team_config_enables_managed_worktrees():
+    repo_root = Path(__file__).resolve().parents[2]
+    config_file = repo_root / "jiuwenswarm" / "resources" / "config.yaml"
+
+    data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+
+    assert data["modes"]["team"]["jiuwen_team"]["worktree"] == {"enabled": True}
+
+
+def test_default_code_configs_do_not_load_multimodal_tools():
+    repo_root = Path(__file__).resolve().parents[2]
+    config_files = [
+        repo_root / "jiuwenswarm" / "resources" / "config.yaml",
+        repo_root / "jiuwenswarm" / "resources" / "config.team.distributed.leader.yaml",
+        repo_root
+        / "jiuwenswarm"
+        / "resources"
+        / "config.team.distributed.teammate.yaml",
+        repo_root
+        / "deploy"
+        / "yuanrong"
+        / "conf"
+        / "gateway-config-yuanrong.template.yaml",
+    ]
+    multimodal_tools = {
+        "visual_question_answering",
+        "image_ocr",
+        "video_understanding",
+        "audio_transcription",
+    }
+
+    for config_file in config_files:
+        data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+        assert multimodal_tools.isdisjoint(data["modes"]["code"]["tools"])
+
+
+def test_default_round_level_compressor_config_uses_context_ratio():
+    repo_root = Path(__file__).resolve().parents[2]
+    config_files = [
+        repo_root / "jiuwenswarm" / "resources" / "config.yaml",
+        repo_root / "jiuwenswarm" / "resources" / "config.team.distributed.leader.yaml",
+        repo_root / "jiuwenswarm" / "resources" / "config.team.distributed.teammate.yaml",
+    ]
+
+    for config_file in config_files:
+        data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+        round_level_config = data["react"]["context_engine_config"]["round_level_compressor_config"]
+
+        assert round_level_config["trigger_context_ratio"] == 0.8
+        assert "trigger_total_tokens" not in round_level_config
+        assert "tokens_threshold" not in round_level_config
+
+
+def test_distributed_team_configs_separate_heartbeat_jobs_and_health_check():
+    repo_root = Path(__file__).resolve().parents[2]
+    config_files = [
+        repo_root / "jiuwenswarm" / "resources" / "config.team.distributed.leader.yaml",
+        repo_root / "jiuwenswarm" / "resources" / "config.team.distributed.teammate.yaml",
+    ]
+
+    for config_file in config_files:
+        data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+        assert set(data["heartbeat"]) == {"jobs"}
+        assert data["heartbeat"]["jobs"]["min_interval_seconds"] == 60
+        assert data["heartbeat"]["jobs"]["execution_timeout_seconds"] == 300
+        assert data["heartbeat"]["jobs"]["user_preemption_timeout_seconds"] == 10
+        assert data["health_check"]["every"] == 3600
+        assert data["health_check"]["target"] == "web"
+
+
+def test_default_config_separates_heartbeat_jobs_and_health_check():
+    repo_root = Path(__file__).resolve().parents[2]
+    config_file = repo_root / "jiuwenswarm" / "resources" / "config.yaml"
+    data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+
+    assert set(data["heartbeat"]) == {"jobs"}
+    assert data["heartbeat"]["jobs"]["min_interval_seconds"] == 60
+    assert data["heartbeat"]["jobs"]["execution_timeout_seconds"] == 300
+    assert data["heartbeat"]["jobs"]["user_preemption_timeout_seconds"] == 10
+    assert data["health_check"]["every"] == 3600
+    assert data["health_check"]["target"] == "web"
+
+
+def test_default_skill_evolution_switch_is_disabled():
+    repo_root = Path(__file__).resolve().parents[2]
+    config_files = [
+        repo_root / "jiuwenswarm" / "resources" / "config.yaml",
+        repo_root / "jiuwenswarm" / "resources" / "config.team.distributed.leader.yaml",
+        repo_root / "jiuwenswarm" / "resources" / "config.team.distributed.teammate.yaml",
+    ]
+
+    for config_file in config_files:
+        data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+        evolution = data["react"]["evolution"]
+
+        assert evolution["skill_evolution"] is False
+        assert evolution["auto_save"] is False
+        assert evolution["review_feedback_min_confidence"] == 0.7
+
+
+def test_default_ttse_config_is_disabled():
+    repo_root = Path(__file__).resolve().parents[2]
+    config_file = repo_root / "jiuwenswarm" / "resources" / "config.yaml"
+
+    react = yaml.safe_load(config_file.read_text(encoding="utf-8"))["react"]
+
+    assert react["ttse"]["enabled"] is False
+    assert react["ttse"]["evolve_enabled"] is True
+    assert react["ttse"]["inject_enabled"] is True
+    assert react["ttse"]["dream_enabled"] is True
+    assert "trajectory_export_enabled" not in react["ttse"]
+    assert "trajectory_export_path" not in react["ttse"]
+    assert "dream_interval" not in react["ttse"]
+    assert "dream_min_hours" not in react["ttse"]
+    assert "dream_ttl_days" not in react["ttse"]
+    embedding = react["ttse"]["embedding"]
+    assert embedding["api_key"] == "${EMBED_API_KEY}"
+    assert embedding["base_url"] == "${EMBED_API_BASE}"
+    assert embedding["model"] == "${EMBED_MODEL}"

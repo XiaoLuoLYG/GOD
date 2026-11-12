@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -22,9 +24,30 @@ from openjiuwen.core.single_agent.rail.base import (
     AgentRail,
     ToolCallInputs,
 )
-from jiuwenclaw.server.runtime.agent_adapter import interface_deep as deep_interface_module
-from jiuwenclaw.server.runtime.agent_adapter.interface_deep import JiuWenClawDeepAdapter
-from jiuwenclaw.common.schema.agent import AgentRequest
+from jiuwenswarm.agents.harness.common.browser_defaults import (
+    DEFAULT_BROWSER_AGENT_MAX_ITERATIONS,
+)
+from jiuwenswarm.agents.harness.common import electron_sideview
+from jiuwenswarm.server.runtime.agent_adapter import interface_deep as deep_interface_module
+from jiuwenswarm.server.runtime.agent_adapter.interface_deep import JiuWenSwarmDeepAdapter
+from jiuwenswarm.common.schema.agent import AgentRequest
+from jiuwenswarm.common.playwright_mcp_runtime import PlaywrightMcpLaunch
+
+
+@pytest.fixture(autouse=True)
+def isolate_browser_runtime_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Adapter synchronization writes to os.environ directly. Keep every test's
+    # launch selection independent of earlier tests and restore all its writes.
+    isolated = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith((
+            "BROWSER_", "PLAYWRIGHT_", "JIUWENSWARM_ELECTRON",
+            "JIUWENSWARM_BROWSER_", "JIUWENSWARM_PLAYWRIGHT_MCP_",
+        ))
+    }
+    monkeypatch.setattr(os, "environ", isolated)
+    monkeypatch.setattr(electron_sideview, "_discovery_original", {})
+    monkeypatch.setattr(electron_sideview, "_discovery_applied", {})
 
 
 class MockLLMModel:
@@ -67,7 +90,7 @@ class ToolTraceRail(AgentRail):
             self.tool_calls.append(ctx.inputs.tool_name)
 
 
-class _TestableJiuWenClawDeepAdapter(JiuWenClawDeepAdapter):
+class _TestableJiuWenSwarmDeepAdapter(JiuWenSwarmDeepAdapter):
     def set_workspace_dir(self, workspace_dir: str) -> None:
         self._workspace_dir = workspace_dir
 
@@ -134,30 +157,169 @@ def _make_fake_runtime() -> MagicMock:
 
 # ─── DeepAdapter (agent mode): only research_agent + browser_agent ──────
 
-def test_deep_adapter_subagents_defaults_to_none_when_unconfigured(
+def test_deep_adapter_keeps_builtin_statusline_agent_when_unconfigured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    adapter = _TestableJiuWenClawDeepAdapter()
+    adapter = _TestableJiuWenSwarmDeepAdapter()
     model = _build_model()
     monkeypatch.setattr(
-        JiuWenClawDeepAdapter,
+        JiuWenSwarmDeepAdapter,
         "_browser_runtime_enabled",
         staticmethod(lambda: False),
     )
-    # DeepAdapter: no subagents configured, no browser → None
+    # The built-in setup agent is available even in an older config that has no
+    # explicit subagents section.
     subagents, _ = adapter.build_configured_subagents(
         model,
         {"max_iterations": 8},
         {},
     )
 
-    assert subagents is None
+    assert subagents is not None
+    assert [item.agent_card.name for item in subagents] == ["statusline-setup"]
+
+
+def test_browser_runtime_environment_tracks_mode_and_chrome_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _TestableJiuWenSwarmDeepAdapter()
+    monkeypatch.delenv("PLAYWRIGHT_MCP_TARGET_ID", raising=False)
+    monkeypatch.delenv("PLAYWRIGHT_MCP_TARGET_RESOLVER", raising=False)
+    monkeypatch.setenv("BROWSER_MANAGED_BINARY", "C:\\stale\\chrome.exe")
+    monkeypatch.setattr(
+        deep_interface_module,
+        "resolve_playwright_mcp_launch",
+        lambda: PlaywrightMcpLaunch(
+            source="override",
+            command="C:\\Node Runtime\\node.exe",
+            args=("C:\\MCP Runtime\\cli.js", "--headless", "--headless"),
+            version="administrator-override",
+        ),
+    )
+
+    adapter._sync_browser_runtime_environment(
+        {
+            "browser": {
+                "chrome_path": "C:\\custom\\chrome.exe",
+                "headless": False,
+            }
+        },
+        runtime_enabled=True,
+    )
+
+    assert os.environ["BROWSER_MANAGED_BINARY"] == "C:\\custom\\chrome.exe"
+    assert "BROWSER_MANAGED_ARGS" not in os.environ
+    assert os.environ["PLAYWRIGHT_MCP_COMMAND"] == "C:\\Node Runtime\\node.exe"
+    assert json.loads(os.environ["PLAYWRIGHT_MCP_ARGS"]) == [
+        "C:\\MCP Runtime\\cli.js"
+    ]
+
+    adapter._sync_browser_runtime_environment(
+        {"browser": {"chrome_path": "", "headless": True}},
+        runtime_enabled=True,
+    )
+
+    assert "BROWSER_MANAGED_BINARY" not in os.environ
+    assert os.environ["BROWSER_MANAGED_ARGS"] == "--headless=new"
+    assert json.loads(os.environ["PLAYWRIGHT_MCP_ARGS"]).count("--headless") == 1
+
+
+def test_browser_runtime_bundle_remains_lazy_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = _TestableJiuWenSwarmDeepAdapter()
+    monkeypatch.setenv("PLAYWRIGHT_MCP_COMMAND", "C:\\Node Runtime\\node.exe")
+    monkeypatch.setenv("PLAYWRIGHT_MCP_ARGS", '["C:\\\\MCP Runtime\\\\cli.js"]')
+    monkeypatch.setenv(
+        "JIUWENSWARM_PLAYWRIGHT_MCP_LAUNCH_SOURCE",
+        "bundled",
+    )
+    monkeypatch.setenv(
+        "JIUWENSWARM_PLAYWRIGHT_MCP_MANAGED_COMMAND",
+        "C:\\Node Runtime\\node.exe",
+    )
+    monkeypatch.setenv(
+        "JIUWENSWARM_PLAYWRIGHT_MCP_MANAGED_ARGS",
+        '["C:\\\\MCP Runtime\\\\cli.js"]',
+    )
+    monkeypatch.setattr(
+        deep_interface_module,
+        "resolve_playwright_mcp_launch",
+        lambda: pytest.fail("disabled browser runtime must not resolve the bundle"),
+    )
+
+    adapter._sync_browser_runtime_environment(
+        {"browser": {"headless": True}},
+        runtime_enabled=False,
+    )
+
+    assert "PLAYWRIGHT_MCP_COMMAND" not in os.environ
+    assert "PLAYWRIGHT_MCP_ARGS" not in os.environ
+    assert "JIUWENSWARM_PLAYWRIGHT_MCP_LAUNCH_SOURCE" not in os.environ
+    assert "JIUWENSWARM_PLAYWRIGHT_MCP_MANAGED_COMMAND" not in os.environ
+    assert "JIUWENSWARM_PLAYWRIGHT_MCP_MANAGED_ARGS" not in os.environ
+
+
+@pytest.mark.parametrize("binding_key,binding_value", [
+    ("PLAYWRIGHT_MCP_TARGET_ID", "sideview-target"),
+    ("PLAYWRIGHT_MCP_TARGET_RESOLVER", "http://127.0.0.1:43124"),
+])
+def test_browser_runtime_environment_preserves_electron_target_args(
+    monkeypatch: pytest.MonkeyPatch,
+    binding_key: str,
+    binding_value: str,
+) -> None:
+    adapter = _TestableJiuWenSwarmDeepAdapter()
+    target_args = json.dumps(
+        [
+            "-y",
+            "--package",
+            "@playwright/mcp@0.0.78",
+            "node",
+            "/electron/target_mcp_wrapper.cjs",
+        ],
+        separators=(",", ":"),
+    )
+    # Match the Electron launcher contract, not just one stale target variable.
+    monkeypatch.setenv("JIUWENSWARM_ELECTRON", "1")
+    monkeypatch.setenv("BROWSER_DRIVER", "remote")
+    monkeypatch.setenv(binding_key, binding_value)
+    monkeypatch.setenv("PLAYWRIGHT_MCP_ARGS", target_args)
+    monkeypatch.setenv("BROWSER_MANAGED_ARGS", "--headless=new")
+
+    adapter._sync_browser_runtime_environment(
+        {"browser": {"chrome_path": "", "headless": True}},
+        runtime_enabled=True,
+    )
+
+    assert os.environ["PLAYWRIGHT_MCP_ARGS"] == target_args
+    assert "BROWSER_MANAGED_ARGS" not in os.environ
+
+
+@pytest.mark.parametrize("driver", ["managed", "extension"])
+def test_browser_runtime_environment_respects_external_driver_with_stale_target(
+    monkeypatch: pytest.MonkeyPatch,
+    driver: str,
+) -> None:
+    adapter = _TestableJiuWenSwarmDeepAdapter()
+    monkeypatch.setenv("BROWSER_DRIVER", driver)
+    monkeypatch.setenv("PLAYWRIGHT_MCP_TARGET_ID", "stale-electron-target")
+    monkeypatch.setattr(
+        deep_interface_module, "resolve_playwright_mcp_launch",
+        lambda: PlaywrightMcpLaunch("bundled", "node", ("/bundled/cli.js",), "0.0.78"),
+    )
+    adapter._sync_browser_runtime_environment(
+        {"browser": {"chrome_path": "/chrome", "headless": True}}, runtime_enabled=True,
+    )
+    assert os.environ["BROWSER_DRIVER"] == driver
+    assert json.loads(os.environ["PLAYWRIGHT_MCP_ARGS"]) == ["/bundled/cli.js", "--headless"]
+    assert os.environ["BROWSER_MANAGED_ARGS"] == "--headless=new"
 
 
 def test_deep_adapter_subagents_includes_browser_by_default_when_runtime_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    adapter = _TestableJiuWenClawDeepAdapter()
+    adapter = _TestableJiuWenSwarmDeepAdapter()
     adapter.set_workspace_dir("/tmp/test-workspace")
     model = _build_model()
 
@@ -167,7 +329,7 @@ def test_deep_adapter_subagents_includes_browser_by_default_when_runtime_enabled
         lambda *args, **kwargs: {"name": "browser_agent", "kwargs": kwargs},
     )
     monkeypatch.setattr(
-        JiuWenClawDeepAdapter,
+        JiuWenSwarmDeepAdapter,
         "_browser_runtime_enabled",
         staticmethod(lambda: True),
     )
@@ -180,14 +342,20 @@ def test_deep_adapter_subagents_includes_browser_by_default_when_runtime_enabled
     )
 
     assert subagents is not None
-    assert [item["name"] for item in subagents] == ["browser_agent"]
-    assert subagents[-1]["kwargs"]["max_iterations"] == 8
+    assert [
+        item.agent_card.name if hasattr(item, "agent_card") else item["name"]
+        for item in subagents
+    ] == ["statusline-setup", "browser_agent"]
+    assert (
+        subagents[-1]["kwargs"]["max_iterations"]
+        == DEFAULT_BROWSER_AGENT_MAX_ITERATIONS
+    )
 
 
 def test_deep_adapter_subagents_only_includes_explicitly_enabled_agents(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    adapter = _TestableJiuWenClawDeepAdapter()
+    adapter = _TestableJiuWenSwarmDeepAdapter()
     adapter.set_workspace_dir("/tmp/test-workspace")
     model = _build_model()
 
@@ -202,7 +370,7 @@ def test_deep_adapter_subagents_only_includes_explicitly_enabled_agents(
         lambda *args, **kwargs: {"name": "browser_agent", "kwargs": kwargs},
     )
     monkeypatch.setattr(
-        JiuWenClawDeepAdapter,
+        JiuWenSwarmDeepAdapter,
         "_browser_runtime_enabled",
         staticmethod(lambda: True),
     )
@@ -221,27 +389,35 @@ def test_deep_adapter_subagents_only_includes_explicitly_enabled_agents(
     )
 
     assert subagents is not None
-    assert [item["name"] for item in subagents] == ["research_agent", "browser_agent"]
-    assert subagents[0]["kwargs"]["max_iterations"] == 5
-    assert subagents[1]["kwargs"]["max_iterations"] == 7
+    names = [
+        item.agent_card.name if hasattr(item, "agent_card") else item["name"]
+        for item in subagents
+    ]
+    assert names == [
+        "statusline-setup",
+        "research_agent",
+        "browser_agent",
+    ]
+    assert subagents[1]["kwargs"]["max_iterations"] == 5
+    assert subagents[2]["kwargs"]["max_iterations"] == 7
 
 
 def test_deep_adapter_subagents_skips_browser_without_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    adapter = _TestableJiuWenClawDeepAdapter()
+    adapter = _TestableJiuWenSwarmDeepAdapter()
     model = _build_model()
 
     monkeypatch.setattr(
-        JiuWenClawDeepAdapter,
+        JiuWenSwarmDeepAdapter,
         "_browser_runtime_enabled",
         staticmethod(lambda: False),
     )
     browser_builder = MagicMock()
     monkeypatch.setattr(deep_interface_module, "build_browser_agent_config", browser_builder)
 
-    # When browser runtime is disabled and no other subagents are configured,
-    # the result should be None
+    # The browser is skipped, while the default-enabled status-line setup
+    # subagent remains available.
     subagents, _ = adapter.build_configured_subagents(
         model,
         {
@@ -252,7 +428,8 @@ def test_deep_adapter_subagents_skips_browser_without_runtime(
         {},
     )
 
-    assert subagents is None
+    assert subagents is not None
+    assert [item.agent_card.name for item in subagents] == ["statusline-setup"]
     browser_builder.assert_not_called()
 
 
@@ -311,18 +488,18 @@ async def test_interface_deep_browser_subagent_task_tool_chain(
         "error": None,
     }
     tool_trace = ToolTraceRail()
-    adapter = _TestableJiuWenClawDeepAdapter()
+    adapter = _TestableJiuWenSwarmDeepAdapter()
     adapter.set_workspace_dir(str(temp_workspace / "workspace" / "agent"))
 
     with (
-        patch.object(JiuWenClawDeepAdapter, "set_checkpoint", AsyncMock()),
-        patch.object(JiuWenClawDeepAdapter, "_create_model", return_value=model),
-        patch.object(JiuWenClawDeepAdapter, "_get_tool_cards", AsyncMock(return_value=[])),
-        patch.object(JiuWenClawDeepAdapter, "_build_agent_rails", return_value=[tool_trace]),
-        patch.object(JiuWenClawDeepAdapter, "_create_sys_operation", return_value=MagicMock()),
-        patch.object(JiuWenClawDeepAdapter, "_proc_context_compaction", AsyncMock()),
-        patch.object(JiuWenClawDeepAdapter, "_register_runtime_tools", AsyncMock()),
-        patch.object(JiuWenClawDeepAdapter, "_refresh_multimodal_configs", return_value=None),
+        patch.object(JiuWenSwarmDeepAdapter, "set_checkpoint", AsyncMock()),
+        patch.object(JiuWenSwarmDeepAdapter, "_create_model", return_value=model),
+        patch.object(JiuWenSwarmDeepAdapter, "_get_tool_cards", AsyncMock(return_value=[])),
+        patch.object(JiuWenSwarmDeepAdapter, "_build_agent_rails", return_value=[tool_trace]),
+        patch.object(JiuWenSwarmDeepAdapter, "_create_sys_operation", return_value=MagicMock()),
+        patch.object(JiuWenSwarmDeepAdapter, "_proc_context_compaction", AsyncMock()),
+        patch.object(JiuWenSwarmDeepAdapter, "_register_runtime_tools", AsyncMock()),
+        patch.object(JiuWenSwarmDeepAdapter, "_refresh_multimodal_configs", return_value=None),
         patch(
             "openjiuwen.harness.subagents.browser_agent.BrowserAgentRuntime",
             return_value=runtime,

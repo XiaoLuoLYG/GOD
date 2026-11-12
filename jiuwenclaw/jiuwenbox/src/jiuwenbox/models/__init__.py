@@ -1,8 +1,15 @@
 # Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
 
 from jiuwenbox.models.sandbox import (
+    BackgroundExecRequest,
     BackgroundExecResult,
+    BackgroundJobStatus,
+    BackgroundJobSummary,
     ExecResult,
+    InvalidJobIdError,
+    InvalidSandboxIdError,
+    KillBackgroundJobRequest,
+    KillBackgroundJobResult,
     SandboxPhase,
     SandboxRef,
     SandboxSpec,
@@ -10,6 +17,10 @@ from jiuwenbox.models.sandbox import (
 from jiuwenbox.models.policy import (
     ArchitectureSyscallPolicy,
     BindMount,
+    ConchDirectionPolicy,
+    ConchFilesystemPolicy,
+    ConchNetworkPolicy,
+    ConchPolicy,
     DirectoryMount,
     FileMount,
     FilesystemPolicy,
@@ -29,13 +40,24 @@ from jiuwenbox.models.common import (
 )
 
 __all__ = [
+    "BackgroundExecRequest",
     "BackgroundExecResult",
+    "BackgroundJobStatus",
+    "BackgroundJobSummary",
     "ExecResult",
+    "InvalidJobIdError",
+    "InvalidSandboxIdError",
+    "KillBackgroundJobRequest",
+    "KillBackgroundJobResult",
     "SandboxPhase",
     "SandboxRef",
     "SandboxSpec",
     "BindMount",
     "ArchitectureSyscallPolicy",
+    "ConchDirectionPolicy",
+    "ConchFilesystemPolicy",
+    "ConchNetworkPolicy",
+    "ConchPolicy",
     "DirectoryMount",
     "FileMount",
     "FilesystemPolicy",

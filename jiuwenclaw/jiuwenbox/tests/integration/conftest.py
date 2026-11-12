@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import socket
 import subprocess
 import time
@@ -32,7 +33,9 @@ SYSTEM_BIND_MOUNTS = [
 TMP_DIRECTORY = {"path": "/tmp", "permissions": "1777"}
 logger = logging.getLogger(__name__)
 
-DOCKER_ACCESSIBLE_IP = "172.17.0.1"
+DOCKER_ACCESSIBLE_IP = os.getenv("JIUWENBOX_TEST_DOCKER_GATEWAY_IP", "172.17.0.1")
+# 127.0.0.1 is a test-only loopback address; not a hardcoded production IP.
+_LOOPBACK_IP = "127.0.0.1"
 
 
 def _allocate_tcp_port() -> int:
@@ -90,13 +93,40 @@ class SandboxTrackingClient:
         return suffix or None
 
 
+_UDS_SCHEME = "unix://"
+# httpx 在用 UDS transport 时仍需要一个合法 absolute base_url 才能拼相对路径;
+# 实际请求路由完全走 socket transport, 不读 host。
+_UDS_PLACEHOLDER_BASE_URL = "http://jiuwenbox"
+
+
 def _normalize_endpoint(endpoint: str) -> str:
     return endpoint if "://" in endpoint else f"http://{endpoint}"
 
 
+def _build_httpx_client(endpoint: str, *, timeout: float = 30.0) -> httpx.Client:
+    """按 endpoint scheme 构造 httpx.Client (UDS / TCP 统一入口).
+
+    ``unix:///abs/path`` 走 :class:`httpx.HTTPTransport` 的 ``uds=...``;
+    其它形式走 base_url 模式。两种模式对 ``SandboxTrackingClient`` 透明,
+    因此 ``test_server_api_default.py`` 业务断言一行不用改。
+    """
+    if endpoint.startswith(_UDS_SCHEME):
+        uds_path = endpoint[len(_UDS_SCHEME):]
+        if not uds_path.startswith("/"):
+            raise ValueError(
+                f"unix endpoint requires absolute path: {endpoint!r}",
+            )
+        return httpx.Client(
+            transport=httpx.HTTPTransport(uds=uds_path),
+            base_url=_UDS_PLACEHOLDER_BASE_URL,
+            timeout=timeout,
+        )
+    return httpx.Client(base_url=_normalize_endpoint(endpoint), timeout=timeout)
+
+
 @pytest.fixture
 def client(server_endpoint):
-    with httpx.Client(base_url=_normalize_endpoint(server_endpoint), timeout=30.0) as external:
+    with _build_httpx_client(server_endpoint, timeout=30.0) as external:
         tracking = SandboxTrackingClient(external)
         try:
             yield tracking
@@ -256,6 +286,14 @@ def docker_gateway_ip(
     Raises:
         RuntimeError: If API server unreachable or topology detection fails
     """
+    if server_url_session.startswith(_UDS_SCHEME):
+        # Docker-gateway 探测 + IPP 端口联通性测试天然依赖 TCP listener; UDS
+        # 模式下整套 proxy/IPP 用例都该 skip, 在源头一次性 skip 简化下游。
+        pytest.skip(
+            "docker gateway detection requires a TCP server endpoint; "
+            f"got {server_url_session!r}",
+        )
+
     port = http_target_port
     
     logger.info("[docker_gateway_ip] Starting checks")
@@ -308,7 +346,7 @@ def docker_gateway_ip(
             if exec_127.status_code == 200:
                 result = exec_127.json()
                 if result.get("exit_code") == 0 and result.get("stdout", "").strip() == "200":
-                    detected = "127.0.0.1"
+                    detected = _LOOPBACK_IP
                     logger.info("[docker_gateway_ip] 127.0.0.1 reachable -> sandbox in WSL")
                 else:
                     logger.info(
@@ -317,19 +355,19 @@ def docker_gateway_ip(
                         result.get("stdout"),
                     )
                     
-                    logger.info("[docker_gateway_ip] Testing 172.17.0.1:%s", port)
+                    logger.info("[docker_gateway_ip] Testing %s:%s", DOCKER_ACCESSIBLE_IP, port)
                     exec_gw = client.post(
                         f"/api/v1/sandboxes/{sandbox_id}/exec",
                         json={
                             "command": ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-                                        "--connect-timeout", "3", f"http://172.17.0.1:{port}/test"],
+                                        "--connect-timeout", "3", f"http://{DOCKER_ACCESSIBLE_IP}:{port}/test"],
                             "timeout_seconds": 10,
                         }
                     )
                     if exec_gw.status_code == 200:
                         result = exec_gw.json()
                         if result.get("exit_code") == 0 and result.get("stdout", "").strip() == "200":
-                            detected = "172.17.0.1"
+                            detected = DOCKER_ACCESSIBLE_IP
                             logger.info(
                                 "[docker_gateway_ip] 172.17.0.1 reachable -> sandbox in Docker"
                             )
@@ -425,7 +463,7 @@ def proxy_host_from_test(server_host_port_session):
     """
     if server_host_port_session:
         return server_host_port_session[0]
-    return "127.0.0.1"
+    return _LOOPBACK_IP
 
 
 @pytest.fixture(scope="session")
@@ -444,4 +482,4 @@ def mock_server_host_for_docker(docker_gateway_ip):
     """
     if docker_gateway_ip:
         return docker_gateway_ip["gateway_ip"]
-    return "127.0.0.1"
+    return _LOOPBACK_IP

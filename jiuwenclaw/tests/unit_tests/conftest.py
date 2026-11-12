@@ -2,8 +2,8 @@
 """Test-wide hooks for the unit_tests tree.
 
 `agentserver/memory/test_external_memory_*.py` must patch
-`jiuwenclaw.utils.get_config_file` and `get_agent_workspace_dir` before
-importing the modules under test (so `jiuwenclaw.agentserver.memory.config` sees
+`jiuwenswarm.utils.get_config_file` and `get_agent_workspace_dir` before
+importing the modules under test (so `jiuwenswarm.agentserver.memory.config` sees
 a stable path at import). Those two files are collected early (under
 `agentserver/...`), and their import-time patch would otherwise leak: other
 modules then hit ``Path / "memory"`` with a ``str`` path or, after switching to
@@ -19,9 +19,12 @@ functions, hence this hook.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
-import jiuwenclaw.common.utils as _utils
+import pytest
+
+import jiuwenswarm.common.utils as _utils
 
 _REAL_GET_CONFIG_FILE = _utils.get_config_file
 _REAL_GET_AGENT_WORKSPACE_DIR = _utils.get_agent_workspace_dir
@@ -36,6 +39,43 @@ _EXTERNAL_MEMORY_BASENAMES = frozenset(
         "test_external_memory_config.py",
     }
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_user_workspace(tmp_path):
+    """Keep data written by unit tests (sessions, etc.) out of the real ~/.jiuwenswarm."""
+    from jiuwenswarm.server.runtime.session import session_metadata
+
+    # Own MonkeyPatch: this teardown then runs after the test's monkeypatch is undone,
+    # so the drain below uses the real queue/clock instead of a test's stubs.
+    flush_pending_writes = session_metadata.flush_pending_writes
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(_utils, "_workspace_base_dir", tmp_path / ".jiuwenswarm")
+        # Subprocesses spawned by tests resolve the workspace from the environment.
+        mp.setenv("JIUWENSWARM_DATA_DIR", str(tmp_path / ".jiuwenswarm"))
+        yield
+        # Metadata is written by a background thread; drain it before the patch is undone.
+        flush_pending_writes()
+
+
+@pytest.fixture
+def allow_macos_pytest_temp_sources(monkeypatch):
+    """让使用 /private/var 临时目录的测试显式绕过内置 /var 黑名单。"""
+    if sys.platform != "darwin":
+        return
+
+    from jiuwenswarm.server.runtime.skill.skill_manager import SkillManager
+
+    get_roots = SkillManager._get_import_local_forbidden_roots
+
+    def _get_test_forbidden_roots() -> list[Path]:
+        return [root for root in get_roots() if root != Path("/var")]
+
+    monkeypatch.setattr(
+        SkillManager,
+        "_get_import_local_forbidden_roots",
+        staticmethod(_get_test_forbidden_roots),
+    )
 
 
 def _stub_get_config_file() -> Path:

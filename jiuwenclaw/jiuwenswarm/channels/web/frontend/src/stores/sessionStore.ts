@@ -1,0 +1,2362 @@
+/**
+ * 会话状态管理（多 session 版本）
+ *
+ * 全局字段保持不变，session 级字段按 session 隔离存储在 runtimes 中。
+ */
+
+import { create } from 'zustand';
+import { parseModelSelection } from '../features/settings/modules/models/modelGroupAdapters';
+import {
+  buildConversationModelPayload,
+} from '../multi-session/state/conversationModelSelection';
+import {
+  isSingleAgentContextUsageSnapshot,
+  isTeamLeaderContextUsageSnapshot,
+  parseContextUsageSnapshot,
+} from '../features/contextUsage/contextUsageModel';
+import { parseSessionTokenUsageSnapshot } from '../types/sessionTokenUsage';
+import {
+  Session,
+  AgentMode,
+  ModelEntry,
+  ModelGroup,
+  ModelSelection,
+  Message,
+  ContextCompressionRuntime,
+  ContextCompressionSummary,
+  ContextUsageSnapshot,
+  SessionTokenUsageSnapshot,
+  TeamMemberContextCompressionState,
+} from '../types';
+import {
+  createTaskProgressBaseline,
+  mergeTaskProgressBaseline,
+  registerConfirmedTaskCreation,
+  type TaskProgressBaseline,
+} from '../features/teamTaskProgressBaseline';
+import type {
+  AgentGroupIdentity,
+  AgentGroupSelectionIntent,
+  AgentSelectionIntent,
+} from '../features/agentManagement/types';
+import {
+  loadTeamConnectionPresentation,
+  saveTeamConnectionPresentation,
+  type TeamConnectionPresentation,
+} from '../features/teamConnectionPresentation';
+import { isAgentGroupSelected } from '../features/agentManagement/port';
+import { isTeamAgentMode, stripPlanSuffix } from '../features/planMode/wireMode';
+import {
+  applyWorkflowUpdate as applyWorkflowUpdateImpl,
+  reassembleAgentFieldParts,
+  type WorkflowAgent,
+  type WorkflowPhase,
+  type WorkflowRun,
+} from '../components/teamArea/workflowTypes';
+import { requestAgentDetail, requestPhaseAgents } from '../services/webClient';
+import type { TeamDispatchMode } from '../features/teamDispatch/featureConfig';
+import {
+  normalizeTeamLeaderIdentity,
+  type TeamLeaderIdentity,
+} from '../features/teamLeaderIdentity';
+import { normalizeTeamGroupIdentity } from '../features/teamGroupIdentity';
+
+const MODE_STORAGE_KEY = 'jiuwenclaw_mode';
+const MODEL_STORAGE_KEY = 'jiuwenclaw_selected_model';
+const MODEL_SELECTION_STORAGE_KEY = 'jiuwenclaw_last_model_selection';
+const LEGACY_MODEL_STORAGE_KEY = 'jiuwenclaw_last_legacy_model';
+const AGENT_SELECTION_STORAGE_KEY = 'jiuwenclaw_agent_selection';
+const AGENT_GROUP_SELECTION_STORAGE_KEY = 'jiuwenclaw_agent_group_selection';
+const TRANSIENT_NEW_CONVERSATION_ID = 'new';
+
+function loadLastModelSelection(): ModelSelection | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(MODEL_SELECTION_STORAGE_KEY);
+    if (!raw) return null;
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const selection = value as Partial<ModelSelection>;
+    if ((selection.type !== 'model' && selection.type !== 'model_group') || typeof selection.id !== 'string') {
+      return null;
+    }
+    const id = selection.id.trim();
+    if (!id) return null;
+    if (selection.type === 'model') return { type: 'model', id };
+    return {
+      type: 'model_group',
+      id,
+      ...(typeof selection.route_id === 'string' && selection.route_id.trim()
+        ? { route_id: selection.route_id.trim() }
+        : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function loadLastLegacyModelName(): string | null {
+  if (typeof localStorage === 'undefined') return null;
+  try { return localStorage.getItem(LEGACY_MODEL_STORAGE_KEY)?.trim() || null; } catch { return null; }
+}
+
+function cacheLastLegacyModelName(name: string): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(LEGACY_MODEL_STORAGE_KEY, name);
+    localStorage.removeItem(MODEL_SELECTION_STORAGE_KEY);
+  } catch { /* noop */ }
+}
+
+export function cacheLastModelSelection(selection: ModelSelection): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(MODEL_SELECTION_STORAGE_KEY, JSON.stringify(selection));
+    localStorage.removeItem(LEGACY_MODEL_STORAGE_KEY);
+  } catch { /* noop */ }
+}
+
+/** New chats restore the last stable selection, then fall back default-group -> custom -> free -> empty. */
+export function resolveNewConversationModelSelection(
+  models: ModelEntry[],
+  groups: ModelGroup[],
+  cachedSelection: ModelSelection | null,
+): ModelSelection | null {
+  if (cachedSelection?.type === 'model') {
+    const cachedModel = models.find((model) => model.model_id === cachedSelection.id);
+    if (cachedModel) return { type: 'model', id: cachedSelection.id };
+  } else if (cachedSelection?.type === 'model_group') {
+    const cachedGroup = groups.find(
+      (group) => group.model_group_id === cachedSelection.id && group.enabled !== false,
+    );
+    if (cachedGroup) {
+      const routeId = cachedSelection.route_id?.trim();
+      if (!routeId || cachedGroup.routes.some((route) => route.route_id === routeId && route.enabled !== false)) {
+        return routeId
+          ? { type: 'model_group', id: cachedSelection.id, route_id: routeId }
+          : { type: 'model_group', id: cachedSelection.id };
+      }
+    }
+  }
+  const defaultGroup = groups.find(
+    (group) => group.is_default === true && group.enabled !== false && Boolean(group.model_group_id?.trim()),
+  );
+  if (defaultGroup?.model_group_id) {
+    return { type: 'model_group', id: defaultGroup.model_group_id };
+  }
+  const fallback = models.find((model) => model.is_free !== true && Boolean(model.model_id?.trim()))
+    ?? models.find((model) => model.is_free === true && Boolean(model.model_id?.trim()));
+  return fallback?.model_id ? { type: 'model', id: fallback.model_id } : null;
+}
+
+/** Keep a still-valid selection; otherwise resolve the same fallback as a new conversation. */
+export function resolveAvailableModelSelection(
+  selection: ModelSelection | null,
+  models: ModelEntry[],
+  groups: ModelGroup[],
+): ModelSelection | null {
+  return resolveNewConversationModelSelection(models, groups, selection);
+}
+
+/**
+ * True while models.list / groups have not arrived yet.
+ * An empty catalog must not be treated as “selection deleted” (#5860): refresh during
+ * goal execution often restores metadata before the catalog, and clearing then falls
+ * back to the default model.
+ */
+export function isModelCatalogPending(models: ModelEntry[], groups: ModelGroup[]): boolean {
+  return models.length === 0 && groups.length === 0;
+}
+
+export function isModelSelectionAvailable(
+  selection: ModelSelection | null,
+  models: ModelEntry[],
+  groups: ModelGroup[],
+): boolean {
+  if (selection?.type === 'model') return models.some((model) => model.model_id === selection.id);
+  if (selection?.type !== 'model_group') return false;
+  const group = groups.find((item) => item.model_group_id === selection.id && item.enabled !== false);
+  if (!group) return false;
+  const routeId = selection.route_id?.trim();
+  return !routeId || group.routes.some((route) => route.route_id === routeId && route.enabled !== false);
+}
+
+function applyResolvedModelSelection(
+  runtime: SessionRuntime,
+  selection: ModelSelection | null,
+  models: ModelEntry[],
+): SessionRuntime {
+  const selectedModel = selection?.type === 'model'
+    ? models.find((model) => model.model_id === selection.id)
+    : null;
+  return {
+    ...runtime,
+    selectedModelSelection: selection,
+    selectedModelName: selection?.type === 'model_group'
+      ? null
+      : selectedModel?.model_name ?? (selection ? runtime.selectedModelName : null),
+  };
+}
+
+function restoreNewConversationSelection(
+  runtime: SessionRuntime,
+  models: ModelEntry[],
+  groups: ModelGroup[],
+): SessionRuntime {
+  // Catalog refresh can briefly omit groups; keep the draft group until the user
+  // changes it. Historical sessions heal via ChatModelSelector / session restore.
+  if (runtime.selectedModelSelection?.type === 'model_group') return runtime;
+  const legacyName = loadLastLegacyModelName();
+  const legacyModel = models.find((model) => model.model_name === legacyName);
+  if (legacyName && (legacyModel || models.length === 0)) {
+    return {
+      ...runtime,
+      selectedModelName: legacyName,
+      selectedModelSelection: legacyModel?.model_id ? { type: 'model', id: legacyModel.model_id } : null,
+    };
+  }
+  const cached = loadLastModelSelection();
+  const selection = isModelSelectionAvailable(cached, models, groups)
+    ? cached
+    : !cached && isModelSelectionAvailable(runtime.selectedModelSelection, models, groups)
+      ? runtime.selectedModelSelection
+      : resolveNewConversationModelSelection(models, groups, cached);
+  return applyResolvedModelSelection(runtime, selection, models);
+}
+
+function clearStoredAgentSelection(sessionId: string): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    const stored = localStorage.getItem(AGENT_SELECTION_STORAGE_KEY);
+    if (!stored) return;
+    const parsed: unknown = JSON.parse(stored);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+    const selections = { ...(parsed as Record<string, unknown>) };
+    if (!Object.prototype.hasOwnProperty.call(selections, sessionId)) return;
+    delete selections[sessionId];
+    if (Object.keys(selections).length === 0) {
+      localStorage.removeItem(AGENT_SELECTION_STORAGE_KEY);
+    } else {
+      localStorage.setItem(AGENT_SELECTION_STORAGE_KEY, JSON.stringify(selections));
+    }
+  } catch {
+    // Browser storage can be unavailable in private/restricted contexts.
+  }
+}
+
+function loadAgentSelectionIntent(sessionId: string): AgentSelectionIntent {
+  if (typeof localStorage === 'undefined') return { kind: 'keep' };
+  if (sessionId === TRANSIENT_NEW_CONVERSATION_ID) {
+    // The draft session lives only in memory. Clear keys written by older builds
+    // so a previous Agent cannot leak into the next new conversation.
+    clearStoredAgentSelection(sessionId);
+    return { kind: 'keep' };
+  }
+  try {
+    const stored = localStorage.getItem(AGENT_SELECTION_STORAGE_KEY);
+    if (!stored) return { kind: 'keep' };
+    const parsed: unknown = JSON.parse(stored);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { kind: 'keep' };
+    const selectedId = (parsed as Record<string, unknown>)[sessionId];
+    return typeof selectedId === 'string' && selectedId.trim()
+      ? { kind: 'select', id: selectedId }
+      : { kind: 'keep' };
+  } catch {
+    return { kind: 'keep' };
+  }
+}
+
+function contextUsageTimestamp(snapshot: ContextUsageSnapshot | null): number | null {
+  const raw = snapshot?.timestamp;
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function saveAgentSelectionIntent(sessionId: string, intent: AgentSelectionIntent) {
+  if (typeof localStorage === 'undefined') return;
+  if (sessionId === TRANSIENT_NEW_CONVERSATION_ID) {
+    clearStoredAgentSelection(sessionId);
+    return;
+  }
+  try {
+    const stored = localStorage.getItem(AGENT_SELECTION_STORAGE_KEY);
+    const parsed: unknown = stored ? JSON.parse(stored) : {};
+    const selections = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? { ...(parsed as Record<string, unknown>) }
+      : {};
+    if (intent.kind === 'select' && intent.id.trim()) {
+      selections[sessionId] = intent.id;
+    } else {
+      delete selections[sessionId];
+    }
+    if (Object.keys(selections).length === 0) {
+      localStorage.removeItem(AGENT_SELECTION_STORAGE_KEY);
+    } else {
+      localStorage.setItem(AGENT_SELECTION_STORAGE_KEY, JSON.stringify(selections));
+    }
+  } catch {
+    // Browser storage can be unavailable in private/restricted contexts.
+  }
+}
+
+function sameAgentSelectionIntent(
+  left: AgentSelectionIntent,
+  right: AgentSelectionIntent,
+): boolean {
+  if (left.kind !== right.kind) return false;
+  return left.kind !== 'select' || right.kind === 'select' && left.id === right.id;
+}
+
+function clearStoredAgentGroupSelection(sessionId: string): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    const stored = localStorage.getItem(AGENT_GROUP_SELECTION_STORAGE_KEY);
+    if (!stored) return;
+    const parsed: unknown = JSON.parse(stored);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+    const selections = { ...(parsed as Record<string, unknown>) };
+    if (!Object.prototype.hasOwnProperty.call(selections, sessionId)) return;
+    delete selections[sessionId];
+    if (Object.keys(selections).length === 0) localStorage.removeItem(AGENT_GROUP_SELECTION_STORAGE_KEY);
+    else localStorage.setItem(AGENT_GROUP_SELECTION_STORAGE_KEY, JSON.stringify(selections));
+  } catch {
+    // Browser storage can be unavailable in private/restricted contexts.
+  }
+}
+
+function loadAgentGroupSelectionIntent(sessionId: string): AgentGroupSelectionIntent {
+  if (typeof localStorage === 'undefined') return { kind: 'keep' };
+  if (sessionId === TRANSIENT_NEW_CONVERSATION_ID) {
+    clearStoredAgentGroupSelection(sessionId);
+    return { kind: 'keep' };
+  }
+  try {
+    const stored = localStorage.getItem(AGENT_GROUP_SELECTION_STORAGE_KEY);
+    if (!stored) return { kind: 'keep' };
+    const parsed: unknown = JSON.parse(stored);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { kind: 'keep' };
+    const selectedId = (parsed as Record<string, unknown>)[sessionId];
+    return typeof selectedId === 'string' && selectedId.trim() ? { kind: 'select', id: selectedId } : { kind: 'keep' };
+  } catch {
+    return { kind: 'keep' };
+  }
+}
+
+function saveAgentGroupSelectionIntent(sessionId: string, intent: AgentGroupSelectionIntent): void {
+  if (typeof localStorage === 'undefined') return;
+  if (sessionId === TRANSIENT_NEW_CONVERSATION_ID) {
+    clearStoredAgentGroupSelection(sessionId);
+    return;
+  }
+  try {
+    const stored = localStorage.getItem(AGENT_GROUP_SELECTION_STORAGE_KEY);
+    const parsed: unknown = stored ? JSON.parse(stored) : {};
+    const selections = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? { ...(parsed as Record<string, unknown>) }
+      : {};
+    if (intent.kind === 'select' && intent.id.trim()) selections[sessionId] = intent.id;
+    else delete selections[sessionId];
+    if (Object.keys(selections).length === 0) localStorage.removeItem(AGENT_GROUP_SELECTION_STORAGE_KEY);
+    else localStorage.setItem(AGENT_GROUP_SELECTION_STORAGE_KEY, JSON.stringify(selections));
+  } catch {
+    // Browser storage can be unavailable in private/restricted contexts.
+  }
+}
+
+function sameAgentGroupSelectionIntent(
+  left: AgentGroupSelectionIntent,
+  right: AgentGroupSelectionIntent,
+): boolean {
+  if (left.kind !== right.kind) return false;
+  return left.kind !== 'select' || right.kind === 'select' && left.id === right.id;
+}
+
+function loadModeFromStorage(): AgentMode {
+  if (typeof localStorage === 'undefined') return DEFAULT_MODE;
+  try {
+    const stored = localStorage.getItem(MODE_STORAGE_KEY);
+    if (stored) {
+      return normalizeAgentMode(stored);
+    }
+  } catch (error) {
+    console.error('Error loading mode from storage:', error);
+  }
+  return DEFAULT_MODE;
+}
+
+function saveModeToStorage(mode: AgentMode) {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(MODE_STORAGE_KEY, mode);
+  } catch (error) {
+    console.error('Error saving mode to storage:', error);
+  }
+}
+
+const DEFAULT_MODE: AgentMode = 'agent';
+
+function normalizeAgentMode(mode: unknown): AgentMode {
+  if (typeof mode !== 'string') return DEFAULT_MODE;
+  if (isTeamAgentMode(mode)) return 'team';
+  // 后端 session.mode 可能是新命名 `agent.{work|code}.plan`，先剥掉 plan 后缀
+  // 再归一化（旧 `team.plan.*` / `team.code.*` 已被上面的 isTeamAgentMode 拦截）。
+  const normalized = stripPlanSuffix(mode.trim().toLowerCase());
+  if (normalized === 'auto_harness') return 'auto_harness';
+  return 'agent';
+}
+
+function normalizeSession(session: Session): Session {
+  return {
+    ...session,
+    mode: normalizeAgentMode(session.mode),
+  };
+}
+
+/**
+ * 按 `alias || model_name` 在可选模型列表里解析出"实际生效"的模型条目。
+ *
+ * 背景（bug003）：会话记录的 `selectedModelName` 只是一个名字字符串，模型改名/改别名后
+ * 这个字符串可能不再对应任何可选模型。之前 UI 显示（`InputArea.tsx` 的 `ModelSelector`）
+ * 会做兜底匹配，但实际发给后端的 `getEffectiveModelName` 没有做同样的兜底，导致"显示值"
+ * 和"实际请求的 model_name"可能不一致，且旧字符串失配后无法感知。抽成共享函数后两边统一
+ * 走同一次解析，谁都不会再吐出陈旧、未经校验的名字字符串。
+ *
+ * @param chatAvailableModels 当前可选的模型列表（is_default!==false 的模型）
+ * @param selectedModelName 该会话记录的模型名字字符串（可能是改名前的陈旧值）
+ * @param defaultModelName 后端配置的默认模型名字字符串
+ * @returns 解析命中的模型条目；`chatAvailableModels` 为空（模型列表尚未加载）时返回 null
+ */
+export function resolveEffectiveModel(
+  chatAvailableModels: ModelEntry[],
+  selectedModelName: string | null,
+  defaultModelName: string | null,
+): ModelEntry | null {
+  if (chatAvailableModels.length === 0) return null;
+  const displayed = selectedModelName || defaultModelName;
+  // 兼容历史保存的 alias 和后端会话元数据中的 model_name，使展示与请求命中同一条目。
+  return (
+    chatAvailableModels.find(
+      (m) => m.alias === displayed || m.model_name === displayed,
+    ) ??
+    chatAvailableModels.find((m) => (m.alias || m.model_name) === displayed) ??
+    chatAvailableModels[0]
+  );
+}
+
+/**
+ * Resolve the model shown by the chat selector.
+ *
+ * 单 Agent 与集群（team）模式共用同一套解析：都展示会话自选的模型，
+ * 失配时回退默认模型（见 resolveEffectiveModel）。
+ */
+export function resolveChatModelSelection(
+  chatAvailableModels: ModelEntry[],
+  selectedModelName: string | null,
+  defaultModelName: string | null,
+): ModelEntry | null {
+  return resolveEffectiveModel(
+    chatAvailableModels,
+    selectedModelName,
+    defaultModelName,
+  );
+}
+
+/** Resolve a configured display name to the model ID required by backend RPCs. */
+export function resolveConfiguredModelName(
+  availableModels: ModelEntry[],
+  configuredModelName: string | null,
+): string | null {
+  const normalizedName = configuredModelName?.trim();
+  if (!normalizedName) return null;
+  return availableModels.find(
+    (model) => model.alias === normalizedName || model.model_name === normalizedName,
+  )?.model_name ?? null;
+}
+
+const FINAL_EVENT_DUPLICATE_WINDOW_MS = 60_000;
+
+function normalizeExecutionContent(content?: string): string {
+  return (content || '').replace(/\s+/g, ' ').trim();
+}
+
+function isDuplicateFinalExecutionEvent(
+  existing: TeamMemberExecutionEvent,
+  next: TeamMemberExecutionEvent
+): boolean {
+  if (existing.kind !== 'final' || next.kind !== 'final') {
+    return false;
+  }
+  if (existing.member_id !== next.member_id) {
+    return false;
+  }
+  if (!normalizeExecutionContent(existing.content)) {
+    return false;
+  }
+  if (normalizeExecutionContent(existing.content) !== normalizeExecutionContent(next.content)) {
+    return false;
+  }
+  return Math.abs((existing.timestamp || 0) - (next.timestamp || 0)) <= FINAL_EVENT_DUPLICATE_WINDOW_MS;
+}
+
+function dedupeTeamMemberExecutionEvents(
+  events: TeamMemberExecutionEvent[]
+): TeamMemberExecutionEvent[] {
+  const deduped: TeamMemberExecutionEvent[] = [];
+  for (const event of events) {
+    const duplicateIndex = deduped.findIndex((item) => isDuplicateFinalExecutionEvent(item, event));
+    if (duplicateIndex >= 0) {
+      deduped[duplicateIndex] = {
+        ...deduped[duplicateIndex],
+        ...event,
+        id: deduped[duplicateIndex].id,
+        timestamp: Math.min(deduped[duplicateIndex].timestamp || event.timestamp, event.timestamp),
+      };
+      continue;
+    }
+    deduped.push(event);
+  }
+  return deduped;
+}
+
+interface MemoryUsage {
+  rssMb: number | null;
+  usedPercent: number | null;
+}
+
+export interface TeamTaskEvent {
+  id: string;
+  type: string;
+  team_id: string;
+  task_id: string;
+  status: string;
+  timestamp: number;
+  member_id?: string;
+  assignee?: string;
+  team_name?: string;
+  title?: string;
+  content?: string;
+  /** Swarmflow run that produced this task (absent on plain team tasks). */
+  workflow_run_id?: string;
+  /** Run paused: the board's time-eased progress must hold, not creep or reset. */
+  progress_frozen?: boolean;
+  /** Wall-clock at which progress_frozen flipped true (the easing clock stops here). */
+  progress_frozen_at?: number;
+  // Truncation observability flags — backend may set these on team.task.created/
+  // updated events when the title/content exceeded the wire limit. Purely
+  // passthrough: the store does not render a badge; the inline marker
+  // `…(truncated, total N chars)` already surfaces truncation to the user.
+  title_truncated?: boolean;
+  title_original_size?: number;
+  content_truncated?: boolean;
+  content_original_size?: number;
+  updated_at?: number | string | null;
+}
+
+export type TeamTaskStatus =
+  | 'pending'
+  | 'blocked'
+  | 'planning'
+  | 'in_progress'
+  | 'in_review'
+  | 'completed'
+  | 'cancelled';
+
+export interface TeamTask {
+  task_id: string;
+  title?: string;
+  content?: string;
+  status: TeamTaskStatus;
+  assignee?: string;
+  team_id?: string;
+  timestamp?: number;
+  skills?: string[];
+  files?: string[];
+  /** Swarmflow run that produced this task (absent on plain team tasks). */
+  workflow_run_id?: string;
+  /** Run paused: the board's time-eased progress must hold, not creep or reset. */
+  progress_frozen?: boolean;
+  /** Wall-clock at which progress_frozen flipped true (the easing clock stops here). */
+  progress_frozen_at?: number;
+  // Truncation observability flags — set by the backend on team.task.created/
+  // updated events when title/content exceeded the wire limit. Carried through
+  // the normalize/upsert pipeline; a status-only event MUST NOT reset these
+  // (upsertTeamTask uses `?? existing`). Not rendered as a badge — the inline
+  // marker `…(truncated, total N chars)` already shows truncation.
+  title_truncated?: boolean;
+  title_original_size?: number;
+  content_truncated?: boolean;
+  content_original_size?: number;
+}
+
+// Upsert input: a task event may omit status (e.g. a content-only update).
+// The store then preserves the task's existing status instead of resetting it.
+export type TeamTaskUpsert = Omit<TeamTask, 'status'> & { status?: TeamTaskStatus };
+
+interface TeamMember {
+  id: string;
+  member_id: string;
+  status: string;
+  timestamp: number;
+  name?: string;
+  execution_status?: string | null;
+  mode?: string;
+  /** TeamRole 值：leader / teammate / human_agent / bridge_agent / worker */
+  role?: string;
+  /** 外部 CLI 后端名（claude / codex / ...），普通成员为空 */
+  cli_agent?: string | null;
+  /** 产生该成员的 swarmflow run（镜像 worker 才有，真实队友无此字段） */
+  workflow_run_id?: string;
+  /** 专家节点引用的专家团成员名（镜像的专家 worker 才有） */
+  agent_template?: string | null;
+  /** 专家的展示名（镜像的专家 worker 才有） */
+  display_name?: string | null;
+}
+
+/** 增量成员事件里的空字段不得覆盖已知值：返回 next，空则回退 prev。 */
+function keepKnownMemberField(
+  next: string | null | undefined,
+  prev: string | null | undefined
+): string | undefined {
+  if (typeof next === 'string' && next.trim() !== '') return next;
+  return typeof prev === 'string' && prev.trim() !== '' ? prev : undefined;
+}
+
+export type HumanShareStatus = 'pending' | 'joined' | 'left';
+
+export interface HumanShareCommand {
+  memberName: string;
+  displayName?: string;
+  sessionId: string;
+  teamName: string;
+  sessionRef: string;
+  joinCommand: string;
+  exitCommand: string;
+  status: HumanShareStatus;
+  sourceChannel?: string;
+  userId?: string;
+  updatedAt: number;
+}
+
+export type TeamMemberExecutionEventKind =
+  | 'final'
+  | 'tool_call'
+  | 'tool_result'
+  | 'file';
+
+export interface TeamMemberExecutionEvent {
+  id: string;
+  member_id: string;
+  kind: TeamMemberExecutionEventKind;
+  timestamp: number;
+  title: string;
+  content?: string;
+  tool_name?: string;
+  tool_call_id?: string;
+  files?: Array<{
+    name: string;
+    size?: number;
+    mime_type?: string;
+    download_url?: string;
+    path?: string;
+  }>;
+}
+
+/**
+ * 单个 session 的运行态。
+ * 原 B 类全局字段全部迁移到这里，按 session 隔离。
+ */
+export interface SessionRuntime {
+  mode: AgentMode;
+  selectedModelName: string | null;
+  /** Stable `{type,id}` selection; preferred over model_name for runtime/session APIs. */
+  selectedModelSelection: ModelSelection | null;
+  projectDirectory: string | null;
+  /** 新会话草稿值；真实 Session 创建后由后端 metadata 的权威值覆盖。 */
+  persistSession: boolean;
+  contextUsageSnapshot: ContextUsageSnapshot | null;
+  tokenUsageSnapshot: SessionTokenUsageSnapshot | null;
+  teamTaskEvents: TeamTaskEvent[];
+  teamTasks: TeamTask[];
+  teamTaskProgressBaseline: TaskProgressBaseline;
+  teamMembers: TeamMember[];
+  teamConnectionPresentation: TeamConnectionPresentation | null;
+  teamLeaderMemberIds: string[];
+  teamHumanShareCommands: HumanShareCommand[];
+  teamMemberExecutionEvents: TeamMemberExecutionEvent[];
+  teamMemberContextCompression: Record<string, TeamMemberContextCompressionState>;
+  teamHistoryMessages: Message[];
+  /** 当前会话输入栏已选中的技能名（用于随消息发送，发送后清空——一次性语义） */
+  selectedSkills: string[];
+  /** skill-creator 统一入口等场景的会话级元数据，随 chat.send 发送后清除 */
+  metadata?: Record<string, unknown>;
+  /** 当前会话的智能体挂载草稿；keep 表示不修改后端当前挂载 */
+  agentSelectionIntent: AgentSelectionIntent;
+  /** 当前会话的 AgentGroup 挂载草稿；绑定后由 agentGroupBinding 提供只读展示。 */
+  agentGroupSelectionIntent: AgentGroupSelectionIntent;
+  /** 后端已确认的 AgentGroup 绑定；非空时首条绑定参数不再重复发送。 */
+  agentGroupBinding: string | null;
+  /** 首条 AgentGroup 消息已发出、等待后端确认期间的乐观锁定。 */
+  agentGroupBindingPending: string | null;
+  /** 首次 AgentGroup 绑定时锁定的 leader 身份；普通 Team 为 null。 */
+  teamLeaderIdentity: TeamLeaderIdentity | null;
+  /** 本会话已选 AgentGroup 的展示身份；目录卸载后仍用于历史消息展示。 */
+  teamGroupIdentity: AgentGroupIdentity | null;
+  /**
+   * 本会话期间持续启用的插件id/MCP名，由输入框"+"菜单"扩展"面板的开关控制。与
+   * selectedSkills 不同：这两个字段发 chat.send 后不清空，会一直带在每条消息里，直到用户在
+   * 面板里手动关闭开关。恢复历史会话时由后端 session_equipment 快照重新填充。
+   */
+  enabledPlugins: string[];
+  enabledMcps: string[];
+  /** 是否已从后端快照恢复，或已由用户在本地明确修改。 */
+  extensionsHydrated: boolean;
+  /** 本会话是否启用 swarmflow（会话级，随 chat.send 下发） */
+  enableSwarmflow: boolean;
+  /** 本会话 swarmflow token 上限（留空=不限） */
+  swarmflowBudget: number | null;
+  /**
+   * 本会话团队的任务调度模式（会话级，随 chat.send 下发并持久化到会话 metadata）。
+   * undefined = 用户未拨过：开关默认关闭（自主模式）。团队建好后不可再改。
+   */
+  teamDispatchMode?: TeamDispatchMode;
+  /** SwarmFlow 工作流运行列表（树视图渲染） */
+  workflowRuns: WorkflowRun[];
+}
+
+function createEmptyRuntime(
+  sessionId?: string,
+  availableModels: ModelEntry[] = [],
+  availableModelGroups: ModelGroup[] = [],
+): SessionRuntime {
+  const legacyName = sessionId === TRANSIENT_NEW_CONVERSATION_ID ? loadLastLegacyModelName() : null;
+  const legacyModel = availableModels.find((model) => model.model_name === legacyName);
+  const restoreLegacyName = Boolean(legacyName && (legacyModel || availableModels.length === 0));
+  const restoredSelection = sessionId === TRANSIENT_NEW_CONVERSATION_ID
+    ? resolveNewConversationModelSelection(availableModels, availableModelGroups, loadLastModelSelection())
+    : null;
+  const restoredModel = restoredSelection?.type === 'model'
+    ? availableModels.find((model) => model.model_id === restoredSelection.id)
+    : null;
+  return {
+    mode: loadModeFromStorage(),
+    selectedModelName: restoreLegacyName ? legacyName : restoredModel?.model_name ?? null,
+    selectedModelSelection: restoreLegacyName
+      ? legacyModel?.model_id ? { type: 'model', id: legacyModel.model_id } : null
+      : restoredSelection,
+    projectDirectory: null,
+    persistSession: false,
+    contextUsageSnapshot: null,
+    tokenUsageSnapshot: null,
+    teamTaskEvents: [],
+    teamTasks: [],
+    teamTaskProgressBaseline: createTaskProgressBaseline(),
+    teamMembers: [],
+    teamConnectionPresentation: sessionId ? loadTeamConnectionPresentation(sessionId) : null,
+    teamLeaderMemberIds: [],
+    teamHumanShareCommands: [],
+    teamMemberExecutionEvents: [],
+    teamMemberContextCompression: {},
+    teamHistoryMessages: [],
+    selectedSkills: [],
+    metadata: undefined,
+    agentSelectionIntent: sessionId ? loadAgentSelectionIntent(sessionId) : { kind: 'keep' },
+    agentGroupSelectionIntent: sessionId ? loadAgentGroupSelectionIntent(sessionId) : { kind: 'keep' },
+    agentGroupBinding: null,
+    agentGroupBindingPending: null,
+    teamLeaderIdentity: null,
+    teamGroupIdentity: null,
+    enabledPlugins: [],
+    enabledMcps: [],
+    extensionsHydrated: false,
+    enableSwarmflow: false,
+    swarmflowBudget: null,
+    workflowRuns: [],
+  };
+}
+
+interface SessionState {
+  // A 类全局字段
+  currentSession: Session | null;
+  sessions: Session[];
+  isConnected: boolean;
+  availableTools: string[];
+  memoryUsage: MemoryUsage;
+  availableModels: ModelEntry[];
+  /** All configured models available to the chat picker, including non-default connections. */
+  chatAvailableModels: ModelEntry[];
+  /** models.list 返回的模型组目录，供选择器与设置页共用 */
+  availableModelGroups: ModelGroup[];
+  /** 后端配置的默认模型 ID，供集群模式和新建会话取用，不受任何会话手动切换模型影响 */
+  defaultModelName: string | null;
+
+  // B 类 session 级字段
+  runtimes: Record<string, SessionRuntime>;
+
+  // Runtime 管理方法
+  ensureRuntime: (sessionId: string) => SessionRuntime;
+  initializeDefaultModel: (sessionId: string) => void;
+  getRuntime: (sessionId: string | null) => SessionRuntime | undefined;
+  getEffectiveModelName: (sessionId: string | null) => string | null;
+  getModelSelectionPayload: (sessionId: string) => Record<string, unknown>;
+  removeRuntime: (sessionId: string) => void;
+
+  // A 类 actions（不加 sessionId）
+  setCurrentSession: (session: Session | null) => void;
+  setSessions: (sessions: Session[]) => void;
+  addSession: (session: Session) => void;
+  updateSession: (sessionId: string, updates: Partial<Session>) => void;
+  removeSession: (sessionId: string) => void;
+  setConnected: (connected: boolean) => void;
+  setAvailableTools: (tools: string[]) => void;
+  receiveContextUsage: (payload: unknown) => void;
+  receiveSessionTokenUsage: (payload: unknown) => void;
+  setMemoryUsage: (memoryUsage: Partial<MemoryUsage> | null) => void;
+  setAvailableModels: (models: ModelEntry[], activeModel?: string) => void;
+  setAvailableModelGroups: (groups: ModelGroup[]) => void;
+  setSelectedModelName: (sessionId: string, name: string | null) => void;
+  setSelectedModelSelection: (sessionId: string, selection: ModelSelection | null) => void;
+  /** Prefer stable selection; fall back to model_name only when no selection is set. */
+  getOutgoingModelParams: (sessionId: string) => Record<string, unknown>;
+
+  // B 类 actions（加 sessionId）
+  setMode: (sessionId: string, mode: AgentMode) => void;
+  setProjectDirectory: (sessionId: string, directory: string | null) => void;
+  setPersistSession: (sessionId: string, enabled: boolean) => void;
+  setTeamTaskEvents: (sessionId: string, events: TeamTaskEvent[]) => void;
+  addTeamTaskEvent: (sessionId: string, event: TeamTaskEvent) => void;
+  setTeamTasks: (sessionId: string, tasks: TeamTask[]) => void;
+  registerConfirmedTeamTaskCreation: (sessionId: string, taskId: string) => void;
+  mergeTeamTaskProgressBaseline: (sessionId: string, baseline: TaskProgressBaseline) => void;
+  upsertTeamTask: (sessionId: string, task: TeamTaskUpsert) => void;
+  updateTeamTask: (sessionId: string, taskId: string, patch: Partial<TeamTask>) => void;
+  setTeamMembers: (sessionId: string, members: TeamMember[]) => void;
+  setTeamConnectionPresentation: (sessionId: string, presentation: TeamConnectionPresentation | null) => void;
+  clearTeamConnectionPresentation: (sessionId: string, memberId?: string) => void;
+  setTeamLeaderMemberIds: (sessionId: string, memberIds: string[]) => void;
+  addTeamLeaderMemberId: (sessionId: string, memberId: string) => void;
+  /** 输入栏已选技能：追加（去重） */
+  addSelectedSkill: (sessionId: string, skill: string) => void;
+  /** 输入栏已选技能：移除指定项 */
+  removeSelectedSkill: (sessionId: string, skill: string) => void;
+  /** 输入栏已选技能：清空 */
+  clearSelectedSkills: (sessionId: string) => void;
+  /** 设置/清除会话级元数据（skill-creator 统一入口等场景） */
+  setSessionMetadata: (sessionId: string, metadata: Record<string, unknown> | null) => void;
+  /** 输入栏智能体选择：选择、清空或恢复为不修改 */
+  setAgentSelectionIntent: (sessionId: string, intent: AgentSelectionIntent) => void;
+  clearAgentSelectionIntent: (sessionId: string, expectedIntent?: AgentSelectionIntent) => void;
+  setAgentGroupSelectionIntent: (sessionId: string, intent: AgentGroupSelectionIntent) => void;
+  clearAgentGroupSelectionIntent: (sessionId: string, expectedIntent?: AgentGroupSelectionIntent) => void;
+  setAgentGroupBinding: (sessionId: string, groupId: string | null) => void;
+  setAgentGroupBindingPending: (sessionId: string, groupId: string | null) => void;
+  setTeamLeaderIdentity: (sessionId: string, identity: TeamLeaderIdentity | null) => void;
+  setTeamGroupIdentity: (sessionId: string, identity: AgentGroupIdentity | null) => void;
+  /** 本会话启用插件：追加（去重） */
+  addEnabledPlugin: (sessionId: string, pluginId: string) => void;
+  /** 本会话启用插件：移除指定项 */
+  removeEnabledPlugin: (sessionId: string, pluginId: string) => void;
+  /** 本会话启用插件：清空 */
+  clearEnabledPlugins: (sessionId: string) => void;
+  /** 本会话启用MCP：追加（去重） */
+  addEnabledMcp: (sessionId: string, mcpName: string) => void;
+  /** 本会话启用MCP：移除指定项 */
+  removeEnabledMcp: (sessionId: string, mcpName: string) => void;
+  /** 本会话启用MCP：清空 */
+  clearEnabledMcps: (sessionId: string) => void;
+  /** 用后端的会话级装备快照恢复插件/MCP选择。 */
+  restoreSessionEquipment: (
+    sessionId: string,
+    equipment: { plugin_names?: string[]; mcp?: string[] },
+  ) => void;
+  addTeamMember: (sessionId: string, member: TeamMember) => void;
+  updateTeamMemberStatus: (sessionId: string, memberId: string, newStatus: string, timestamp?: number) => void;
+  setTeamHumanShareCommands: (sessionId: string, commands: HumanShareCommand[]) => void;
+  upsertTeamHumanShareCommand: (sessionId: string, command: HumanShareCommand) => void;
+  updateTeamHumanShareStatus: (
+    sessionId: string,
+    memberName: string,
+    status: HumanShareStatus,
+    patch?: Partial<HumanShareCommand>
+  ) => void;
+  setTeamMemberExecutionEvents: (sessionId: string, events: TeamMemberExecutionEvent[]) => void;
+  addTeamMemberExecutionEvent: (sessionId: string, event: TeamMemberExecutionEvent) => void;
+  setTeamMemberContextCompressionStatus: (
+    sessionId: string,
+    memberId: string,
+    runtime?: ContextCompressionRuntime,
+    summary?: ContextCompressionSummary
+  ) => void;
+  clearTeamMemberContextCompressionStatus: (sessionId: string, memberId: string) => void;
+  clearAllTeamMemberContextCompressionStatus: (sessionId: string) => void;
+  setTeamHistoryMessages: (sessionId: string, messages: Message[]) => void;
+
+  // SwarmFlow actions
+  /** 增量合并一条 workflow 更新到 workflowRuns */
+  applyWorkflowUpdate: (sessionId: string, workflow: WorkflowRun) => void;
+  /** 设置/关闭用户配置 enableSwarmflow 与预算 swarmflowBudget（配置态，非视图态） */
+  setSwarmflowActive: (sessionId: string, active: boolean, budget?: number | null) => void;
+  /** 设置本会话团队的任务调度模式（显式值，随 chat.send 下发并持久化到会话 metadata） */
+  setTeamDispatchMode: (sessionId: string, mode: TeamDispatchMode) => void;
+  /** 懒加载 phase 完整 agents（command.workflows get_phase） */
+  loadPhaseAgents: (
+    sessionId: string,
+    workflowId: string,
+    phaseId: string,
+    agentOffset?: number,
+  ) => Promise<void>;
+  /** 懒加载单个 agent 完整体（command.workflows get_agent） */
+  loadAgentDetail: (
+    sessionId: string,
+    workflowId: string,
+    phaseId: string,
+    agentId: string,
+  ) => Promise<void>;
+}
+
+export const useSessionStore = create<SessionState>((set, get) => ({
+  currentSession: null,
+  sessions: [],
+  isConnected: false,
+  availableTools: [],
+  memoryUsage: {
+    rssMb: null,
+    usedPercent: null,
+  },
+  availableModels: [],
+  chatAvailableModels: [],
+  availableModelGroups: [],
+  defaultModelName: null,
+  runtimes: {},
+
+  ensureRuntime: (sessionId) => {
+    const state = get();
+    const existing = state.runtimes[sessionId];
+    if (existing) return existing;
+    const runtime = createEmptyRuntime(sessionId, state.chatAvailableModels, state.availableModelGroups);
+    set((state) => ({
+      runtimes: { ...state.runtimes, [sessionId]: runtime },
+    }));
+    return runtime;
+  },
+
+  initializeDefaultModel: (sessionId) => {
+    const runtime = get().ensureRuntime(sessionId);
+    if (runtime.selectedModelSelection || runtime.selectedModelName) return;
+    const defaultModelName = get().defaultModelName;
+    if (defaultModelName) get().setSelectedModelName(sessionId, defaultModelName);
+  },
+
+  getRuntime: (sessionId) => {
+    if (!sessionId) return undefined;
+    return get().runtimes[sessionId];
+  },
+
+  getEffectiveModelName: (sessionId) => {
+    if (!sessionId) return null;
+    const state = get();
+    const runtime = state.runtimes[sessionId];
+    if (!runtime) return null;
+    // Group selections intentionally have no model_name identity; callers that still
+    // need a display/legacy name should not invent one from active_model/default.
+    if (runtime.selectedModelSelection?.type === 'model_group') {
+      return null;
+    }
+    if (runtime.selectedModelSelection?.type === 'model') {
+      const byId = state.availableModels.find((model) => model.model_id === runtime.selectedModelSelection?.id)
+        ?? state.chatAvailableModels.find((model) => model.model_id === runtime.selectedModelSelection?.id);
+      if (byId) return byId.model_name;
+    }
+    // 不再原样吐出 runtime.selectedModelName（可能是模型改名后失配的陈旧字符串），
+    // 而是走与 UI 显示（ModelSelector）相同的解析逻辑，确保发给后端的 model_name
+    // 参数与界面上显示的模型永远指向同一个 entry（bug003）。
+    // 单 Agent 与集群（team）模式统一走同一套解析——集群模式下用户同样可以自选模型，
+    // 后端 team_helpers 会把它透传给未显式配置 per-agent model 的团队成员。
+    //
+    // 注意：这里返回的是 model_name 而非 alias。后端 _model_cache 以 model_name 为
+    // key 查找；alias 只是展示名，后端无法据此解析。
+    const resolved = resolveEffectiveModel(
+      state.chatAvailableModels,
+      runtime.selectedModelName,
+      state.defaultModelName,
+    );
+    return resolved ? resolved.model_name : runtime.selectedModelName;
+  },
+
+  getOutgoingModelParams: (sessionId) => get().getModelSelectionPayload(sessionId),
+
+  removeRuntime: (sessionId) => {
+    set((state) => {
+      const next = { ...state.runtimes };
+      delete next[sessionId];
+      return { runtimes: next };
+    });
+  },
+
+  getModelSelectionPayload: (sessionId) => {
+    const state = get();
+    const runtime = state.runtimes[sessionId];
+    const session =
+      state.currentSession?.session_id === sessionId
+        ? state.currentSession
+        : state.sessions.find((candidate) => candidate.session_id === sessionId);
+    const effectiveModelName = state.getEffectiveModelName(sessionId);
+    const individualModel = [...state.availableModels, ...state.chatAvailableModels].find(
+      (model) => model.model_name === effectiveModelName && Boolean(model.model_id?.trim()),
+    );
+    const selectedModelSelection = runtime?.selectedModelSelection
+      ?? (individualModel?.model_id ? { type: 'model' as const, id: individualModel.model_id.trim() } : null);
+    return buildConversationModelPayload({
+      mode: runtime?.mode,
+      selectedModelSelection,
+      cronId: session?.cron_id,
+      selectedModelName: effectiveModelName,
+    });
+  },
+
+  setCurrentSession: (session) => {
+    const normalizedSession = session ? normalizeSession(session) : null;
+    set((state) => {
+      if (!normalizedSession) {
+        return { currentSession: null };
+      }
+      const sessionId = normalizedSession.session_id;
+      const existingRuntime = state.runtimes[sessionId];
+      const baseRuntime = existingRuntime || createEmptyRuntime(sessionId);
+      const hasGroupBinding = Object.prototype.hasOwnProperty.call(normalizedSession, 'agent_group_name');
+      const hasTeamLeaderIdentity = Object.prototype.hasOwnProperty.call(normalizedSession, 'team_leader_identity');
+      const hasTeamGroupIdentity = Object.prototype.hasOwnProperty.call(normalizedSession, 'team_group_identity');
+      const sessionGroupBinding = typeof normalizedSession.agent_group_name === 'string' && normalizedSession.agent_group_name.trim()
+        ? normalizedSession.agent_group_name.trim()
+        : null;
+      const nextAgentGroupBinding = sessionGroupBinding || baseRuntime.agentGroupBinding;
+      const nextRuntime: SessionRuntime = {
+        ...baseRuntime,
+        mode: normalizedSession.mode || baseRuntime.mode,
+        selectedModelSelection: Object.prototype.hasOwnProperty.call(normalizedSession, 'model_selection')
+          ? parseModelSelection(normalizedSession.model_selection)
+          : baseRuntime.selectedModelSelection,
+        persistSession: normalizedSession.persist_session === true,
+        teamHistoryMessages: baseRuntime.teamHistoryMessages,
+        agentGroupBinding: hasGroupBinding ? nextAgentGroupBinding : baseRuntime.agentGroupBinding,
+        agentGroupBindingPending: sessionGroupBinding
+          ? null
+          : baseRuntime.agentGroupBindingPending,
+        teamLeaderIdentity: hasTeamLeaderIdentity
+          ? normalizeTeamLeaderIdentity(normalizedSession.team_leader_identity)
+          : baseRuntime.teamLeaderIdentity,
+        teamGroupIdentity: hasTeamGroupIdentity
+          ? normalizeTeamGroupIdentity(normalizedSession.team_group_identity)
+          : baseRuntime.teamGroupIdentity,
+      };
+      return {
+        currentSession: normalizedSession,
+        runtimes: { ...state.runtimes, [sessionId]: nextRuntime },
+      };
+    });
+  },
+
+  setSessions: (sessions) => {
+    set({ sessions: sessions.map(normalizeSession) });
+  },
+
+  addSession: (session) => {
+    set((state) => ({
+      sessions: [normalizeSession(session), ...state.sessions],
+    }));
+  },
+
+  updateSession: (sessionId, updates) => {
+    const normalizedUpdates =
+      Object.prototype.hasOwnProperty.call(updates, 'mode')
+        ? { ...updates, mode: normalizeAgentMode((updates as { mode?: unknown }).mode) }
+        : updates;
+    set((state) => ({
+      sessions: state.sessions.map((s) =>
+        s.session_id === sessionId ? normalizeSession({ ...s, ...normalizedUpdates }) : s
+      ),
+      currentSession:
+        state.currentSession?.session_id === sessionId
+          ? normalizeSession({ ...state.currentSession, ...normalizedUpdates })
+          : state.currentSession,
+    }));
+  },
+
+  removeSession: (sessionId) => {
+    set((state) => ({
+      sessions: state.sessions.filter((s) => s.session_id !== sessionId),
+      currentSession:
+        state.currentSession?.session_id === sessionId
+          ? null
+          : state.currentSession,
+    }));
+  },
+
+  setMode: (sessionId, mode) => {
+    const normalizedMode = normalizeAgentMode(mode);
+    saveModeToStorage(normalizedMode);
+    if (normalizedMode !== 'agent') {
+      saveAgentSelectionIntent(sessionId, { kind: 'clear' });
+    }
+    if (normalizedMode !== 'team') {
+      saveAgentGroupSelectionIntent(sessionId, { kind: 'clear' });
+      saveTeamConnectionPresentation(sessionId, null);
+    }
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      const agentSelectionIntent = normalizedMode === 'agent'
+        ? runtime.agentSelectionIntent
+        : { kind: 'clear' as const };
+      const agentGroupSelectionIntent = normalizedMode === 'team'
+        ? runtime.agentGroupSelectionIntent
+        : { kind: 'clear' as const };
+      // 切离 team 模式时自动关闭 swarmflow
+      const closingSwarmflow =
+        runtime.mode === 'team' && normalizedMode !== 'team' && runtime.enableSwarmflow;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: {
+            ...runtime,
+            mode: normalizedMode,
+            contextUsageSnapshot: runtime.mode === normalizedMode ? runtime.contextUsageSnapshot : null,
+            teamConnectionPresentation:
+              normalizedMode === 'team'
+                ? (runtime.teamConnectionPresentation ?? loadTeamConnectionPresentation(sessionId))
+                : null,
+            agentSelectionIntent,
+            agentGroupSelectionIntent,
+            ...(normalizedMode !== 'team' ? { agentGroupBinding: null } : {}),
+            ...(normalizedMode !== 'team' ? { agentGroupBindingPending: null } : {}),
+            ...(normalizedMode !== 'team' ? { teamGroupIdentity: null } : {}),
+            ...(closingSwarmflow
+              ? { enableSwarmflow: false, swarmflowBudget: null }
+              : {}),
+          },
+        },
+      };
+    });
+  },
+
+  setProjectDirectory: (sessionId, directory) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, projectDirectory: directory },
+        },
+      };
+    });
+  },
+
+  setPersistSession: (sessionId, enabled) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, persistSession: Boolean(enabled) },
+        },
+      };
+    });
+  },
+
+  setConnected: (connected) => {
+    set({ isConnected: connected });
+  },
+
+  setAvailableTools: (tools) => {
+    set({ availableTools: tools });
+  },
+
+  receiveContextUsage: (payload) => {
+    const snapshot = parseContextUsageSnapshot(payload);
+    if (!snapshot) return;
+    const sessionId = snapshot.product_session_id;
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      const isEligible =
+        runtime.mode === 'agent'
+          ? isSingleAgentContextUsageSnapshot(snapshot)
+          : runtime.mode === 'team' && isTeamLeaderContextUsageSnapshot(snapshot);
+      if (!isEligible) return state;
+      const incomingTimestamp = contextUsageTimestamp(snapshot);
+      const currentTimestamp = contextUsageTimestamp(runtime.contextUsageSnapshot);
+      // history.get pages are loaded newest-first. Keep an older page from
+      // replacing the latest live/history snapshot already shown in the UI.
+      if (
+        incomingTimestamp !== null &&
+        currentTimestamp !== null &&
+        incomingTimestamp < currentTimestamp
+      ) {
+        return state;
+      }
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, contextUsageSnapshot: snapshot },
+        },
+      };
+    });
+  },
+
+  receiveSessionTokenUsage: (payload) => {
+    const snapshot = parseSessionTokenUsageSnapshot(payload);
+    if (!snapshot) return;
+    set((state) => {
+      const runtime = state.runtimes[snapshot.session_id];
+      if (!runtime) return state;
+      if (
+        runtime.tokenUsageSnapshot
+        && runtime.tokenUsageSnapshot.revision >= snapshot.revision
+      ) {
+        return state;
+      }
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [snapshot.session_id]: { ...runtime, tokenUsageSnapshot: snapshot },
+        },
+      };
+    });
+  },
+
+  setMemoryUsage: (memoryUsage) => {
+    if (!memoryUsage) {
+      set({
+        memoryUsage: {
+          rssMb: null,
+          usedPercent: null,
+        },
+      });
+      return;
+    }
+
+    const normalizedRssMb =
+      typeof memoryUsage.rssMb === 'number' && Number.isFinite(memoryUsage.rssMb)
+        ? Number(Math.max(memoryUsage.rssMb, 0).toFixed(1))
+        : null;
+    const normalizedUsedPercent =
+      typeof memoryUsage.usedPercent === 'number' && Number.isFinite(memoryUsage.usedPercent)
+        ? Number(Math.min(Math.max(memoryUsage.usedPercent, 0), 100).toFixed(1))
+        : null;
+
+    set({
+      memoryUsage: {
+        rssMb: normalizedRssMb,
+        usedPercent: normalizedUsedPercent,
+      },
+    });
+  },
+
+  setTeamTaskEvents: (sessionId, events) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, teamTaskEvents: events },
+        },
+      };
+    });
+  },
+
+  addTeamTaskEvent: (sessionId, event) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      const existingIndex = runtime.teamTaskEvents.findIndex(
+        (e) => e.task_id === event.task_id
+      );
+      if (existingIndex >= 0) {
+        const updatedEvents = [...runtime.teamTaskEvents];
+        updatedEvents[existingIndex] = {
+          ...updatedEvents[existingIndex],
+          ...event,
+        };
+        return {
+          runtimes: {
+            ...state.runtimes,
+            [sessionId]: { ...runtime, teamTaskEvents: updatedEvents },
+          },
+        };
+      }
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, teamTaskEvents: [event, ...runtime.teamTaskEvents] },
+        },
+      };
+    });
+  },
+
+  setTeamTasks: (sessionId, tasks) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: {
+            ...runtime,
+            teamTasks: tasks,
+            teamTaskProgressBaseline: tasks.length === 0
+              ? createTaskProgressBaseline()
+              : runtime.teamTaskProgressBaseline,
+          },
+        },
+      };
+    });
+  },
+
+  registerConfirmedTeamTaskCreation: (sessionId, taskId) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      const baseline = registerConfirmedTaskCreation(
+        runtime.teamTasks,
+        runtime.teamTaskProgressBaseline,
+        taskId
+      );
+      if (baseline === runtime.teamTaskProgressBaseline) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, teamTaskProgressBaseline: baseline },
+        },
+      };
+    });
+  },
+
+  mergeTeamTaskProgressBaseline: (sessionId, restoredBaseline) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: {
+            ...runtime,
+            teamTaskProgressBaseline: mergeTaskProgressBaseline(
+              runtime.teamTaskProgressBaseline,
+              restoredBaseline
+            ),
+          },
+        },
+      };
+    });
+  },
+
+  upsertTeamTask: (sessionId, task) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      const existingIndex = runtime.teamTasks.findIndex(
+        (item) => item.task_id === task.task_id
+      );
+      if (existingIndex >= 0) {
+        const existing = runtime.teamTasks[existingIndex];
+        const updatedTasks = [...runtime.teamTasks];
+        // The board's visual progress is eased from `timestamp` (task start).
+        // A later status event must not restart that clock — pause → resume
+        // would otherwise drop the bar back to 10%.
+        const frozen = task.progress_frozen ?? existing.progress_frozen;
+        updatedTasks[existingIndex] = {
+          ...existing,
+          ...task,
+          timestamp: existing.timestamp ?? task.timestamp,
+          progress_frozen: frozen,
+          progress_frozen_at: frozen
+            ? (existing.progress_frozen ? existing.progress_frozen_at : task.timestamp)
+            : undefined,
+          // An event without an explicit status (e.g. a content-only update)
+          // must not reset the task; keep the existing status.
+          status: task.status ?? existing.status,
+          title: task.title ?? existing.title,
+          content: task.content ?? existing.content,
+          assignee: task.assignee ?? existing.assignee,
+          team_id: task.team_id ?? existing.team_id,
+          skills: task.skills ?? existing.skills,
+          files: task.files ?? existing.files,
+          // Truncation flags: a status-only event carries none, so `?? existing`
+          // preserves whatever a prior created/updated event set. NEVER reset
+          // these to false/undefined on a status-only upsert.
+          title_truncated: task.title_truncated ?? existing.title_truncated,
+          title_original_size: task.title_original_size ?? existing.title_original_size,
+          content_truncated: task.content_truncated ?? existing.content_truncated,
+          content_original_size: task.content_original_size ?? existing.content_original_size,
+        };
+        return {
+          runtimes: {
+            ...state.runtimes,
+            [sessionId]: { ...runtime, teamTasks: updatedTasks },
+          },
+        };
+      }
+      // New card: a status-only event may arrive before the created event,
+      // leaving an empty title. Fall back to a placeholder built from the
+      // task_id tail so the card is not rendered with a bare empty title
+      // (matches the precedent in features/teamHistoryPanelRestore.ts upsertTask).
+      return {
+       runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, teamTasks: [{
+            ...task,
+            status: task.status ?? 'pending',
+            title: task.title ?? `任务 ${String(task.task_id || '').slice(-6)}`,
+          }, ...runtime.teamTasks],
+      },
+        },
+      };
+    });
+  },
+
+  updateTeamTask: (sessionId, taskId, patch) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      const existingIndex = runtime.teamTasks.findIndex(
+        (task) => task.task_id === taskId
+      );
+      if (existingIndex < 0) {
+        return state;
+      }
+      const updatedTasks = [...runtime.teamTasks];
+      updatedTasks[existingIndex] = {
+        ...updatedTasks[existingIndex],
+        ...patch,
+        title: patch.title ?? updatedTasks[existingIndex].title,
+        content: patch.content ?? updatedTasks[existingIndex].content,
+        assignee: patch.assignee ?? updatedTasks[existingIndex].assignee,
+        team_id: patch.team_id ?? updatedTasks[existingIndex].team_id,
+        skills: patch.skills ?? updatedTasks[existingIndex].skills,
+        files: patch.files ?? updatedTasks[existingIndex].files,
+      };
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, teamTasks: updatedTasks },
+        },
+      };
+    });
+  },
+
+  setTeamMembers: (sessionId, members) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      const memberIds = new Set(members.map((member) => member.member_id));
+      const nextCompression = Object.fromEntries(
+        Object.entries(runtime.teamMemberContextCompression).filter(([memberId]) => memberIds.has(memberId))
+      );
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: {
+            ...runtime,
+            teamMembers: members,
+            teamMemberContextCompression: nextCompression,
+          },
+        },
+      };
+    });
+  },
+
+  setTeamConnectionPresentation: (sessionId, presentation) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime || runtime.mode !== 'team') return state;
+      saveTeamConnectionPresentation(sessionId, presentation);
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: {
+            ...runtime,
+            teamConnectionPresentation: presentation,
+          },
+        },
+      };
+    });
+  },
+
+  clearTeamConnectionPresentation: (sessionId, memberId) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      const presentation = runtime?.teamConnectionPresentation;
+      if (!runtime || !presentation) return state;
+      const memberIds = memberId ? presentation.memberIds.filter((id) => id !== memberId) : [];
+      if (memberIds.length === presentation.memberIds.length) {
+        return state;
+      }
+      saveTeamConnectionPresentation(sessionId, memberIds.length > 0 ? { memberIds } : null);
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: {
+            ...runtime,
+            teamConnectionPresentation: memberIds.length > 0 ? { memberIds } : null,
+          },
+        },
+      };
+    });
+  },
+
+  setTeamLeaderMemberIds: (sessionId, memberIds) => {
+    const normalized = Array.from(
+      new Set(memberIds.map((memberId) => memberId.trim()).filter(Boolean))
+    );
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, teamLeaderMemberIds: normalized },
+        },
+      };
+    });
+  },
+
+  addTeamLeaderMemberId: (sessionId, memberId) => {
+    const normalized = memberId.trim();
+    if (!normalized) return;
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      if (runtime.teamLeaderMemberIds.includes(normalized)) {
+        return state;
+      }
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, teamLeaderMemberIds: [...runtime.teamLeaderMemberIds, normalized] },
+        },
+      };
+    });
+  },
+
+  addSelectedSkill: (sessionId, skill) => {
+    const normalized = skill.trim();
+    if (!normalized) return;
+    set((state) => {
+      const runtime = state.runtimes[sessionId] ?? createEmptyRuntime();
+      if (
+        isAgentGroupSelected(
+          runtime.mode,
+          runtime.agentGroupSelectionIntent,
+          runtime.agentGroupBinding,
+          runtime.agentGroupBindingPending,
+        )
+      ) return state;
+      if (runtime.selectedSkills.includes(normalized)) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, selectedSkills: [...runtime.selectedSkills, normalized] },
+        },
+      };
+    });
+  },
+
+  removeSelectedSkill: (sessionId, skill) => {
+    const normalized = skill.trim();
+    if (!normalized) return;
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      if (!runtime.selectedSkills.includes(normalized)) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, selectedSkills: runtime.selectedSkills.filter((s) => s !== normalized) },
+        },
+      };
+    });
+  },
+
+  clearSelectedSkills: (sessionId) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      if (runtime.selectedSkills.length === 0) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, selectedSkills: [] },
+        },
+      };
+    });
+  },
+
+  setSessionMetadata: (sessionId, metadata) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, metadata: metadata ?? undefined },
+        },
+      };
+    });
+  },
+
+  setAgentSelectionIntent: (sessionId, intent) => {
+    saveAgentSelectionIntent(sessionId, intent);
+    set((state) => {
+      const runtime = state.runtimes[sessionId] ?? createEmptyRuntime(sessionId);
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, agentSelectionIntent: intent },
+        },
+      };
+    });
+  },
+
+  clearAgentSelectionIntent: (sessionId, expectedIntent) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime || runtime.agentSelectionIntent.kind === 'keep') return state;
+      if (expectedIntent && !sameAgentSelectionIntent(runtime.agentSelectionIntent, expectedIntent)) {
+        return state;
+      }
+      // A selected Agent is a session-level attachment, not a one-shot input hint.
+      // Keep the visible selection after a successful send; only a clear intent is
+      // consumed after the server has applied the detach request.
+      if (runtime.agentSelectionIntent.kind === 'select') return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, agentSelectionIntent: { kind: 'keep' } },
+        },
+      };
+    });
+  },
+
+  setAgentGroupSelectionIntent: (sessionId, intent) => {
+    saveAgentGroupSelectionIntent(sessionId, intent);
+    set((state) => {
+      const runtime = state.runtimes[sessionId] ?? createEmptyRuntime(sessionId);
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, agentGroupSelectionIntent: intent },
+        },
+      };
+    });
+  },
+
+  clearAgentGroupSelectionIntent: (sessionId, expectedIntent) => {
+    saveAgentGroupSelectionIntent(sessionId, { kind: 'clear' });
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime || runtime.agentGroupSelectionIntent.kind === 'keep') return state;
+      if (expectedIntent && !sameAgentGroupSelectionIntent(runtime.agentGroupSelectionIntent, expectedIntent)) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, agentGroupSelectionIntent: { kind: 'keep' } },
+        },
+      };
+    });
+  },
+
+  setAgentGroupBinding: (sessionId, groupId) => {
+    const normalized = typeof groupId === 'string' && groupId.trim() ? groupId.trim() : null;
+    set((state) => {
+      const runtime = state.runtimes[sessionId] ?? createEmptyRuntime(sessionId);
+      const nextSessions = state.sessions.map((session) => session.session_id === sessionId
+        ? { ...session, agent_group_name: normalized }
+        : session);
+      const nextCurrentSession = state.currentSession?.session_id === sessionId
+        ? { ...state.currentSession, agent_group_name: normalized }
+        : state.currentSession;
+      return {
+        sessions: nextSessions,
+        currentSession: nextCurrentSession,
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: {
+            ...runtime,
+            agentGroupBinding: normalized,
+            agentGroupBindingPending: null,
+            teamLeaderIdentity: normalized && (!runtime.agentGroupBinding || runtime.agentGroupBinding === normalized)
+              ? runtime.teamLeaderIdentity
+              : null,
+            teamGroupIdentity: normalized && (
+              runtime.teamGroupIdentity?.name === normalized
+              || runtime.teamGroupIdentity?.id === normalized
+            )
+              ? runtime.teamGroupIdentity
+              : null,
+            agentGroupSelectionIntent: normalized ? { kind: 'keep' } : runtime.agentGroupSelectionIntent,
+          },
+        },
+      };
+    });
+  },
+
+  setAgentGroupBindingPending: (sessionId, groupId) => {
+    const normalized = typeof groupId === 'string' && groupId.trim() ? groupId.trim() : null;
+    set((state) => {
+      const runtime = state.runtimes[sessionId] ?? createEmptyRuntime(sessionId);
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, agentGroupBindingPending: normalized },
+        },
+      };
+    });
+  },
+
+  setTeamLeaderIdentity: (sessionId, identity) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId] ?? createEmptyRuntime(sessionId);
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, teamLeaderIdentity: identity },
+        },
+      };
+    });
+  },
+
+  setTeamGroupIdentity: (sessionId, identity) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId] ?? createEmptyRuntime(sessionId);
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, teamGroupIdentity: identity },
+        },
+      };
+    });
+  },
+
+  addEnabledPlugin: (sessionId, pluginId) => {
+    const normalized = pluginId.trim();
+    if (!normalized) return;
+    set((state) => {
+      const runtime = state.runtimes[sessionId] ?? createEmptyRuntime();
+      if (runtime.enabledPlugins.includes(normalized)) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: {
+            ...runtime,
+            enabledPlugins: [...runtime.enabledPlugins, normalized],
+            extensionsHydrated: true,
+          },
+        },
+      };
+    });
+  },
+
+  removeEnabledPlugin: (sessionId, pluginId) => {
+    const normalized = pluginId.trim();
+    if (!normalized) return;
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      if (!runtime.enabledPlugins.includes(normalized)) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: {
+            ...runtime,
+            enabledPlugins: runtime.enabledPlugins.filter((s) => s !== normalized),
+            extensionsHydrated: true,
+          },
+        },
+      };
+    });
+  },
+
+  clearEnabledPlugins: (sessionId) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, enabledPlugins: [], extensionsHydrated: true },
+        },
+      };
+    });
+  },
+
+  addEnabledMcp: (sessionId, mcpName) => {
+    const normalized = mcpName.trim();
+    if (!normalized) return;
+    set((state) => {
+      const runtime = state.runtimes[sessionId] ?? createEmptyRuntime();
+      if (runtime.enabledMcps.includes(normalized)) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: {
+            ...runtime,
+            enabledMcps: [...runtime.enabledMcps, normalized],
+            extensionsHydrated: true,
+          },
+        },
+      };
+    });
+  },
+
+  removeEnabledMcp: (sessionId, mcpName) => {
+    const normalized = mcpName.trim();
+    if (!normalized) return;
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      if (!runtime.enabledMcps.includes(normalized)) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: {
+            ...runtime,
+            enabledMcps: runtime.enabledMcps.filter((s) => s !== normalized),
+            extensionsHydrated: true,
+          },
+        },
+      };
+    });
+  },
+
+  clearEnabledMcps: (sessionId) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, enabledMcps: [], extensionsHydrated: true },
+        },
+      };
+    });
+  },
+
+  restoreSessionEquipment: (sessionId, equipment) => {
+    const normalize = (values: string[] | undefined) => Array.from(new Set(
+      (Array.isArray(values) ? values : [])
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ));
+    set((state) => {
+      const runtime = state.runtimes[sessionId] ?? createEmptyRuntime(sessionId);
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: {
+            ...runtime,
+            enabledPlugins: normalize(equipment.plugin_names),
+            enabledMcps: normalize(equipment.mcp),
+            extensionsHydrated: true,
+          },
+        },
+      };
+    });
+  },
+
+  addTeamMember: (sessionId, member) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      const existingIndex = runtime.teamMembers.findIndex(
+        (m) => m.member_id === member.member_id
+      );
+      if (existingIndex >= 0) {
+        const updatedMembers = [...runtime.teamMembers];
+        const existingMember = updatedMembers[existingIndex];
+        // 每类成员事件只带自己关心的字段（如 team.member.spawned 不带 name），
+        // 直接展开覆盖会把已知的展示名/模式抹成 undefined，界面就退回显示
+        // member_id。空值一律不覆盖已有值，规则同 ToolPanel 的 mergeById。
+        updatedMembers[existingIndex] = {
+          ...existingMember,
+          ...member,
+          name: keepKnownMemberField(member.name, existingMember.name),
+          status: keepKnownMemberField(member.status, existingMember.status) ?? '',
+          execution_status: keepKnownMemberField(
+            member.execution_status,
+            existingMember.execution_status
+          ),
+          mode: keepKnownMemberField(member.mode, existingMember.mode),
+          role: keepKnownMemberField(member.role, existingMember.role),
+          cli_agent: keepKnownMemberField(member.cli_agent, existingMember.cli_agent),
+          workflow_run_id: keepKnownMemberField(
+            member.workflow_run_id,
+            existingMember.workflow_run_id,
+          ),
+          agent_template: keepKnownMemberField(member.agent_template, existingMember.agent_template),
+          display_name: keepKnownMemberField(member.display_name, existingMember.display_name),
+        };
+        return {
+          runtimes: {
+            ...state.runtimes,
+            [sessionId]: { ...runtime, teamMembers: updatedMembers },
+          },
+        };
+      }
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, teamMembers: [member, ...runtime.teamMembers] },
+        },
+      };
+    });
+  },
+
+  updateTeamMemberStatus: (sessionId, memberId, newStatus, timestamp) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      const existingIndex = runtime.teamMembers.findIndex(
+        (m) => m.member_id === memberId
+      );
+      if (existingIndex >= 0) {
+        const updatedMembers = [...runtime.teamMembers];
+        updatedMembers[existingIndex] = {
+          ...updatedMembers[existingIndex],
+          status: newStatus,
+          timestamp: timestamp || Date.now(),
+        };
+        return {
+          runtimes: {
+            ...state.runtimes,
+            [sessionId]: { ...runtime, teamMembers: updatedMembers },
+          },
+        };
+      }
+      return state;
+    });
+  },
+
+  setTeamHumanShareCommands: (sessionId, commands) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, teamHumanShareCommands: commands },
+        },
+      };
+    });
+  },
+
+  upsertTeamHumanShareCommand: (sessionId, command) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      const existingIndex = runtime.teamHumanShareCommands.findIndex(
+        (item) => item.memberName === command.memberName && item.sessionId === command.sessionId
+      );
+      if (existingIndex >= 0) {
+        const updated = [...runtime.teamHumanShareCommands];
+        const existing = updated[existingIndex];
+        updated[existingIndex] = {
+          ...existing,
+          ...command,
+          displayName: command.displayName || existing.displayName,
+          teamName: command.teamName || existing.teamName,
+          sessionRef: command.sessionRef || existing.sessionRef,
+          joinCommand: command.joinCommand || existing.joinCommand,
+          exitCommand: command.exitCommand || existing.exitCommand,
+          status:
+            command.status === 'pending' && existing.status !== 'pending'
+              ? existing.status
+              : command.status,
+        };
+        return {
+          runtimes: {
+            ...state.runtimes,
+            [sessionId]: { ...runtime, teamHumanShareCommands: updated },
+          },
+        };
+      }
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: {
+            ...runtime,
+            teamHumanShareCommands: [...runtime.teamHumanShareCommands, command],
+          },
+        },
+      };
+    });
+  },
+
+  updateTeamHumanShareStatus: (sessionId, memberName, status, patch = {}) => {
+    const normalizedMemberName = memberName.trim();
+    if (!normalizedMemberName) return;
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: {
+            ...runtime,
+            teamHumanShareCommands: runtime.teamHumanShareCommands.map((command) =>
+              command.memberName === normalizedMemberName
+                ? {
+                    ...command,
+                    ...patch,
+                    status,
+                    updatedAt: Date.now(),
+                  }
+                : command
+            ),
+          },
+        },
+      };
+    });
+  },
+
+  setTeamMemberExecutionEvents: (sessionId, events) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, teamMemberExecutionEvents: dedupeTeamMemberExecutionEvents(events).slice(0, 300) },
+        },
+      };
+    });
+  },
+
+  addTeamMemberExecutionEvent: (sessionId, event) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      const eventPatch = Object.fromEntries(
+        Object.entries(event).filter(([, value]) => value !== undefined)
+      ) as TeamMemberExecutionEvent;
+      const duplicateIndex = runtime.teamMemberExecutionEvents.findIndex(
+        (item) => isDuplicateFinalExecutionEvent(item, eventPatch)
+      );
+      if (duplicateIndex >= 0) {
+        const updatedEvents = [...runtime.teamMemberExecutionEvents];
+        updatedEvents[duplicateIndex] = {
+          ...updatedEvents[duplicateIndex],
+          ...eventPatch,
+          id: updatedEvents[duplicateIndex].id,
+          timestamp: Math.min(updatedEvents[duplicateIndex].timestamp || eventPatch.timestamp, eventPatch.timestamp),
+        };
+        return {
+          runtimes: {
+            ...state.runtimes,
+            [sessionId]: { ...runtime, teamMemberExecutionEvents: updatedEvents },
+          },
+        };
+      }
+      const existingIndex = runtime.teamMemberExecutionEvents.findIndex(
+        (item) => item.id === event.id
+      );
+      if (existingIndex >= 0) {
+        const updatedEvents = [...runtime.teamMemberExecutionEvents];
+        updatedEvents[existingIndex] = {
+          ...updatedEvents[existingIndex],
+          ...eventPatch,
+        };
+        return {
+          runtimes: {
+            ...state.runtimes,
+            [sessionId]: { ...runtime, teamMemberExecutionEvents: updatedEvents },
+          },
+        };
+      }
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, teamMemberExecutionEvents: [eventPatch, ...runtime.teamMemberExecutionEvents].slice(0, 300) },
+        },
+      };
+    });
+  },
+
+  setTeamMemberContextCompressionStatus: (sessionId, memberId, runtimeState, summary) => {
+    const normalizedMemberId = memberId.trim();
+    if (!normalizedMemberId) return;
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      const next = { ...runtime.teamMemberContextCompression };
+      if (!runtimeState && !summary) {
+        delete next[normalizedMemberId];
+      } else {
+        const existing = next[normalizedMemberId];
+        next[normalizedMemberId] = { runtime: runtimeState, summary: summary ?? existing?.summary };
+      }
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, teamMemberContextCompression: next },
+        },
+      };
+    });
+  },
+
+  clearTeamMemberContextCompressionStatus: (sessionId, memberId) => {
+    const normalizedMemberId = memberId.trim();
+    if (!normalizedMemberId) return;
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime?.teamMemberContextCompression[normalizedMemberId]) {
+        return state;
+      }
+      const next = { ...runtime.teamMemberContextCompression };
+      delete next[normalizedMemberId];
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, teamMemberContextCompression: next },
+        },
+      };
+    });
+  },
+
+  clearAllTeamMemberContextCompressionStatus: (sessionId) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, teamMemberContextCompression: {} },
+        },
+      };
+    });
+  },
+
+  setTeamHistoryMessages: (sessionId, messages) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...runtime, teamHistoryMessages: messages },
+        },
+      };
+    });
+  },
+
+  applyWorkflowUpdate: (sessionId, workflow) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId] ?? createEmptyRuntime();
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: {
+            ...runtime,
+            workflowRuns: applyWorkflowUpdateImpl(runtime.workflowRuns, workflow),
+          },
+        },
+      };
+    });
+  },
+
+  loadPhaseAgents: async (sessionId, workflowId, phaseId, agentOffset = 0) => {
+    const payload = await requestPhaseAgents(sessionId, workflowId, phaseId, agentOffset);
+    if (payload.error || !payload.phase || typeof payload.phase !== 'object') return;
+    const phase = payload.phase as WorkflowPhase;
+    const runtime = get().runtimes[sessionId];
+    const existing = runtime?.workflowRuns.find((item) => item.id === workflowId);
+    if (!existing) return;
+    const updatedPhases = (existing.phases ?? []).map((p) =>
+      p.id === phaseId
+        ? {
+            ...p,
+            ...phase,
+            agents: (phase.agents ?? p.agents ?? []).map((a) =>
+              reassembleAgentFieldParts(a),
+            ),
+          }
+        : p,
+    );
+    get().applyWorkflowUpdate(sessionId, { ...existing, phases: updatedPhases });
+  },
+
+  loadAgentDetail: async (sessionId, workflowId, phaseId, agentId) => {
+    const payload = await requestAgentDetail(sessionId, workflowId, phaseId, agentId);
+    if (payload.error || !payload.agent || typeof payload.agent !== 'object') return;
+    const agent = reassembleAgentFieldParts(payload.agent as WorkflowAgent);
+    const runtime = get().runtimes[sessionId];
+    const existing = runtime?.workflowRuns.find((item) => item.id === workflowId);
+    if (!existing) return;
+    const updatedPhases = (existing.phases ?? []).map((phase) =>
+      phase.id === phaseId
+        ? {
+            ...phase,
+            agents: (phase.agents ?? []).map((a) =>
+              a.id === agentId ? { ...a, ...agent } : a,
+            ),
+          }
+        : phase,
+    );
+    get().applyWorkflowUpdate(sessionId, { ...existing, phases: updatedPhases });
+  },
+
+  setSwarmflowActive: (sessionId, active, budget) => {
+    set((state) => {
+      const rt = state.runtimes[sessionId];
+      if (!rt) return state;
+      // budget === undefined → caller 不关心,保留旧值(仅切开关);
+      // budget === null   → 显式设为无限制(覆盖旧值);
+      // budget 为正整数   → 设置具体上限。
+      const nextBudget = !active
+        ? null
+        : budget !== undefined
+          ? budget
+          : (rt.swarmflowBudget ?? null);
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: {
+            ...rt,
+            enableSwarmflow: active,
+            swarmflowBudget: nextBudget,
+          },
+        },
+      };
+    });
+  },
+
+  setTeamDispatchMode: (sessionId, mode) => {
+    set((state) => {
+      const rt = state.runtimes[sessionId];
+      if (!rt) return state;
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: { ...rt, teamDispatchMode: mode },
+        },
+      };
+    });
+  },
+
+  setAvailableModels: (models, activeModel) => {
+    set((state) => {
+      const defaultModels = models.filter((m) => m.is_default !== false);
+      // Default status controls initialization, not whether a connection can be selected.
+      const chatModels = models;
+      // 优先使用后端返回的 activeModel（默认模型），其次取第一个；状态统一保存真实
+      // model_name，alias 只用于界面展示。各会话 runtime 的 selectedModelName 不在这里
+      // 重置——单 Agent 和集群会话都是用户自选状态，模型列表刷新（models.updated）不应
+      // 冲掉；陈旧失配的名字由 getEffectiveModelName 走 resolveEffectiveModel 兜底解析。
+      const matchedModel = activeModel ? chatModels.find((m) => m.model_name === activeModel) : null;
+      const selected = (matchedModel ?? defaultModels[0] ?? chatModels[0])?.model_name ?? null;
+      if (selected) {
+        try { localStorage.setItem(MODEL_STORAGE_KEY, selected); } catch { /* noop */ }
+      }
+      // 默认模型变化时，同步未发送的新建会话（'new'，见 newConversationLifecycle 的
+      // NEW_CONVERSATION_ID；此处用字面量避免循环依赖）的模型选择：仅当其当前选择
+      // 恰为旧默认模型（说明来自默认而非用户手动选择）时才替换为新默认，用户手动
+      // 选择的模型不受影响。已创建的真实会话 runtime 依然不在此处重置。
+      const runtimes = { ...state.runtimes };
+      const pendingNewRuntime = runtimes['new'];
+      if (pendingNewRuntime) {
+        runtimes['new'] = restoreNewConversationSelection(
+          pendingNewRuntime,
+          chatModels,
+          state.availableModelGroups,
+        );
+      }
+      return { availableModels: models, chatAvailableModels: chatModels, defaultModelName: selected, runtimes };
+    });
+  },
+
+  setAvailableModelGroups: (groups) => {
+    set((state) => {
+      const pendingNewRuntime = state.runtimes[TRANSIENT_NEW_CONVERSATION_ID];
+      if (!pendingNewRuntime) return { availableModelGroups: groups };
+      // Historical sessions keep a dead selection until ChatModelSelector /
+      // session restore can fall back and persist session.selection.set (#5424).
+      return {
+        availableModelGroups: groups,
+        runtimes: {
+          ...state.runtimes,
+          [TRANSIENT_NEW_CONVERSATION_ID]: restoreNewConversationSelection(
+            pendingNewRuntime,
+            state.chatAvailableModels,
+            groups,
+          ),
+        },
+      };
+    });
+  },
+
+  setSelectedModelName: (sessionId, name) => {
+    // 注意：这里只更新当次会话的内存态，不再写 MODEL_STORAGE_KEY——
+    // 该 key 专门保存后端配置的默认模型（见 setAvailableModels），
+    // 用户手动切模型不应污染"默认模型"这个标记，否则新建会话会继承到"最后用过的模型"。
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      const model = name
+        ? state.availableModels.find((entry) => entry.model_name === name)
+          ?? state.chatAvailableModels.find((entry) => entry.model_name === name)
+        : null;
+      const selectionFromName: ModelSelection | null =
+        model?.model_id && model.model_id.trim()
+          ? { type: 'model', id: model.model_id.trim() }
+          : null;
+      if (model && name) {
+        if (!selectionFromName) cacheLastLegacyModelName(name);
+        else if (loadLastLegacyModelName()) cacheLastModelSelection(selectionFromName);
+      }
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: {
+            ...runtime,
+            selectedModelName: name,
+            // Legacy name restore should not invent a group selection; keep an
+            // existing group selection only when the caller clears the name.
+            selectedModelSelection:
+              selectionFromName
+              ?? (name ? null : runtime.selectedModelSelection?.type === 'model_group'
+                ? runtime.selectedModelSelection
+                : null),
+          },
+        },
+      };
+    });
+  },
+
+  setSelectedModelSelection: (sessionId, selection) => {
+    set((state) => {
+      const runtime = state.runtimes[sessionId];
+      if (!runtime) return state;
+      if (selection) cacheLastModelSelection(selection);
+      let selectedModelName = runtime.selectedModelName;
+      if (selection?.type === 'model') {
+        const model = state.availableModels.find((entry) => entry.model_id === selection.id)
+          ?? state.chatAvailableModels.find((entry) => entry.model_id === selection.id);
+        if (model) selectedModelName = model.model_name;
+      } else if (selection?.type === 'model_group') {
+        selectedModelName = null;
+      }
+      return {
+        runtimes: {
+          ...state.runtimes,
+          [sessionId]: {
+            ...runtime,
+            selectedModelSelection: selection,
+            selectedModelName,
+          },
+        },
+      };
+    });
+  },
+}));

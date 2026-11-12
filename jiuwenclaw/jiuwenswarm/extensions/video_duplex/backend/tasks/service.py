@@ -1,0 +1,1049 @@
+"""Durable user tasks over an injected Agent executor, independent of media/RPC."""
+
+import asyncio
+import hashlib
+import json
+import logging
+import time
+import uuid
+from dataclasses import dataclass
+
+import portalocker
+
+from .store import TaskStore
+from .errors import CancellationSettlementTimeout, QueueVersionConflict, TaskRevisionConflict
+from .diagnostics import trace_task, task_state
+
+TERMINAL = {"completed", "failed", "cancelled"}
+CANCEL_SETTLEMENT_TIMEOUT = 90
+logger = logging.getLogger(__name__)
+
+
+def _clean_title(title):
+    """Display-only task name: one line, at most 80 characters."""
+    if not isinstance(title, str) or len(title) > 80 or "\n" in title or "\r" in title:
+        raise ValueError("Invalid title")
+    return title.strip()
+
+
+@dataclass(frozen=True)
+class TaskModification:
+    revision: int
+    instruction: str
+    title: str = ""
+
+
+class ExecutionUncertain(RuntimeError):
+    """The transport lost the final execution fact; never automatically replay."""
+
+
+class InteractionPending(RuntimeError):
+    """The Agent ended this stream at an observed interaction, not a result."""
+
+
+_HELD_BY_CARD = object()
+
+
+class TaskService:
+    def __init__(self, store: TaskStore, executor, *, on_change=None, concurrency=2,
+                 notification_timeout=2):
+        self.store, self.executor, self.on_change = store, executor, on_change
+        if type(concurrency) is not int or concurrency < 1:
+            raise ValueError("Task concurrency must be a positive integer")
+        self.concurrency = concurrency
+        self.notification_timeout = notification_timeout
+        self.workers = {}
+        self.cancellations = {}
+        self.reconciles = set()
+        self.notifications = {}
+        self.pending_notifications = {}
+        # Core sessions where a user still has to answer a card (#5486). A task
+        # sent there would be read as the card's answer, so it stays queued.
+        self.pending_interrupts = set()
+        self.closed = False
+        self.started = False
+        self.active_scopes = set()
+        self.lease = portalocker.Lock(str(store.path) + ".owner", timeout=0)
+
+    def start(self, owner=None, session=None):
+        """Recover only the requested conversation before dispatching its queue."""
+        if self.closed:
+            raise RuntimeError("Task service is closed")
+        if (owner is not None or session is not None) and (
+            not isinstance(owner, str) or not isinstance(session, str) or not session
+        ):
+            raise ValueError("Task owner must be a string and conversation is required")
+        if self.started and (owner is None or (owner, session) in self.active_scopes):
+            return
+        first_start = not self.started
+        if first_start:
+            self.lease.acquire()
+        try:
+            stopping = set()
+            with self.store.transaction() as db:
+                tasks = self.store.rows(db, owner, session)
+                scopes = {(owner, session)} if owner is not None else {
+                    (task["owner"], task["session"]) for task in tasks
+                }
+                for task in tasks:
+                    if task["status"] == "cancelling":
+                        # The user asked to stop it, so Core's "not running" settles it as cancelled (#5545).
+                        stopping.add(task["id"])
+                    if task["status"] in {"running", "cancelling", "waiting_user"} or (
+                        task["status"] == "queued" and task.get("resume_answer")
+                    ):
+                        task.update(
+                            status="unknown",
+                            error="Execution ownership lost; tools were not replayed",
+                        )
+                        if task.get("interaction"):
+                            task["interaction"]["state"] = "expired"
+                        for change in task["changes"]:
+                            if change["state"] == "claimed":
+                                change["state"] = "unknown"
+                        task["sequence"] += 1
+                        self.store.put(db, task)
+        except BaseException:
+            if first_start:
+                self.lease.release()
+            raise
+        self.started = True
+        self.active_scopes.update(scopes)
+        self.kick()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None:
+            with self.store.transaction() as db:
+                lost = [t for t in self.store.rows(db, owner, session) if t["status"] == "unknown"]
+            for task in lost:
+                self._spawn_reconcile(task, stopped=task["id"] in stopping)
+
+    def _spawn_reconcile(self, task, *, stopped=False):
+        # Kept out of self.cancellations: a probe must not block a real stop.
+        work = asyncio.create_task(
+            self._reconcile(task, stopped=stopped), name="managed-task-reconcile"
+        )
+        self.reconciles.add(work)
+        work.add_done_callback(self.reconciles.discard)
+
+    async def _reconcile(self, task, *, stopped=False):
+        """Ask Core once whether an unknown/cancelling task still runs; end it if not (#5486, #5545)."""
+        probe = getattr(self.executor, "cancel", None)
+        try:
+            gone = await probe(task, probe=True)
+        except Exception:
+            logger.warning("Task reconcile failed for %s", task["id"], exc_info=True)
+            return
+        if not gone:
+            return
+        task = self.store.update(task["id"], lambda t: (
+            (t.update(status="cancelled", output_closed=True, checkpoint_open=False, error="")
+             if stopped else
+             t.update(status="failed", output_closed=True, checkpoint_open=False,
+                      error="执行已中断，未重放"))
+            if t["status"] == "unknown" else None
+        ))
+        await self._notify(task)
+        self.interrupt_settled()
+
+    def interrupt_settled(self, core_session_id=None):
+        """A card was answered or a turn ended: probe held sessions again, then dispatch."""
+        if core_session_id is None:
+            self.pending_interrupts.clear()
+        else:
+            self.pending_interrupts.discard(core_session_id)
+        self.kick()
+
+    def kick(self):
+        if self.closed or not self.started:
+            return
+        with self.store.transaction() as db:
+            tasks = self.store.rows(db)
+        active = []
+        for task in tasks:
+            if (task["owner"], task["session"]) not in self.active_scopes:
+                continue
+            if task["status"] in {"running", "cancelling", "unknown", "waiting_user"} or task["id"] in self.workers:
+                active.append(task)
+        # Capacity covers executions owned by this service. Unknown executions
+        # still constrain dependencies/resources; their activity is not inferred.
+        for task in sorted(tasks, key=lambda t: t["position"]):
+            if sum(map(self._holds_capacity, active)) >= self.concurrency:
+                break
+            if task["status"] != "queued" or task["id"] in self.workers:
+                continue
+            if (task["owner"], task["session"]) not in self.active_scopes:
+                continue
+            if not self._ready(task, tasks, active):
+                continue
+            worker = asyncio.create_task(
+                self._drain(task["id"]), name="managed-agent-task"
+            )
+            self.workers[task["id"]] = worker
+            active.append(task)
+            worker.add_done_callback(
+                lambda done, key=task["id"]: self._worker_done(key, done)
+            )
+
+    def _holds_capacity(self, t):
+        # An uncertain execution still owned by our worker keeps its capacity.
+        return (t["status"] != "unknown" or t["id"] in self.workers) and not (
+            t["status"] == "waiting_user" and t.get("execution_settled")
+        )
+
+    def _ready(self, task, tasks, active):
+        return not self._blockers(task, tasks, active)
+
+    def _holds_card(self, task):
+        # A resumed task answers its own card; only new work waits behind one.
+        return not task.get("resume_answer") and task.get("core_session_id") in self.pending_interrupts
+
+    def _blockers(self, task, tasks, active):
+        """The exact tasks that keep ``task`` from dispatching (empty: ready)."""
+        request = task["request"]
+        by_id = {t["id"]: t for t in tasks}
+        dependencies = [
+            by_id.get(key, {}) for key in request.get("depends_on", [])
+        ]
+        if any(t.get("status") != "completed" for t in dependencies):
+            return [t for t in dependencies if t and t.get("status") != "completed"] or [{}]
+
+        if self._holds_card(task):
+            return [{}]
+
+        def same_scope(t):
+            return (t["owner"], t["session"]) == (task["owner"], task["session"])
+
+        # A saved chat owns one Agent/context/output lease, including independent jobs.
+        if task["session"].startswith("task-duplex:"):
+            held = [
+                t for t in tasks
+                if same_scope(t) and t["id"] != task["id"] and t in active
+            ]
+            if held:
+                return held
+
+        if not request.get("independent", False):
+            earlier = [
+                t for t in tasks
+                if same_scope(t)
+                and t["id"] != task["id"]
+                and (
+                    t in active
+                    or (t["position"] < task["position"] and t["status"] not in TERMINAL)
+                )
+            ]
+            if earlier:
+                return earlier
+        # Missing declarations mean unknown resources, not a proven conflict.
+        resources = set(request.get("resources", []))
+        conflicts = []
+        for other in active:
+            held = set(other["request"].get("resources", []))
+            if not resources or not held:
+                continue
+            if "*" in resources or "*" in held or resources & held:
+                conflicts.append(other)
+        return conflicts
+
+    def _worker_done(self, scope, worker):
+        self.workers.pop(scope, None)
+        # Observe failures; the persisted attempt remains unknown rather than replayed.
+        if not worker.cancelled() and worker.exception() is None:
+            if worker.result() is _HELD_BY_CARD:
+                # Nothing ran; probing again now would only loop until the card settles.
+                self.kick()
+            else:
+                self.interrupt_settled()
+
+    @staticmethod
+    def _new(owner, session, instruction, request, *, parent=None):
+        task_id = uuid.uuid4().hex
+        return dict(
+            id=task_id,
+            owner=owner,
+            session=session,
+            instruction=instruction,
+            title=request.get("title", ""),
+            request=request,
+            status="queued",
+            revision=1,
+            sequence=1,
+            position=time.time_ns(),
+            created_at=time.time(),
+            core_session_id=(session.removeprefix("task-duplex:")
+                             if session.startswith("task-duplex:")
+                             else "managed-task-" + task_id),
+            request_id="task-" + uuid.uuid4().hex,
+            changes=[],
+            progress=[],
+            result=None,
+            error="",
+            parent_id=parent,
+            successor_id=None,
+            checkpoint_open=False,
+            execution_settled=False,
+            execution_cancelled=False,
+            execution_bound=False,
+            output_closed=False,
+        )
+
+    def submit(self, owner, session, command_id, instruction, request=None):
+        # WebChannel permits an absent user; persist it as an exact empty scope.
+        # None remains invalid because store reads use it to mean "all owners".
+        if not isinstance(owner, str) or not session:
+            raise ValueError("Task owner must be a string and conversation is required")
+        self.start(owner, session)
+        if not isinstance(instruction, str) or not instruction.strip():
+            raise ValueError("Task instruction is required")
+        if len(instruction) > 16000:
+            raise ValueError("Task instruction exceeds 16000 characters")
+        request = dict(request or {})
+        title = _clean_title(request.pop("title", ""))
+        if title:
+            request["title"] = title
+        if not isinstance(request.get("independent", False), bool):
+            raise ValueError("independent must be a boolean")
+        for key in ("depends_on", "resources"):
+            items = request.get(key, [])
+            if (
+                not isinstance(items, list)
+                or len(items) > 32
+                or any(
+                    not isinstance(v, str) or not v.strip() or len(v) > 256
+                    for v in items
+                )
+            ):
+                raise ValueError(f"Invalid {key}")
+        if "resources" in request:
+            request["resources"] = sorted(
+                {v.strip().replace("\\", "/").casefold() for v in request["resources"]}
+            )
+        with self.store.transaction() as db:
+            replay, fingerprint = self.store.replay(
+                db,
+                owner,
+                session,
+                command_id,
+                ["submit", instruction, request],
+            )
+            if replay:
+                return {
+                    **self.store.get(db, replay["task_id"], owner, session),
+                    "reused": True,
+                }
+            for dependency in request.get("depends_on", []):
+                self.store.get(db, dependency, owner, session)
+            task = self._new(owner, session, instruction.strip(), request)
+            self.store.put(db, task)
+            self.store.command(
+                db,
+                task,
+                command_id,
+                fingerprint,
+                {"task_id": task["id"], "state": "accepted"},
+            )
+        self.kick()
+        return task
+
+    def get(self, owner, session, task_id):
+        self.start(owner, session)
+        return self.store.read(task_id, owner, session)
+
+    def list(self, owner, session, *, query="", status="", offset=0, limit=50):
+        self.start(owner, session)
+        if not isinstance(offset, int) or offset < 0:
+            raise ValueError("Invalid pagination")
+        if not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise ValueError("Invalid pagination")
+        with self.store.transaction() as db:
+            tasks = self.store.rows(db, owner, session)
+        if status:
+            tasks = [t for t in tasks if t["status"] == status]
+        tasks = [t for t in tasks if query.casefold() in t["instruction"].casefold() or query.casefold() in t.get("title", "").casefold()]
+        end = offset + limit
+        return tasks[offset:end], (end if len(tasks) > end else None)
+
+    def modify(self, owner, session, task_id, command_id, change: TaskModification):
+        revision, instruction = change.revision, change.instruction
+        title = _clean_title(change.title)
+        self.start(owner, session)
+        if (
+            not isinstance(instruction, str)
+            or not instruction.strip()
+            or len(instruction) > 4000
+        ):
+            raise ValueError("Modification must contain 1–4000 characters")
+        with self.store.transaction() as db:
+            task = self.store.get(db, task_id, owner, session)
+            replay, fingerprint = self.store.replay(
+                db,
+                owner,
+                session,
+                command_id,
+                ["modify", task_id, revision, instruction] + ([title] if title else []),
+            )
+            if replay:
+                return replay
+            if revision != task["revision"] or task["successor_id"]:
+                raise TaskRevisionConflict("Task revision changed; query the current task")
+            if task["status"] not in {"queued", "running", "completed"}:
+                raise ValueError("This task cannot accept modifications")
+            change = dict(
+                id=command_id, instruction=instruction.strip(), state="pending"
+            )
+            if task["status"] == "queued":
+                # Same transaction as the dispatch claim: no lost update at admission.
+                if len(task["instruction"]) + len(instruction) > 15970:
+                    raise ValueError(
+                        "Accumulated task instruction exceeds 16000 characters"
+                    )
+                task["instruction"] += "\nUser modification: " + instruction.strip()
+                change["state"] = "queued_input_updated"
+            elif task["status"] == "completed":
+                child = self._successor(db, task, instruction.strip(), title=title)
+                change.update(state="followup", successor_id=child["id"])
+            if title:
+                change["title"] = title
+                if task["status"] != "completed":
+                    task["title"] = title
+            task["changes"].append(change)
+            task["revision"] += 1
+            task["sequence"] += 1
+            self.store.put(db, task)
+            receipt = dict(
+                task_id=task_id,
+                operation_id=command_id,
+                state=change["state"],
+                revision=task["revision"],
+                successor_id=change.get("successor_id"),
+            )
+            self.store.command(db, task, command_id, fingerprint, receipt)
+        self._publish(task)
+        self.kick()
+        return receipt
+
+    def _successor(self, db, task, instruction, *, title=""):
+        if task["successor_id"]:
+            return self.store.get(db, task["successor_id"])
+        adopted = "\n".join(
+            c["instruction"]
+            for c in task["changes"]
+            if c["state"] in {"context_written", "model_input_observed"}
+        )
+        request = {
+            **task["request"],
+            "title": title or task.get("title", ""),
+            "prior_result": task["result"],
+            "depends_on": [task["id"]],
+        }
+        # A successor is a new execution, not a replay of the original call_id.
+        for key in ("tool_call_id", "turn_id", "frame_data_url"):
+            request.pop(key, None)
+        child = self._new(
+            task["owner"],
+            task["session"],
+            task["instruction"] + "\n" + adopted + "\nUser revision: " + instruction,
+            request,
+            parent=task["id"],
+        )
+        task["successor_id"] = child["id"]
+        self.store.put(db, child)
+        return child
+
+    async def cancel(self, owner, session, task_id, command_id, *, user_instruction=""):
+        self.start(owner, session)
+        if not isinstance(user_instruction, str) or len(user_instruction) > 4000:
+            raise ValueError("Cancellation instruction must contain at most 4000 characters")
+        user_instruction = user_instruction.strip()
+        with self.store.transaction() as db:
+            task = self.store.get(db, task_id, owner, session)
+            replay, fingerprint = self.store.replay(
+                db, owner, session, command_id,
+                ["cancel", task_id] + ([user_instruction] if user_instruction else []),
+            )
+            if replay:
+                return replay
+            recheck = task["status"] == "cancelling"
+            if task["status"] == "completed" and user_instruction:
+                if task["successor_id"]:
+                    raise TaskRevisionConflict("Task already has a follow-up; query the current task")
+                # Reuse completed-task modification without guessing how to undo effects.
+                child = self._successor(db, task, user_instruction, title="处理取消请求")
+                task["changes"].append(dict(
+                    id=command_id, instruction=user_instruction,
+                    state="followup", successor_id=child["id"],
+                ))
+                task["revision"] += 1
+                task["sequence"] += 1
+                self.store.put(db, task)
+                receipt = dict(
+                    task_id=task_id, operation_id=command_id, state="followup",
+                    task_status="completed", stopped=False, revision=task["revision"],
+                    successor_id=child["id"], converted_to="modify",
+                    message="原执行已完成，已将用户的完整取消要求交给 Core 后续处理；尚未确认处理结果。",
+                )
+            else:
+                if task["status"] == "queued" and not task.get("resume_answer"):
+                    task["status"] = "cancelled"
+                elif task["status"] not in TERMINAL:
+                    task["status"] = "cancelling"
+                task["revision"] += 1
+                task["sequence"] += 1
+                for change in task["changes"]:
+                    if change["state"] == "pending":
+                        change["state"] = "rejected"
+                if task.get("interaction"):
+                    task["interaction"]["state"] = "expired"
+                self.store.put(db, task)
+                receipt = dict(
+                    task_id=task_id,
+                    operation_id=command_id,
+                    state="accepted" if task["status"] == "cancelling" else task["status"],
+                    task_status=task["status"],
+                    stopped=task["status"] == "cancelled",
+                    message=("取消已受理，正在等待执行停止；尚未确认停止。"
+                             if task["status"] == "cancelling" else
+                             "任务已取消。" if task["status"] == "cancelled" else
+                             "本次 Core 执行已经结束，未执行新的取消操作；其结果仍可另行委托 Core 修改或继续处理。"),
+                )
+            self.store.command(db, task, command_id, fingerprint, receipt)
+        if task["status"] == "cancelling" and task_id not in self.cancellations:
+            work = asyncio.create_task(self._cancel(task), name="managed-task-cancel")
+            self.cancellations[task_id] = work
+            work.add_done_callback(lambda _: self.cancellations.pop(task_id, None))
+        elif recheck and task["status"] == "cancelling":
+            self._spawn_reconcile(task)
+        self.interrupt_settled()
+        await self._notify(task)
+        return receipt
+
+    async def _cancel(self, task):
+        trace_task("task_cancel_worker_started", task=task_state(task))
+        try:
+            await self.executor.cancel(task)
+        except CancellationSettlementTimeout as exc:
+            task = self.store.update(task["id"], lambda t: (
+                t.update(status="unknown", error=str(exc)) if t["status"] == "cancelling" else None
+            ))
+            trace_task("task_cancel_worker_failed", task=task_state(task), error=str(exc))
+            await self._notify(task)
+            self.kick()
+            return
+        except Exception as exc:
+            # A failed stop request does not end the execution; its settle ack still decides.
+            message = str(exc) or type(exc).__name__
+            await self._notify(self.store.update(
+                task["id"],
+                lambda t: (
+                    t.update(error=message) if t["status"] == "cancelling" else None
+                ),
+            ))
+        current = self.store.read(task["id"])
+        if current.get("execution_cancelled") and current["execution_settled"]:
+            observer = self.workers.get(task["id"])
+            if observer and not observer.done():
+                observer.cancel()
+                await asyncio.gather(observer, return_exceptions=True)
+        try:
+            async with asyncio.timeout(CANCEL_SETTLEMENT_TIMEOUT):
+                # Without a worker (e.g. after restart) nothing else closes the output.
+                while task["id"] in self.workers and not self.store.read(task["id"])["output_closed"]:
+                    await asyncio.sleep(0.05)
+                # Wait for the execution's settle ack, which arrives even after a rejected stop.
+                while not self.store.read(task["id"])["execution_settled"]:
+                    await asyncio.sleep(0.05)
+        except TimeoutError:
+            task = self.store.update(task["id"], lambda t: (
+                t.update(status="unknown", error="Stop accepted, but execution cleanup was not confirmed")
+                if t["status"] == "cancelling" else None
+            ))
+            trace_task("task_cancel_settlement_timeout", task=task_state(task))
+            await self._notify(task)
+            self.kick()
+            return
+        task = self.store.update(
+            task["id"],
+            lambda t: (
+                t.update(status="cancelled", error="")
+                if t["status"] == "cancelling"
+                else None
+            ),
+        )
+        await self._notify(task)
+        self.interrupt_settled()
+
+    def reorder(
+        self, owner, session, task_id, revision, before_id=None, *, command_id=None
+    ):
+        self.start(owner, session)
+        with self.store.transaction() as db:
+            task = self.store.get(db, task_id, owner, session)
+            if command_id is not None:
+                replay, fingerprint = self.store.replay(
+                    db,
+                    owner,
+                    session,
+                    command_id,
+                    ["reorder", task_id, revision, before_id],
+                )
+                if replay:
+                    return replay
+            if task["status"] != "queued":
+                raise ValueError("Task is no longer waiting; running tasks cannot be reordered")
+            if self.queue_version(db, owner, session) != revision:
+                raise QueueVersionConflict("Queue changed; query before reordering")
+            tasks = sorted(
+                (
+                    t
+                    for t in self.store.rows(db, owner, session)
+                    if t["status"] == "queued"
+                ),
+                key=lambda t: t["position"],
+            )
+            if before_id and not any(t["id"] == before_id for t in tasks):
+                raise ValueError("Queue target is no longer waiting")
+            if before_id == task_id:
+                tasks = []
+            else:
+                tasks = [t for t in tasks if t["id"] != task_id]
+                index = next(
+                    (i for i, t in enumerate(tasks) if t["id"] == before_id), 0
+                )
+                tasks.insert(index, task)
+            for index, item in enumerate(tasks):
+                item.update(
+                    position=index,
+                    revision=item["revision"] + 1,
+                    sequence=item["sequence"] + 1,
+                )
+                self.store.put(db, item)
+            receipt = dict(
+                task_id=task_id,
+                state="reordered",
+                queue_version=self.queue_version(db, owner, session),
+            )
+            if command_id is not None:
+                self.store.command(db, task, command_id, fingerprint, receipt)
+        self._publish(next((t for t in tasks if t["id"] == task_id), task))
+        self.kick()
+        return receipt
+
+    @staticmethod
+    def _queue_answer(task):
+        # Retain the suspended execution identity until dispatch wins over cancel.
+        task.update(status="queued", resume_answer=True)
+
+    async def answer(
+        self, owner, session, task_id, command_id, interaction_id, *, answers, native_ui=False
+    ):
+        """Bind an answer to the exact observed question and execution."""
+        from .interactions import (
+            validate_answers, validate_native_approval_answers, voice_approval_answers,
+            NATIVE_APPROVAL_SOURCES,
+        )
+
+        self.start(owner, session)
+        with self.store.transaction() as db:
+            task = self.store.get(db, task_id, owner, session)
+            replay, fingerprint = self.store.replay(
+                db,
+                owner,
+                session,
+                command_id,
+                ["answer", task_id, interaction_id, answers],
+            )
+            if replay:
+                return replay
+            interaction = task.get("interaction") or {}
+            if interaction.get("id") == interaction_id and interaction.get("operation_id"):
+                if interaction.get("source") in NATIVE_APPROVAL_SOURCES:
+                    chosen = answers if native_ui else voice_approval_answers(interaction, answers)
+                    chosen = validate_native_approval_answers(interaction, chosen)
+                else:
+                    chosen = validate_answers(interaction, answers)
+                if chosen == interaction.get("answers"):
+                    receipt = dict(
+                        task_id=task_id, operation_id=command_id, state="already_answered",
+                        applied=False, task_state=task["status"],
+                        message="This exact card already has the same recorded answer. Nothing was resubmitted. Report task_state; do not infer continued execution or completion.",
+                    )
+                    self.store.command(db, task, command_id, fingerprint, receipt)
+                    return receipt
+            if (
+                task["status"] != "waiting_user"
+                or interaction.get("state") != "pending"
+                or interaction.get("id") != interaction_id
+            ):
+                raise ValueError("Question is no longer pending for this task")
+            if interaction.get("source") in NATIVE_APPROVAL_SOURCES:
+                if not native_ui:
+                    # Voice may only pick one of the card's own options.
+                    answers = voice_approval_answers(interaction, answers)
+                answers = validate_native_approval_answers(interaction, answers)
+            else:
+                answers = validate_answers(interaction, answers)
+            interaction.update(
+                state="accepted", answers=answers, operation_id=command_id
+            )
+            suspended = interaction["source"] in {"ask_user_interrupt", *NATIVE_APPROVAL_SOURCES}
+            if suspended and task["output_closed"] and task["execution_settled"]:
+                self._queue_answer(task)
+            elif not suspended:
+                if task["output_closed"]:
+                    raise ValueError("The original answer channel has closed")
+                task["status"] = "running"
+            task["sequence"] += 1
+            self.store.put(db, task)
+            receipt = dict(task_id=task_id, operation_id=command_id, state="accepted")
+            self.store.command(db, task, command_id, fingerprint, receipt)
+        if not suspended:
+            # This is control input to the still-owned output stream, not a new task.
+            try:
+                await self.executor.answer(task)
+            except Exception as exc:
+                error = str(exc)
+                self.store.update(
+                    task_id,
+                    lambda t: (
+                        t.update(status="unknown", error=error)
+                        if t["status"] == "running"
+                        and t["request_id"] == task["request_id"]
+                        else None
+                    ),
+                )
+                raise
+        await self._notify(self.store.read(task_id))
+        self.interrupt_settled(task["core_session_id"])
+        return receipt
+
+    def queue_version(self, db, owner, session):
+        # Persist an ordered revision of scheduling facts, not streamed progress.
+        facts = [
+            [t["id"], t["status"], t["position"], t["request"].get("independent", False),
+             t["request"].get("depends_on", []), t["request"].get("resources", [])]
+            for t in self.store.rows(db, owner, session)
+        ]
+        fingerprint = hashlib.sha256(json.dumps(facts, sort_keys=True).encode()).hexdigest()
+        previous = db.execute(
+            "SELECT fingerprint, version FROM task_queue_versions WHERE owner=? AND session=?",
+            (owner, session),
+        ).fetchone()
+        if previous is not None and previous["fingerprint"] == fingerprint:
+            return previous["version"]
+        # All legacy hash tokens were below 2**48. Start above them so delayed
+        # pre-upgrade snapshots cannot overwrite the new monotonic revisions.
+        version = previous["version"] + 1 if previous is not None else 2**48
+        db.execute(
+            "INSERT INTO task_queue_versions VALUES (?,?,?,?) "
+            "ON CONFLICT(owner,session) DO UPDATE SET "
+            "fingerprint=excluded.fingerprint, version=excluded.version",
+            (owner, session, fingerprint, version),
+        )
+        return version
+
+    def snapshot(self, owner, session):
+        self.start(owner, session)
+        with self.store.transaction() as db:
+            tasks = self.store.rows(db, owner, session)
+            all_tasks = self.store.rows(db)
+            by_id = {t["id"]: t for t in all_tasks}
+            for task in tasks:
+                if task["status"] != "queued":
+                    continue
+                dependencies = [
+                    by_id.get(key, {}) for key in task["request"].get("depends_on", [])
+                ]
+                task["wait_reason"] = (
+                    "dependency_failed_or_cancelled"
+                    if any(
+                        t.get("status") in {"failed", "cancelled"} for t in dependencies
+                    )
+                    else "dependency_pending"
+                    if any(t.get("status") != "completed" for t in dependencies)
+                    else "pending_interrupt"
+                    if self._holds_card(task)
+                    else "capacity_order_or_resource"
+                )
+                if task["wait_reason"] == "capacity_order_or_resource":
+                    task["waiting_on"] = self._waiting_on(task, all_tasks)
+            return tasks, self.queue_version(db, owner, session)
+
+    def _waiting_on(self, task, all_tasks):
+        """Name the tasks a waiting task is held behind, using kick()'s rules."""
+        active = [
+            t for t in all_tasks
+            if t["status"] in {"running", "cancelling", "unknown", "waiting_user"}
+            or t["id"] in self.workers
+        ]
+        blockers = self._blockers(task, all_tasks, active)
+        if not blockers:
+            counted = [t for t in active if self._holds_capacity(t)]
+            if len(counted) >= self.concurrency:
+                blockers = counted
+        # Capacity is shared by every conversation, but other users' tasks stay private.
+        return [
+            dict(id=t["id"], title=t.get("title") or t["instruction"],
+                 status=t["status"], search_session_id=t["session"])
+            for t in blockers
+            if t.get("owner") == task["owner"]
+        ]
+
+    async def preempt(self, owner, session, task_id, revision, command_id):
+        # Admission/reorder has no await: a stale request cannot stop another task.
+        tasks, _ = self.snapshot(owner, session)
+        if sum(t["status"] == "running" for t in tasks) > 1:
+            raise ValueError("Multiple tasks are running; cancel an exact task instead")
+        self.reorder(owner, session, task_id, revision)
+        for active in tasks:
+            if active["status"] == "running":
+                await self.cancel(owner, session, active["id"], command_id)
+                break
+        # Dispatch stays blocked until the exact old execution settles.
+
+    async def _notify(self, task):
+        self._publish(task)
+
+    def _publish(self, task):
+        # Queue edits must reach every subscriber of the conversation, not only the caller.
+        if not self.on_change or self.closed:
+            return
+        # One sender and one latest snapshot per task. Slow clients must not
+        # backpressure Agent output or accumulate an unbounded notification queue.
+        key = task["id"]
+        self.pending_notifications[key] = task
+        if key not in self.notifications:
+            self.notifications[key] = asyncio.create_task(self._send_notifications(key))
+
+    async def _send_notifications(self, key):
+        failures = 0
+        try:
+            while key in self.pending_notifications:
+                task = self.pending_notifications.pop(key)
+                try:
+                    await asyncio.wait_for(self.on_change(task), timeout=self.notification_timeout)
+                except Exception:
+                    # Prefer a newer snapshot if one arrived during delivery.
+                    if key in self.pending_notifications:
+                        failures = 0
+                    else:
+                        failures += 1
+                        if failures < 3:
+                            self.pending_notifications[key] = task
+                        else:
+                            logger.warning("Task notification retries exhausted for %s", key)
+                else:
+                    failures = 0
+                await asyncio.sleep(0.1)
+        finally:
+            self.notifications.pop(key, None)
+
+    async def _drain(self, task_id):
+        queued = self.store.read(task_id)
+        if queued is None:
+            return  # Deleted between kick and drain.
+        probe = getattr(self.executor, "pending_interrupt", None)
+        if queued["status"] == "queued" and not queued.get("resume_answer") and probe is not None:
+            try:
+                held = await probe(queued)
+            except Exception:
+                # Core still refuses a live card itself; an unreachable probe must not stall the queue.
+                logger.warning("Pending interrupt probe failed for %s", task_id, exc_info=True)
+                held = False
+            if held:
+                self.pending_interrupts.add(queued["core_session_id"])
+                self._publish(queued)
+                return _HELD_BY_CARD
+        # Recheck after admission: queued cancel/modify/reorder can win before this runs.
+        with self.store.transaction() as db:
+            task = self.store.get(db, task_id)
+            tasks = self.store.rows(db)
+            active = []
+            for other in tasks:
+                if other["id"] == task_id:
+                    continue
+                if other["status"] in {"running", "cancelling", "unknown", "waiting_user"}:
+                    active.append(other)
+            if task["status"] != "queued" or not self._ready(task, tasks, active):
+                return
+            if any(
+                t["status"] == "queued"
+                and t["position"] < task["position"]
+                and (t["owner"], t["session"]) == (task["owner"], task["session"])
+                and self._ready(t, tasks, active)
+                for t in tasks
+            ):
+                return
+            if task.get("resume_answer"):
+                # One business task may produce files in several interrupted rounds.
+                # Retain each settled request before assigning the next execution ID.
+                task.setdefault("prior_request_ids", []).append(task["request_id"])
+                task.update(
+                    request_id="task-" + uuid.uuid4().hex,
+                    execution_bound=False,
+                    execution_settled=False,
+                    execution_cancelled=False,
+                    output_closed=False,
+                )
+                task["interaction"]["state"] = "submitted"
+            task.update(
+                status="running", checkpoint_open=True, sequence=task["sequence"] + 1
+            )
+            task["progress"].append(
+                dict(
+                    stage="started",
+                    title="Agent execution started",
+                    status="running",
+                    sequence=len(task["progress"]) + 1,
+                    timestamp=time.time(),
+                )
+            )
+            self.store.put(db, task)
+        await self._notify(task)
+
+        async def persist_progress(
+            entry, task_id=task["id"], request_id=task["request_id"]
+        ):
+            def append(current):
+                if current["request_id"] != request_id or current["status"] not in {
+                    "running",
+                    "waiting_user",
+                    "cancelling",
+                }:
+                    return
+                if entry.get("interaction") and current["status"] != "cancelling":
+                    interaction = entry["interaction"]
+                    old = current.get("interaction") or {}
+                    if (
+                        old.get("request_id") != interaction["request_id"]
+                        or old.get("execution_request_id") != request_id
+                    ):
+                        interaction = {
+                            **interaction,
+                            "id": uuid.uuid4().hex,
+                            "execution_request_id": request_id,
+                        }
+                        current.update(interaction=interaction, status="waiting_user")
+                current["progress"].append(
+                    {
+                        **entry,
+                        "sequence": len(current["progress"]) + 1,
+                        "timestamp": time.time(),
+                    }
+                )
+
+            await self._notify(self.store.update(task_id, append))
+
+        trace_task("task_execution_dispatching", task=task_state(task))
+        reasoning = None
+        last_flush = time.monotonic()
+
+        async def flush_progress():
+            nonlocal reasoning, last_flush
+            if reasoning is not None:
+                entry, reasoning = reasoning, None
+                await persist_progress(entry)
+            last_flush = time.monotonic()
+
+        async def progress(entry):
+            nonlocal reasoning
+            if entry.get("stage") == "reasoning":
+                if reasoning is None:
+                    reasoning = dict(entry)
+                else:
+                    reasoning["content"] = reasoning.get("content", "") + entry.get(
+                        "content", ""
+                    )
+                if (
+                    time.monotonic() - last_flush >= 0.25
+                    or len(reasoning.get("content", "")) >= 4096
+                ):
+                    await flush_progress()
+            else:
+                await flush_progress()
+                await persist_progress(entry)
+
+        outcome, result, error = "completed", None, ""
+        try:
+            result = await self.executor.run(task, progress)
+        except InteractionPending:
+            outcome = "waiting_user"
+        except asyncio.CancelledError:
+            outcome, error = "unknown", "Execution detached; result is unknown"
+            raise
+        except ExecutionUncertain as exc:
+            outcome, error = "unknown", str(exc)
+        except Exception as exc:
+            outcome, error = "failed", str(exc)
+        finally:
+            await flush_progress()
+            with self.store.transaction() as db:
+                current = self.store.get(db, task["id"])
+                current["checkpoint_open"] = False
+                current["output_closed"] = True
+                if not current.get("execution_bound"):
+                    # Closing the checkpoint here rejects any later bind, so nothing is left to settle.
+                    current["execution_settled"] = True
+                if current["execution_cancelled"] and current["execution_settled"]:
+                    # A cancellation flush can contain chat.final/partial text.
+                    # The exact execution's stop fact takes precedence over that text.
+                    current.update(status="cancelled", result=None, partial_result=result, error="")
+                elif current["status"] in {"running", "waiting_user"}:
+                    current.update(status=outcome, result=result, error=error)
+                elif current["status"] == "cancelling" and result is not None:
+                    # Completion won the race; do not discard the actual result.
+                    current.update(status="completed", result=result, error="")
+                elif current["status"] == "cancelling" and current["execution_settled"]:
+                    # Stop was requested and the execution ended without a result.
+                    current.update(status="cancelled", result=None, error="")
+                if current["status"] == "waiting_user":
+                    interaction = current.get("interaction") or {}
+                    if (
+                        interaction.get("state") == "accepted"
+                        and current["execution_settled"]
+                    ):
+                        self._queue_answer(current)
+                elif current.get("interaction") and current["status"] in TERMINAL | {
+                    "unknown"
+                }:
+                    current["interaction"]["state"] = "expired"
+                pending = [c for c in current["changes"] if c["state"] == "pending"]
+                if pending and current["status"] == "completed":
+                    child = self._successor(
+                        db,
+                        current,
+                        "\n".join(c["instruction"] for c in pending),
+                        title=next((c["title"] for c in reversed(pending) if c.get("title")), ""),
+                    )
+                    for change in pending:
+                        change.update(state="followup", successor_id=child["id"])
+                for change in current["changes"]:
+                    if change["state"] == "claimed":
+                        change["state"] = "unknown"
+                    elif change["state"] == "pending" and current["status"] not in {
+                        "waiting_user",
+                        "queued",
+                    }:
+                        change["state"] = "rejected"
+                current["sequence"] += 1
+                self.store.put(db, current)
+            await self._notify(current)
+
+    async def close(self):
+        self.closed = True
+        pending = [
+            *self.workers.values(),
+            *self.cancellations.values(),
+            *self.notifications.values(),
+        ]
+        for worker in pending:
+            worker.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        close_executor = getattr(self.executor, "close", None)
+        if close_executor is not None:
+            await close_executor()
+        self.pending_notifications.clear()
+        if self.started:
+            self.lease.release()

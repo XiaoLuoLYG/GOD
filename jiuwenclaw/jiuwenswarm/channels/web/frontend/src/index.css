@@ -1,0 +1,2727 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===========================================
+   Base Styles
+   =========================================== */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+html {
+  min-width: 584px;
+  overflow-y: hidden;
+}
+
+html.electron-desktop {
+  min-width: 920px;
+}
+
+body {
+  margin: 0;
+  font: 400 var(--font-size-base)/1.55 var(--font-body);
+  letter-spacing: -0.02em;
+  background: var(--effect-page-background);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  height: 100%;
+}
+
+a {
+  color: var(--color-action-primary);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+::selection {
+  background: var(--color-action-primary-subtle);
+  color: var(--color-text-strong);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-default);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-strong);
+}
+
+.resize-divider {
+  position: relative;
+  flex-shrink: 0;
+  width: 4px;
+  cursor: col-resize;
+}
+
+.resize-divider::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  content: '';
+  background: var(--color-border-default);
+  transform: translateX(-50%);
+}
+
+.resize-divider:hover::before,
+.resize-divider:active::before {
+  width: 2px;
+  background: var(--color-border-strong);
+}
+
+.resize-divider--workspace::after {
+  position: absolute;
+  inset: 0 -2px;
+  content: '';
+}
+
+body.workspace-resize-active {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.workspace-resize-active iframe {
+  pointer-events: none;
+}
+
+@layer components {
+  .form-label {
+    @apply block text-sm text-text-strong;
+    line-height: 22px;
+  }
+}
+
+.border-input {
+  border: 1px solid var(--color-border-input-strong);
+}
+
+.border-input:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+}
+
+/* ===========================================
+   Animations
+   =========================================== */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes text-muted-breath {
+  0% {
+    color: var(--color-text-primary);
+    opacity: 0.78;
+  }
+
+  50% {
+    color: var(--color-animation-breath-peak);
+    opacity: 1;
+  }
+
+  100% {
+    color: var(--color-text-primary);
+    opacity: 0.78;
+  }
+}
+
+@keyframes pulse-subtle {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.7;
+  }
+}
+
+@keyframes glow-pulse {
+
+  0%,
+  100% {
+    box-shadow: var(--effect-glow-pulse-rest);
+  }
+
+  50% {
+    box-shadow: 0 0 20px var(--color-action-primary-glow);
+  }
+}
+
+@keyframes chatStreamPulse {
+
+  0%,
+  100% {
+    border-color: var(--color-border-default);
+  }
+
+  50% {
+    border-color: var(--color-action-primary);
+  }
+}
+
+@keyframes chatReadingDot {
+
+  0%,
+  80%,
+  100% {
+    opacity: 0.4;
+    transform: translateY(0);
+  }
+
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes blink {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
+}
+
+:focus-visible {
+  outline: none;
+}
+
+/* ===========================================
+   Component Layer
+   =========================================== */
+
+@layer components {
+
+  /* Shell Layout */
+  .shell {
+    height: 100vh;
+    display: grid;
+    grid-template-columns: minmax(var(--shell-nav-width), var(--shell-nav-width)) minmax(0, 1fr);
+    grid-template-rows: 1fr;
+    grid-template-areas: 'nav content';
+    gap: 0;
+    animation: rise 0.4s var(--ease-out);
+    overflow: hidden;
+    background: var(--color-surface-page);
+  }
+
+  @supports (height: 100dvh) {
+    .shell {
+      height: 100dvh;
+    }
+  }
+
+  /* Shell icon rail */
+  .shell--icon-rail {
+    grid-template-columns: 72px minmax(0, 1fr);
+    grid-template-areas: 'nav content';
+    --tool-panel-width: 300px;
+  }
+
+  .shell--icon-rail.shell--agent-management {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+
+  /* Topbar */
+  .topbar {
+    grid-area: topbar;
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 0 20px;
+    height: var(--shell-topbar-height);
+    border-bottom: 1px solid var(--color-border-default);
+    background: var(--color-surface-chrome);
+    backdrop-filter: blur(10px);
+  }
+
+  /* Brand */
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .brand-logo {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--color-action-primary), var(--color-brand-secondary));
+    border-radius: var(--radius-md);
+    font-weight: 700;
+    font-size: 14px;
+  }
+
+  .brand-logo-img {
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    object-fit: contain;
+    color: white;
+  }
+
+  .brand-text {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .brand-title {
+    height: 68px;
+    line-height: 68px;
+    padding: 0 8px;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--color-text-strong);
+  }
+
+  .brand-sub {
+    font-size: var(--font-size-2xs);
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    line-height: 1;
+  }
+
+  /* Navigation Sidebar */
+  .nav {
+    grid-area: nav;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 16px 12px;
+    background: var(--color-surface-panel);
+    scrollbar-width: none;
+    min-height: 0;
+    border-right: 1px solid var(--color-border-default);
+    max-width: var(--shell-nav-width);
+    width: 100%;
+  }
+
+  .nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Nav items */
+  .nav-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: var(--radius-md);
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    text-decoration: none;
+  }
+
+  .nav-item:hover {
+    color: var(--color-text-primary);
+    background: var(--color-surface-hover);
+    text-decoration: none;
+  }
+
+  .nav-item.active {
+    color: var(--color-text-strong);
+    background: var(--color-action-primary-subtle);
+  }
+
+  .nav-item.active .nav-item__icon {
+    color: var(--color-action-primary);
+  }
+
+  /* Content Area */
+  .content {
+    grid-area: content;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: var(--effect-content-background);
+  }
+
+  /* Anchored dropdown menu (select, more-actions, etc.) */
+  .dropdown-menu {
+    position: absolute;
+    right: 0;
+    top: 100%;
+    margin-top: 0.25rem;
+    z-index: 50;
+    border-radius: 6px;
+    border: 1px solid var(--color-border-default);
+    background: var(--color-surface-panel);
+    box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.16);
+    white-space: nowrap;
+    padding-block: 8px;
+  }
+
+  .dropdown-menu::before {
+    content: '';
+    position: absolute;
+    top: -0.25rem;
+    left: 0;
+    right: 0;
+    height: 0.25rem;
+  }
+
+  .dropdown-menu-item {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding-inline: 16px;
+    line-height: 32px;
+    font-size: 14px;
+    text-align: left;
+    background: none;
+    border: none;
+    cursor: pointer;
+    transition: background-color var(--duration-fast) var(--ease-out);
+  }
+
+  .dropdown-menu-item:hover {
+    background: var(--color-action-secondary);
+  }
+
+  /* Cards */
+  .card {
+    background: var(--color-surface-card);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+  }
+
+  /* Auto-fit responsive card grid shared by marketplace / catalog pages */
+  .card-grid-auto {
+    display: grid;
+    justify-content: center;
+    align-items: flex-start;
+    align-content: start;
+    gap: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  }
+
+  /* 页面通栏容器：flex 列，自身不限宽也不加横向 padding——
+     滚动条由内层滚动列渲染，始终贴 viewport 最右缘 */
+  .page-content {
+    --page-content-padding-top: 32px;
+    display: flex;
+    flex: 1 1 0%;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--color-surface-card);
+    padding-top: var(--page-content-padding-top);
+    margin-bottom: 16px;
+  }
+
+  /* 限宽骨架：页面不滚动的固定区（header/toolbar 等）使用，
+     与滚动列内层保持同一条 max 1400px 内容线（窄屏两侧至少留 48px） */
+  .page-shell {
+    width: min(1400px, calc(100% - 96px));
+    margin-right: auto;
+    margin-left: auto;
+  }
+
+  /* 滚动列（技能/专家/扩展的列表）：通栏，滚动条贴 viewport 最右缘。
+     scrollbar-gutter: stable 永久预留 8px 滚动条槽位（全局 ::-webkit-scrollbar 宽 8px），
+     both-edges 两侧对称预留，内容几何居中且滚动条出现/消失都不挤压布局 */
+  .page-scroll {
+    scrollbar-gutter: stable;
+    scrollbar-gutter: stable both-edges;
+    /* 顶部 16px 用 margin：让出滚动容器之外，滚动条/滚动区从工具栏下方开始（原各页面 card-grid-auto 内联 paddingTop 收编于此）；
+       底部 32px 用 padding：滚动内容末尾呼吸空间，最后一张卡/区块不贴滚动容器底缘 */
+    margin-top: 16px;
+    padding-bottom: 32px;
+  }
+
+  /* 滚动列/详情滚动体的内层限宽：滚动容器两侧已各让出 8px 滚动条槽，
+     故在 100% 基础上扣 96-16=80px，与 .page-shell（100%-96px）内容线严格对齐 */
+  .page-scroll>*,
+  .detail-body>* {
+    width: min(1400px, calc(100% - 80px));
+    margin-right: auto;
+    margin-left: auto;
+  }
+
+  /* 详情页统一滚动容器（agent/skill/connector detail）：同 .page-scroll 通栏滚动，
+     子元素通过 > * 规则限宽 1400px 并居中；纵向间距由 flex gap 统一为 32px。
+     子元素 flex-shrink:0——flex 子项默认可收缩，内容超高时会被压进容器内导致
+     overflow-y-auto 永不溢出、页面无法滚动；配合调用方去掉页签区 flex-1（basis 0
+     会吸干/压瘪剩余空间），子元素高度恒为内容高，滚动行为与块流版本一致。
+     AgentEditor 的 detail-body 只有一个 inner 包裹子元素，间距不受影响 */
+  .detail-body {
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+    scrollbar-gutter: stable;
+    scrollbar-gutter: stable both-edges;
+    padding-top: 16px;
+    margin-bottom: 16px;
+  }
+
+  .detail-body>* {
+    flex-shrink: 0;
+  }
+
+  /* 加载层覆盖整个详情页，返回按钮保留原有顶部内边距。 */
+  .detail-loading-shell {
+    position: relative;
+    margin-top: calc(-1 * var(--page-content-padding-top));
+    padding-top: var(--page-content-padding-top);
+  }
+
+  .detail-loading-center {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+  }
+
+  .skill-detail-state {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    color: var(--color-text-secondary);
+  }
+
+  .skill-detail-state p {
+    margin: 0;
+  }
+
+  /* 统一返回按钮（agent/skill/connector detail）。
+     限宽 1400px 并居中，与详情页内容区域对齐；flex-shrink:0 保证不被压缩。 */
+  .detail-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 0;
+    background: transparent;
+    color: var(--color-text-primary);
+    padding: 0;
+    cursor: pointer;
+    font-family: var(--font-body);
+    font-size: 14px;
+    line-height: 22px;
+    width: min(1400px, calc(100% - 96px));
+    margin-right: auto;
+    margin-left: auto;
+    margin-bottom: 16px;
+    flex-shrink: 0;
+  }
+
+  .detail-back:hover {
+    color: var(--color-text-strong);
+  }
+
+  .detail-back svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  /* 统一详情页能力 chip 行（agent/connector detail 共用）：32px 药丸形态，
+     规格源自 agent-management 详情页能力 chip（原 .agent-management-chip）。
+     行容器负责换行与间距，chip 本身只管单体形态 */
+  .detail-chip-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .detail-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 32px;
+    border-radius: 4px;
+    background: var(--color-tag-surface);
+    color: var(--color-text-primary);
+    padding: 0 16px;
+    font-size: 14px;
+    line-height: 22px;
+  }
+
+  /* 弱化变体：文案与右侧 currentColor 图标统一用次级灰，hover 仍走 --link 的 accent 反馈 */
+  .detail-chip--weak {
+    color: var(--color-text-weak);
+  }
+
+  /* 可点变体（扩展示例药丸等）：hover 复刻扩展模块原药丸的 accent 蓝反馈——
+     底样式无边框，用 inset 描边等价原 border 变色 */
+  .detail-chip--link {
+    cursor: pointer;
+  }
+
+  .detail-chip--link:hover {
+    color: var(--color-chat-accent);
+    box-shadow: inset 0 0 0 1px var(--color-chat-accent);
+  }
+
+  /* 详情页快捷输入/示例列表（agent/connector detail 共用）：单列栅格，每项独占一行，
+     限宽 696px（规格源自 agent-management 详情页快捷输入 .agent-management-prompt-list，
+     2026-09-11 提升为共享类）；行内 chip 复用 .detail-chip 规格，可点态加 .detail-chip--link */
+  .detail-prompt-list {
+    display: grid;
+    max-width: 696px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  /* 整行可点的快捷输入 chip（grid 子项自动拉满整行）：文案与右侧动作图标两端对齐，
+     文案超长单行省略 */
+  .detail-chip--spread {
+    justify-content: space-between;
+    gap: 16px;
+    text-align: left;
+  }
+
+  .detail-chip--spread>span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* chip 内右侧动作图标位（发送等）：纯装饰、颜色继承行文字，hover 时跟随变 accent */
+  .detail-chip__icon {
+    display: inline-flex;
+    width: 24px;
+    height: 24px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    color: inherit;
+  }
+
+  /* 统一详情页头部操作区（agent/connector detail 共用）：规格源自 agent-management 详情页
+     操作区（.agent-management-detail__actions），2026-09-29 提升为共享类。容器只管排布；
+     按钮分文字链接态（发布/卸载 .detail-action）与 28px 药丸态（使用/安装） */
+  .detail-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+  }
+
+  /* 文字链接态动作按钮（发布/卸载）：透明底无边框、28px 命中区；hover 不变底色
+     （对齐 agent-management 详情操作区：发布/卸载在头部操作区内无 hover 底色反馈） */
+  .detail-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    border: 0;
+    border-radius: var(--radius-full);
+    background: transparent;
+    color: var(--color-text-primary);
+    padding: 0 8px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 20px;
+  }
+
+  .detail-action:disabled {
+    cursor: wait;
+    opacity: var(--opacity-agent-muted);
+  }
+
+  /* 带边框药丸动作（使用）：min-width 56px / 水平内边距 28px；hover 与底态同貌
+     （agent-management 详情操作区内 use 按钮 hover 不变貌），禁用为 not-allowed 弱化 */
+  .detail-action--use {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 56px;
+    min-height: 28px;
+    border: 1px solid var(--color-button-border);
+    border-radius: var(--radius-full);
+    background: var(--color-surface-card);
+    color: var(--color-text-primary);
+    padding: 0 28px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 20px;
+    white-space: nowrap;
+  }
+
+  .detail-action--use:disabled {
+    cursor: not-allowed;
+    opacity: var(--opacity-agent-disabled);
+  }
+
+  /* 强调实底药丸动作（安装）：深色实底，hover 提亮为 action-primary，禁用为等待态弱化 */
+  .detail-action--install {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 56px;
+    min-height: 28px;
+    border: 1px solid var(--color-text-strong);
+    border-radius: var(--radius-full);
+    background: var(--color-text-strong);
+    color: var(--color-text-inverse);
+    padding: 0 28px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 20px;
+    white-space: nowrap;
+  }
+
+  .detail-action--install:hover:not(:disabled) {
+    border-color: var(--color-action-primary);
+    background: var(--color-action-primary);
+  }
+
+  .detail-action--install:disabled {
+    cursor: wait;
+    opacity: var(--opacity-agent-muted);
+  }
+
+  .page-content .chat-picker-panel__tabs {
+    height: 34px;
+    min-height: 34px;
+    margin-bottom: 0;
+    font-size: 16px;
+  }
+
+  .page-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    margin-top: 32px;
+    margin-bottom: 16px;
+  }
+
+  .page-catalog {
+    display: flex;
+    align-items: center;
+    font-size: 16px;
+  }
+
+  .main-panel-card {
+    border-radius: 0;
+  }
+
+  /* Horizontal sub-tabs (e.g. config page categories) */
+  .app-subtabs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 0;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--color-border-default);
+  }
+
+  .app-subtabs__tab {
+    appearance: none;
+    margin: 0;
+    padding: 0.65rem 1rem;
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    color: var(--color-text-secondary);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+  }
+
+  .app-subtabs__tab:hover {
+    color: var(--color-text-primary);
+  }
+
+  .app-subtabs__tab--active {
+    color: var(--color-action-primary);
+    border-bottom-color: var(--color-action-primary);
+  }
+
+  /* Pills */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--color-border-default);
+    padding: 6px 12px;
+    border-radius: var(--radius-full);
+    background: var(--color-action-secondary);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+  }
+
+  .pill:hover {
+    border-color: var(--color-border-strong);
+  }
+
+  /* Status Dot */
+  .statusDot {
+    width: 8px;
+    height: 8px;
+    border-radius: var(--radius-full);
+    background: var(--color-feedback-danger);
+    box-shadow: var(--effect-status-danger-glow);
+    animation: pulse-subtle 2s ease-in-out infinite;
+  }
+
+  .statusDot.ok {
+    background: var(--color-feedback-success);
+    box-shadow: var(--effect-status-success-glow);
+    animation: none;
+  }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: 1px solid var(--color-border-default);
+    background: var(--color-surface-elevated);
+    padding: 9px 16px;
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    cursor: pointer;
+  }
+
+  .btn:hover {
+    background: var(--color-surface-hover);
+    border-color: var(--color-border-strong);
+    transform: translateY(-1px);
+    box-shadow: var(--effect-shadow-sm);
+  }
+
+  .btn:active {
+    background: var(--color-action-secondary);
+    transform: translateY(0);
+    box-shadow: none;
+  }
+
+  .btn.primary {
+    border-color: var(--color-action-primary);
+    background: var(--color-action-primary);
+    color: var(--color-action-primary-text);
+    box-shadow: var(--effect-button-primary-shadow);
+  }
+
+  .btn.primary:hover {
+    background: var(--color-action-primary-hover);
+    border-color: var(--color-action-primary-hover);
+    box-shadow:
+      var(--effect-shadow-md),
+      0 0 20px var(--color-action-primary-glow);
+  }
+
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+    transform: none;
+    box-shadow: none;
+  }
+
+  .btn:disabled:hover,
+  .btn.primary:disabled:hover {
+    background: var(--color-surface-elevated);
+    border-color: var(--color-border-default);
+    transform: none;
+    box-shadow: none;
+  }
+
+  .btn.primary:disabled {
+    background: var(--color-action-primary-disabled-surface);
+    border-color: var(--color-action-primary-disabled-border);
+  }
+
+  /* Form Fields */
+  .field input,
+  .field textarea,
+  .field select {
+    border: 1px solid var(--color-border-input);
+    background: var(--color-surface-card);
+    border-radius: var(--radius-md);
+    padding: 8px 12px;
+    outline: none;
+    box-shadow: inset 0 1px 0 var(--color-surface-highlight);
+  }
+
+  .field input:focus,
+  .field textarea:focus,
+  .field select:focus {
+    border-color: var(--color-border-focus);
+    box-shadow: var(--effect-focus-ring);
+  }
+
+  /* Chat Bubbles */
+  .chat-bubble {
+    background: var(--color-chat-bubble-default);
+    border-radius: 24px 0 24px 24px;
+    padding: 16px 20px;
+    min-width: 0;
+    /* light.css 中 --color-text-primary 即 #191919 */
+    color: var(--color-text-primary);
+  }
+
+  .chat-bubble.user {
+    border-color: transparent;
+    background: var(--color-connector-tool-icon-surface);
+    width: fit-content;
+    max-width: calc(100% - 88px);
+    margin-left: auto;
+  }
+
+  .chat-bubble.assistant {
+    border-color: transparent;
+    background: transparent;
+    border-radius: 0;
+    padding: 0;
+    color: var(--color-text-primary);
+  }
+
+  .chat-bubble.streaming {
+    animation: chatStreamPulse 1.5s ease-in-out infinite;
+  }
+
+  .chat-bubble.assistant.chat-bubble--tool-result {
+    border: 1px solid var(--color-action-primary);
+    border-left-width: 4px;
+    border-radius: 12px;
+    padding: 12px 16px;
+    background: var(--color-action-primary-subtle);
+  }
+
+  .chat-bubble__result-label {
+    margin-bottom: 8px;
+    color: var(--color-action-primary);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .chat-bubble.assistant.streaming {
+    animation: none;
+  }
+
+  .assistant-row {
+    gap: 10px;
+    align-items: flex-start;
+  }
+
+  .assistant-row.assistant-row--no-avatar {
+    gap: 0;
+  }
+
+  .assistant-row__avatar {
+    flex: 0 0 auto;
+    width: 32px;
+    margin-top: 2px;
+  }
+
+  .chat-bubble-wrapper--with-files {
+    width: 100%;
+  }
+
+  /* AI disclaimer — footer note pinned below the composer */
+  .chat-ai-disclaimer {
+    width: 816px;
+    max-width: calc(100% - 48px);
+    margin-inline: auto;
+    flex: 0 0 auto;
+    padding: 8px 12px;
+    color: var(--color-text-secondary);
+    font-size: 11px;
+    font-weight: 400;
+    line-height: 1.4;
+    text-align: center;
+    letter-spacing: 0.1px;
+  }
+
+  /* Reading indicator */
+  .chat-reading-indicator {
+    width: fit-content;
+    padding: 10px 16px;
+  }
+
+  .chat-reading-indicator__dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 12px;
+  }
+
+  .chat-reading-indicator__dots>span {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: var(--radius-full);
+    background: var(--color-text-secondary);
+    opacity: 0.6;
+    transform: translateY(0);
+    animation: chatReadingDot 1.2s ease-in-out infinite;
+    will-change: transform, opacity;
+  }
+
+  .chat-reading-indicator__dots>span:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+
+  .chat-reading-indicator__dots>span:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+
+  /* Chat text */
+  .chat-text {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    color: var(--color-text-primary);
+    line-height: 22px;
+    white-space: pre-wrap;
+  }
+
+  .chat-markdown {
+    @apply prose prose-sm max-w-none;
+    max-width: 100%;
+    min-width: 0;
+    --tw-prose-body: var(--color-text-primary);
+    --tw-prose-headings: var(--color-text-strong);
+    --tw-prose-lead: var(--color-text-secondary);
+    --tw-prose-links: var(--color-action-primary);
+    --tw-prose-bold: var(--color-text-strong);
+    --tw-prose-counters: var(--color-text-secondary);
+    --tw-prose-bullets: var(--color-text-secondary);
+    --tw-prose-hr: var(--color-border-default);
+    --tw-prose-quotes: var(--color-text-chat);
+    --tw-prose-quote-borders: var(--color-border-default);
+    --tw-prose-captions: var(--color-text-secondary);
+    --tw-prose-code: var(--color-text-chat);
+    --tw-prose-pre-code: var(--color-text-chat);
+    --tw-prose-pre-bg: var(--color-action-secondary);
+    --tw-prose-th-borders: var(--color-border-default);
+    --tw-prose-td-borders: var(--color-border-default);
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    white-space: normal;
+  }
+
+  .chat-markdown :where(p, li, blockquote, h1, h2, h3, h4, h5, h6) {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .chat-markdown :where(ul, ol) {
+    max-width: 100%;
+  }
+
+  .chat-markdown :where(pre) {
+    max-width: 100%;
+    overflow-x: auto;
+    font-size: 1em;
+  }
+
+  .chat-markdown-table-wrap {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    margin: 0.75em 0 1em;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-card, transparent);
+  }
+
+  .chat-markdown-table-wrap>table {
+    width: 100%;
+    min-width: 28rem;
+    margin: 0;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 0.875em;
+    line-height: 1.5;
+  }
+
+  .chat-markdown-table-wrap :where(th, td) {
+    border-right: 1px solid var(--color-border-default);
+    border-bottom: 1px solid var(--color-border-default);
+    padding: 0.5em 0.75em;
+    vertical-align: top;
+    text-align: start;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .chat-markdown-table-wrap :where(th, td):last-child {
+    border-right: 0;
+  }
+
+  .chat-markdown-table-wrap :where(tbody tr:last-child th, tbody tr:last-child td) {
+    border-bottom: 0;
+  }
+
+  .chat-markdown-table-wrap :where(thead) {
+    border-bottom: 0;
+  }
+
+  .chat-markdown-table-wrap :where(tbody tr, tfoot) {
+    border: 0;
+  }
+
+  .chat-markdown-table-wrap :where(th) {
+    background: var(--color-action-secondary);
+    color: var(--color-text-strong);
+    font-weight: 600;
+  }
+
+  .a2ui-message-content {
+    white-space: normal;
+  }
+
+  .chat-markdown :where(pre code) {
+    overflow-wrap: normal;
+    word-break: normal;
+    white-space: pre;
+  }
+
+  .chat-markdown :where(:not(pre) > code) {
+    overflow-wrap: anywhere;
+    white-space: break-spaces;
+    font-size: 1em;
+  }
+
+  /* Typography's own `code { font-size: .857em }` rule comes after its
+     `pre code { font-size: inherit }` reset in the generated CSS, with equal
+     specificity, so it wins and shrinks code-block text too. Override `code`
+     itself (not just `pre`) so both inline and fenced code end up at 1em. */
+  .chat-markdown :where(code) {
+    font-size: 1em;
+  }
+
+  /* Remove the default prose paragraph margins so single-line messages sit flush
+     inside the bubble. Keep spacing between consecutive paragraphs. */
+  .chat-markdown p {
+    margin-block: 0;
+  }
+
+  .chat-markdown p+p {
+    margin-top: 1em;
+  }
+
+  .chat-bubble.assistant.streaming .chat-text {
+    @apply prose-sm max-w-none;
+    color: var(--color-text-chat);
+    font-size: 0.875rem;
+    line-height: 1.7142857;
+  }
+
+  /* Proactive Recommendation Card — 外层 MessageItem 已用 assistant-row + avatar
+     占位对齐正常 agent 回复，这里不再单独限宽，撑满 chat-bubble-wrapper 即可。 */
+  .proactive-recommendation-card {
+    margin: 0.75rem 0;
+  }
+
+  .proactive-card {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .proactive-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--effect-proactive-card-hover);
+  }
+
+  .proactive-card-content {
+    color: var(--color-text-primary);
+    line-height: 1.6;
+  }
+
+  .proactive-card-content p {
+    margin: 0;
+  }
+
+  .proactive-card-content p+p {
+    margin-top: 0.5rem;
+  }
+
+  .context-compression-running-text {
+    display: inline-block;
+    color: var(--color-text-primary);
+    animation: text-muted-breath 2.8s ease-in-out infinite;
+  }
+
+  .chat-content--team .context-compression-lines {
+    width: min(95%, 920px);
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+  }
+
+  .chat-content--team .context-compression-lines::before {
+    content: '';
+  }
+
+  /* Chat input task queue */
+  .chat-input-task-queue {
+    margin: 0 auto 12px;
+    width: calc(100% - 48px);
+    border: 1px solid var(--color-chat-task-queue-border);
+    border-radius: 18px 18px 0 0;
+    background-color: var(--color-surface-page);
+    background-image: linear-gradient(rgba(var(--color-chat-composer-surface-rgb), 0.96),
+        rgba(var(--color-chat-composer-surface-rgb), 0.96));
+    box-shadow: var(--effect-chat-task-queue-highlight);
+    animation: rise 0.3s var(--ease-out);
+  }
+
+  /* Queue drag handle: hidden by default, visible on row hover */
+  .queue-drag-handle {
+    width: 14px;
+    height: 14px;
+    cursor: grab;
+    opacity: 0;
+    flex-shrink: 0;
+  }
+
+  .team-event-group-row:hover .queue-drag-handle {
+    opacity: 0.6;
+  }
+
+  .queue-drag-handle:active {
+    cursor: grabbing;
+  }
+
+  .chat-input-task-queue-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 18px;
+    border: 0;
+    border-bottom: 1px solid var(--color-chat-task-queue-divider);
+    background: transparent;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    cursor: pointer;
+  }
+
+  .chat-input-task-queue-header__main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .chat-input-task-queue-header__title {
+    white-space: nowrap;
+  }
+
+  .chat-input-task-queue-header__chevron {
+    display: flex;
+    align-items: center;
+    color: var(--color-text-secondary);
+  }
+
+  .chat-input-task-queue-header__chevron.is-expanded {
+    transform: rotate(180deg);
+  }
+
+  .chat-input-task-queue-header:last-child {
+    border-bottom: 0;
+  }
+
+  .chat-input-task-queue-list {
+    max-height: 150px;
+    overflow-y: auto;
+    padding: 8px 10px 10px;
+    background: var(--color-chat-composer-surface);
+  }
+
+  .chat-input-task-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 4px;
+  }
+
+  .chat-input-task-item:hover {
+    background: rgba(var(--color-surface-panel-hover-rgb), 0.56);
+  }
+
+  .chat-input-task-content {
+    flex: 1;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chat-input-task-remove {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+  }
+
+  .chat-input-task-remove:hover {
+    background: var(--color-feedback-danger-subtle);
+    color: var(--color-feedback-danger);
+  }
+
+  .chat-input-task-action {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+  }
+
+  .chat-input-task-action:hover {
+    background: var(--color-surface-hover);
+    color: var(--color-text-primary);
+  }
+
+  /* Chat compose wrapper */
+  .chat-compose {
+    width: 816px;
+    max-width: calc(100% - 48px);
+    margin-inline: auto;
+    padding-top: 4px;
+    position: relative;
+    z-index: 5;
+  }
+
+  .chat-panel-shell {
+    --chat-page-max-width: 920px;
+    --chat-page-gutter: clamp(12px, 3vw, 40px);
+    --chat-content-width: min(var(--chat-page-max-width), calc(100% - (var(--chat-page-gutter) * 2)));
+    --chat-floating-panel-offset: 0px;
+    position: relative;
+  }
+
+  .chat-scroll {
+    padding: 18px 0 22px;
+    /* 滚动条常驻占位：内容超出时滚动条出现不再挤压内容区（与 ToolPanel/Subagent 等处理一致）。 */
+    scrollbar-gutter: stable;
+  }
+
+  .chat-content {
+    width: 816px;
+    max-width: calc(100% - 48px);
+    margin-inline: auto;
+  }
+
+  .chat-content--welcome {
+    min-height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  @media (min-width: 1600px) {
+    .chat-panel-shell--team-floating .chat-scroll:not(:has(.chat-content--welcome)) {
+      padding-right: 364px;
+    }
+
+    .chat-panel-shell--team-floating .chat-compose {
+      width: calc(816px + 364px);
+      padding-right: 364px;
+    }
+
+    .chat-panel-shell--team-floating .chat-ai-disclaimer {
+      width: calc(816px + 364px);
+      padding-right: 364px;
+    }
+  }
+
+  /* Tool cards (legacy single) */
+  .chat-tool-card {
+    margin-top: 8px;
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border-default);
+    background: var(--color-action-secondary);
+    display: grid;
+    gap: 4px;
+  }
+
+  /* ====== Team Timeline Messages（头像+名字一行，正文另起一行） ====== */
+  .team-member-message {
+    width: min(100%, 920px);
+    margin: 0 auto 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: stretch;
+  }
+
+  .team-member-message__header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+  }
+
+  .team-member-message__body {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .chat-message-file-list {
+    width: 100%;
+  }
+
+  .team-member-message__card {
+    width: fit-content;
+    max-width: min(82%, 720px);
+    min-width: 0;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border-default);
+    background: rgba(var(--color-action-secondary-rgb), 0.72);
+    padding: 10px 12px;
+    color: var(--color-text-primary);
+    font-size: var(--font-size-sm);
+    line-height: 1.65;
+    word-break: break-word;
+  }
+
+  .team-member-message__content {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .team-member-message__plain {
+    min-width: 0;
+    overflow-x: auto;
+    color: var(--color-text-primary);
+    font-size: var(--font-size-sm);
+    line-height: 1.75;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .team-member-message__plain.chat-markdown {
+    white-space: normal;
+  }
+
+  .team-message-markdown {
+    color: var(--color-text-primary);
+    font-size: inherit;
+    line-height: inherit;
+    --tw-prose-body: var(--color-text-primary);
+    --tw-prose-bold: var(--color-text-strong);
+    --tw-prose-code: var(--color-text-primary);
+    --tw-prose-links: var(--color-action-primary);
+  }
+
+  .team-message-markdown> :first-child {
+    margin-top: 0;
+  }
+
+  .team-message-markdown> :last-child {
+    margin-bottom: 0;
+  }
+
+  .team-message-markdown--inline {
+    display: inline;
+  }
+
+  .team-message-markdown--inline>p:first-child {
+    display: inline;
+    margin: 0;
+  }
+
+  /* ====== Member detail body (team-area / subagent shared) ====== */
+  .member-detail-body>* {
+    max-width: max(720px, calc(100% - 640px));
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* ====== Team Event Group Cards ====== */
+  .team-event-group {
+    margin: 0;
+    width: 100%;
+    background: var(--color-team-event-surface);
+    overflow: hidden;
+  }
+
+  .team-event-group-summary {
+    width: 100%;
+    min-height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 7px 12px;
+    border: 0;
+    background: var(--color-team-event-summary-surface);
+    color: var(--color-text-primary);
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .team-event-group-summary:hover {
+    background: rgba(var(--color-action-secondary-rgb), 0.65);
+  }
+
+  .team-event-group-summary__main {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: nowrap;
+  }
+
+  .team-event-group-summary__icon {
+    width: 14px;
+    height: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-text-secondary);
+    flex: 0 0 auto;
+    line-height: 1;
+  }
+
+  .team-event-group-summary__icon img {
+    width: 14px;
+    height: 14px;
+    display: block;
+    opacity: 0.72;
+    object-fit: contain;
+    transform: translateY(-1px);
+  }
+
+  .team-event-group-summary__title {
+    color: var(--color-text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.2;
+  }
+
+  .team-event-group-summary__activity {
+    min-width: 140px;
+    flex: 1 1 auto;
+    overflow: hidden;
+    color: var(--color-text-primary);
+    font-size: 13px;
+    line-height: 1.35;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .team-event-group-summary__chevron {
+    color: var(--color-text-secondary);
+    flex: 0 0 auto;
+    font-size: 16px;
+    line-height: 1;
+    opacity: 0.55;
+  }
+
+  .team-event-group-list--activity {
+    max-height: 220px;
+    padding: 8px 10px 10px;
+    border-top: 1px solid var(--color-border-default);
+  }
+
+  .team-event-group-row--activity {
+    grid-template-columns: 30px minmax(0, 1fr);
+    padding: 7px 4px;
+  }
+
+  .team-event-group-row--activity+.team-event-group-row--activity {
+    border-top: 1px solid rgba(var(--color-border-default-rgb), 0.64);
+  }
+
+  .team-event-group-chip--status {
+    background: rgba(var(--color-action-primary-rgb), 0.12);
+    color: var(--color-action-primary);
+  }
+
+  .team-event-group-list {
+    max-height: 360px;
+    overflow-y: auto;
+    padding: 5px 0;
+    background: transparent;
+  }
+
+  .team-event-group-row {
+    display: grid;
+    grid-template-columns: 26px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+    padding: 5px 10px;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+  }
+
+  button.team-event-group-row {
+    cursor: pointer;
+  }
+
+  button.team-event-group-row:hover {
+    background: rgba(var(--color-action-secondary-rgb), 0.54);
+  }
+
+  .team-event-group-row__avatar {
+    padding-top: 1px;
+  }
+
+  .team-event-group-row__avatar .h-9 {
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+  }
+
+  .team-event-group-row__main {
+    min-width: 0;
+  }
+
+  .team-event-group-row__meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    margin-bottom: 2px;
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  .team-event-group-row__member {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--color-text-strong);
+    font-weight: 600;
+  }
+
+  .team-event-member-counts {
+    min-width: 0;
+    margin-left: auto;
+    display: inline-grid;
+    grid-template-columns: repeat(3, 36px);
+    align-items: center;
+    justify-content: end;
+    column-gap: 6px;
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.3;
+  }
+
+  .team-event-member-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 3px;
+    white-space: nowrap;
+  }
+
+  .team-event-member-count svg {
+    width: 13px;
+    height: 13px;
+    stroke-width: 1.9;
+  }
+
+  .team-event-group-row__content {
+    color: var(--color-text-primary);
+    font-size: 13px;
+    line-height: 1.5;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  .team-event-group-chip {
+    display: inline-flex;
+    align-items: center;
+    margin-right: 6px;
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-2xs);
+    font-weight: 600;
+    line-height: 1.5;
+  }
+
+  .team-event-group-chip--p2p {
+    background: rgba(var(--color-feedback-info-rgb), 0.16);
+    color: var(--color-feedback-info);
+  }
+
+  .team-event-group-chip--broadcast {
+    background: var(--color-feedback-warning-subtle);
+    color: var(--color-feedback-warning);
+  }
+
+  /* 群聊消息列表内的 @提及 chip：去背景，文字统一链接蓝（light.css --color-text-link: #0067d1） */
+  .team-group-chat-message-list .team-event-group-chip--p2p,
+  .team-group-chat-message-list .team-event-group-chip--broadcast {
+    background: transparent;
+    color: var(--color-text-link);
+    font-size: 14px;
+    font-weight: 400;
+  }
+
+  /* 群聊消息正文：14px / 28px 行高 */
+  .team-group-chat-message-list .team-message-markdown {
+    font-size: 14px;
+    line-height: 22px;
+  }
+
+  .chat-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    position: relative;
+  }
+
+  [data-timeline-scroll-root] {
+    overflow-anchor: none;
+  }
+
+  .chat-timeline>*,
+  .chat-timeline-row>* {
+    margin-top: 0;
+    margin-bottom: 0;
+  }
+
+  /* ====== Tool Tree ====== */
+  .tool-group-frame {
+    margin: 0;
+  }
+
+  .tool-group-frame:not(.tool-group-frame--team) {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+
+  .tool-group-frame:not(.tool-group-frame--team).tool-group-frame--no-avatar {
+    gap: 0;
+  }
+
+  .tool-group-frame:not(.tool-group-frame--team)>.tool-group-frame__avatar {
+    flex: 0 0 32px;
+    width: 32px;
+  }
+
+  .tool-group-frame:not(.tool-group-frame--team)>.min-w-0 {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .tool-group-frame--team {
+    width: min(100%, 920px);
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+  }
+
+  .tool-group-frame--team.tool-group-frame--no-avatar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .tool-tree {
+    margin: 0;
+    padding: 0;
+    --tool-muted: rgba(var(--color-text-secondary-rgb), 0.72);
+    --tool-muted-strong: var(--color-text-secondary);
+  }
+
+  .tool-tree__notices {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 4px;
+  }
+
+  .tool-tree__notice {
+    max-width: 100%;
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-xs);
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+
+  .tool-tree__section+.tool-tree__section {
+    margin-top: 4px;
+  }
+
+  .tool-tree__header {
+    width: 100%;
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 3px 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .tool-tree__header-lines {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .tool-tree__header-line {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .tool-tree__cat-icon {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--tool-muted, var(--color-text-secondary));
+  }
+
+  .tool-tree__cat-icon svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .tool-tree__header-line-text {
+    flex: 0 1 auto;
+    min-width: 0;
+    color: var(--tool-muted, var(--color-text-secondary));
+    font-size: var(--font-size-base, 14px);
+    font-weight: 500;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tool-tree__header-text {
+    display: inline-flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+  }
+
+  .tool-tree__header-goal {
+    flex: 1 1 0;
+    min-width: 0;
+    color: var(--tool-muted, var(--color-text-secondary));
+    font-size: var(--font-size-xs);
+    font-weight: 400;
+    line-height: 1.3;
+    opacity: 0.75;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tool-tree__header-title-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    width: fit-content;
+  }
+
+  /* 轮次耗时行复用 completed-work-chip 样式；此处仅保留不带头像独立行的 team 栅格对齐。 */
+  .turn-elapsed--team {
+    width: min(100%, 920px);
+    margin: 0 auto;
+  }
+
+  .completed-work-col {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    margin: 2px 0;
+  }
+
+  .completed-work-col__avatar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    line-height: 0;
+  }
+
+  .chat-avatar-name {
+    font-size: var(--font-size-sm, 13px);
+    font-weight: 600;
+    line-height: normal;
+    color: var(--color-text-primary);
+  }
+
+  .completed-work-col--team {
+    width: min(100%, 920px);
+    margin: 2px auto;
+  }
+
+  .completed-work-col--nested {
+    margin-left: 0;
+  }
+
+  .completed-work-col--nested .completed-work-chip--streak {
+    font-size: var(--font-size-base, 14px);
+    color: var(--color-text-meta);
+  }
+
+  .completed-work-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    margin: 0;
+    padding: 2px 4px 2px 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-text-meta);
+    font-size: var(--font-size-base, 14px);
+    line-height: 1.4;
+    cursor: pointer;
+    text-align: left;
+    transition: color 0.18s ease;
+  }
+
+  .completed-work-chip__icon {
+    display: inline-flex;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    color: var(--color-text-meta);
+  }
+
+  .completed-work-chip__icon svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  /* active（进行中）：旋转加载图标用次级文本色，label/value 同步变暗（还原 turn-elapsed.is-active 规则） */
+  .completed-work-chip.is-active .completed-work-chip__icon {
+    color: var(--color-text-secondary);
+  }
+
+  .completed-work-chip__label {
+    font-variant-numeric: tabular-nums;
+    min-width: 0;
+    transition:
+      opacity 0.28s ease,
+      transform 0.28s ease;
+  }
+
+  .completed-work-chip.is-active .completed-work-chip__label {
+    color: var(--color-text-secondary);
+  }
+
+  .completed-work-chip .tool-tree-item__disclosure {
+    opacity: 0.7;
+    transition:
+      transform 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+      opacity 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .reasoning-col {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin: 0;
+  }
+
+  .reasoning-col__avatar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    line-height: 0;
+  }
+
+  .reasoning-col--team {
+    width: min(100%, 920px);
+    margin: 0 auto;
+  }
+
+  .reasoning-panel {
+    --tool-muted: rgba(var(--color-text-secondary-rgb), 0.78);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .reasoning-panel .tool-tree__header {
+    padding: 2px 0;
+  }
+
+  /* 思考正文保留高度过渡；任务执行区即时进入布局，只做内容反馈。 */
+  .reasoning-panel__collapse,
+  .timeline-collapse {
+    display: grid;
+    grid-template-rows: 0fr;
+  }
+
+  .reasoning-panel__collapse {
+    transition: grid-template-rows 0.3s ease;
+  }
+
+  .reasoning-panel__collapse.is-open,
+  .timeline-collapse.is-open {
+    grid-template-rows: 1fr;
+  }
+
+  .reasoning-panel__collapse-inner,
+  .timeline-collapse-inner {
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .reasoning-panel__body {
+    margin: 2px 0 2px 20px;
+    padding: 6px 10px;
+    max-height: 220px;
+    overflow-y: auto;
+    border-left: 2px solid rgba(var(--color-text-secondary-rgb), 0.22);
+    color: rgba(var(--color-text-secondary-rgb), 0.82);
+    font-size: var(--font-size-2xs, 11px);
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition:
+      opacity 0.22s ease,
+      transform 0.22s ease;
+  }
+
+  .reasoning-panel__collapse.is-open .reasoning-panel__body {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /*
+   * 时间线折叠：收起时必须脱离文档流，否则 chat-timeline 的 gap 会在每个 0 高节点上累加，
+   * 出现「没展开的内容之间空白巨大」。展开时再进流并做与思考一致的下拉。
+   */
+  .timeline-collapse:not(.is-open) {
+    position: absolute;
+    /* Preserve the timeline width so hidden text does not wrap at every character. */
+    width: 100%;
+    height: 0;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .timeline-collapse.is-open {
+    position: relative;
+    width: auto;
+    visibility: visible;
+    pointer-events: auto;
+  }
+
+  .timeline-collapse.is-open>.timeline-collapse-inner>* {
+    animation: timeline-collapse-drop 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes timeline-collapse-drop {
+    from {
+      opacity: 0;
+      transform: translateY(-2px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* 执行中：不转圈，改用一条明亮窄带从左到右扫过灰字（对比更强、更明显）。 */
+  .tool-tree__header-line-text.is-running {
+    background: linear-gradient(100deg,
+        var(--tool-muted, var(--color-text-secondary)) 0%,
+        var(--tool-muted, var(--color-text-secondary)) 42%,
+        var(--color-text-primary) 50%,
+        var(--tool-muted, var(--color-text-secondary)) 58%,
+        var(--tool-muted, var(--color-text-secondary)) 100%);
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    /* reverse：亮带从左向右扫过；节奏放慢，避免闪得太急。 */
+    animation: shimmer 2.8s linear infinite reverse;
+  }
+
+  .tool-tree__list {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    max-height: 480px;
+    overflow-y: auto;
+    padding-left: 0;
+    padding-right: 6px;
+  }
+
+  .tool-tree__latest {
+    margin-top: 6px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-action-primary);
+    font-size: var(--font-size-2xs);
+    cursor: pointer;
+  }
+
+  .tool-tree__latest:hover {
+    color: var(--color-action-primary-hover);
+  }
+
+  .tool-tree-item+.tool-tree-item {
+    margin-top: 4px;
+  }
+
+  .tool-tree-item__button {
+    width: 100%;
+    max-width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    margin: 0 -8px;
+    width: calc(100% + 16px);
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.14s ease;
+  }
+
+  .tool-tree-item__button:hover {
+    background: var(--color-surface-muted);
+  }
+
+  .tool-tree-item__main {
+    min-width: 0;
+    flex: 1 1 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+  }
+
+  /* 紧贴工具名的展开箭头：默认隐藏，hover 才浮现为「>」，展开后转成向下「v」。 */
+  .tool-tree-item__disclosure {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--tool-muted, var(--color-text-secondary));
+    opacity: 0;
+    transition:
+      transform 0.22s ease,
+      opacity 0.16s ease;
+  }
+
+  .tool-tree-item__disclosure svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .tool-tree-item__button:hover .tool-tree-item__disclosure,
+  .tool-tree__header:hover .tool-tree-item__disclosure,
+  .tool-tree-item__disclosure.is-open {
+    opacity: 1;
+  }
+
+  .tool-tree-item__disclosure.is-open {
+    transform: rotate(90deg);
+  }
+
+  /* 详情内联展开：与思考面板同一套 grid 高度下拉，避免挂载闪一下。 */
+  .tool-tree-item__collapse {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.3s ease;
+  }
+
+  .tool-tree-item__collapse.is-open {
+    grid-template-rows: 1fr;
+  }
+
+  .tool-tree-item__collapse-inner {
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .tool-tree-item__detail-wrap {
+    width: 100%;
+    margin: 2px 0 4px;
+    padding: 10px 12px;
+    background: rgba(var(--color-surface-card-rgb), 0.6);
+    border: 1px solid rgba(var(--color-border-default-rgb), 0.7);
+    border-radius: 8px;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition:
+      opacity 0.22s ease,
+      transform 0.22s ease;
+  }
+
+  .tool-tree-item__collapse.is-open .tool-tree-item__detail-wrap {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .tool-tree-item__detail {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .tool-tree-item__detail > .auto-reviewer-details {
+    margin-top: 0;
+  }
+
+  /* 展开详情里的状态图标也统一为灰色，不用彩色区分。 */
+  .tool-tree-item__detail-wrap .tool-status-icon {
+    color: var(--color-text-secondary);
+  }
+
+  .tool-tree-item__detail-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .tool-tree-item__detail-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--color-text-tertiary, var(--color-text-secondary));
+    font-size: var(--font-size-2xs);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0.75;
+  }
+
+  .tool-tree-item__detail-hint {
+    font-weight: 400;
+    letter-spacing: normal;
+    text-transform: none;
+    opacity: 0.72;
+  }
+
+  .tool-tree-item__detail-badge {
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: var(--font-size-2xs);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    background: var(--color-surface-muted);
+    color: var(--color-text-secondary);
+  }
+
+  .tool-tree-item__detail-badge.is-success {
+    background: var(--color-feedback-success-subtle, rgba(22, 163, 74, 0.12));
+    color: var(--color-feedback-success);
+  }
+
+  .tool-tree-item__detail-badge.is-error,
+  .tool-tree-item__detail-badge.is-timeout {
+    background: rgba(220, 38, 38, 0.08);
+    color: rgba(185, 28, 28, 0.88);
+    font-weight: 500;
+  }
+
+  /* 失败态与「已完成思考」同色，不再用红色强调 */
+  .tool-tree__header-line-text.is-failed {
+    color: var(--tool-muted, var(--color-text-secondary));
+  }
+
+  .tool-tree-item__detail-pre.is-failed {
+    border-color: rgba(220, 38, 38, 0.14);
+  }
+
+  .tool-tree-item__detail-pre--name {
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+    font-weight: 600;
+  }
+
+  .tool-tree-item__detail-status.is-error {
+    color: rgba(185, 28, 28, 0.78);
+  }
+
+  .tool-tree-item__detail-pre {
+    margin: 0;
+    max-height: 168px;
+    overflow: auto;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--color-surface-muted);
+    border: 1px solid var(--color-border-subtle, var(--color-border-default));
+    color: var(--color-text-secondary);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-2xs);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  .tool-tree-item__detail-raw {
+    margin-top: 6px;
+  }
+
+  /* 流程图与折叠标题保持和原始结果标题到输出框一致的间距。 */
+  .tool-tree-item__detail-raw .diagram-container {
+    margin: 4px 0 0;
+    border-radius: 8px;
+  }
+
+  .tool-tree-item__detail-raw .diagram-container__toolbar {
+    min-height: 32px;
+    padding: 4px 6px;
+  }
+
+  .tool-tree-item__detail-raw .markdown-toggle-pill {
+    height: 22px;
+    padding: 0 6px;
+    font-size: var(--font-size-2xs);
+  }
+
+  .tool-tree-item__detail-raw .markdown-toolbar-btn {
+    width: 22px;
+    height: 22px;
+  }
+
+  .tool-tree-item__detail-raw .markdown-toolbar-btn svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .tool-tree-item__detail-raw .diagram-menu__item {
+    font-size: var(--font-size-2xs);
+  }
+
+  .tool-tree-item__detail-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: var(--font-size-2xs);
+    font-weight: 500;
+    color: var(--color-text-secondary);
+  }
+
+  .tool-tree-item__button:hover .tool-tree-item__name {
+    color: var(--color-text-secondary);
+  }
+
+  .tool-status-icon {
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+  }
+
+  .tool-status-icon svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  /* 工具行图标统一浅灰，不再用红/绿区分状态（状态含义在展开详情里体现）。 */
+  .tool-tree-item__status.is-success,
+  .tool-tree-item__status.is-warning,
+  .tool-tree-item__status.is-error,
+  .tool-tree-item__status.is-pending {
+    color: var(--tool-muted, var(--color-text-secondary));
+  }
+
+  .tool-status-icon.is-success {
+    color: var(--color-feedback-success);
+  }
+
+  .tool-status-icon.is-warning {
+    color: var(--color-feedback-warning);
+  }
+
+  .tool-status-icon.is-error {
+    color: var(--color-feedback-danger);
+  }
+
+  .tool-status-icon.is-pending {
+    color: var(--color-action-primary);
+  }
+
+  .tool-status-icon--lg {
+    width: 32px;
+    height: 32px;
+  }
+
+  .tool-status-icon--lg svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .tool-tree-item__status {
+    width: 16px;
+    height: 16px;
+  }
+
+  .tool-tree-item__status svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .tool-tree-item__name {
+    min-width: 0;
+    color: var(--tool-muted, var(--color-text-secondary));
+    /* 用正文字体而非等宽：等宽字形更宽、更“重”，会显得比外层标题还大。 */
+    font-family: inherit;
+    font-size: var(--font-size-2xs);
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Keyboard shortcut badge */
+  .kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 5px;
+    font-family: var(--font-mono);
+    font-size: var(--font-size-2xs);
+    font-weight: 500;
+    line-height: 1;
+    border-radius: 4px;
+    background: var(--color-kbd-background);
+    color: var(--color-text-secondary);
+  }
+
+  /* Streaming cursor */
+  .streaming-cursor {
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    background: var(--color-action-primary);
+    animation: blink 1s step-end infinite;
+    margin-left: 2px;
+    vertical-align: text-bottom;
+  }
+
+  /* Skill action button */
+  .skill-action-btn {
+    min-width: 76px;
+    height: 28px;
+    padding: 0 12px;
+    border-radius: 24px;
+    font-size: var(--font-size-sm);
+    border: 1px solid var(--color-skill-action-border);
+    background: var(--color-skill-action-surface);
+    color: var(--color-skill-action-text);
+    white-space: nowrap;
+  }
+
+  .skill-action-btn:hover {
+    background: var(--color-skill-action-hover);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+
+    .chat-timeline,
+    .completed-work-col,
+    .reasoning-col,
+    .tool-group-frame,
+    .reasoning-panel__collapse,
+    .timeline-collapse,
+    .reasoning-panel__body,
+    .timeline-collapse.is-open,
+    .timeline-collapse.is-open>.timeline-collapse-inner>*,
+    .tool-tree-item__disclosure,
+    .tool-tree-item__collapse,
+    .tool-tree-item__detail-wrap,
+    .completed-work-chip,
+    .completed-work-chip__label {
+      animation: none !important;
+      transition: none !important;
+    }
+
+    .timeline-collapse:not(.is-open) {
+      display: none !important;
+    }
+  }
+}
+
+/* ===========================================
+   Utilities
+   =========================================== */
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.muted {
+  color: var(--color-text-secondary);
+}
+
+/* Animation utilities */
+.animate-rise {
+  animation: rise 0.35s var(--ease-out) backwards;
+}
+
+/* Voice recording pulse */
+@keyframes voice-pulse {
+
+  0%,
+  100% {
+    box-shadow: var(--effect-voice-pulse-start);
+  }
+
+  50% {
+    box-shadow: var(--effect-voice-pulse-end);
+  }
+}
+
+.voice-recording {
+  animation: voice-pulse 1.5s ease-in-out infinite;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out forwards;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.2s var(--ease-out);
+}
+
+/* Slide in from right - Drawer animation */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.3s var(--ease-out) forwards;
+}
+
+/* ===========================================
+   Responsive - Large screens
+   =========================================== */
+
+@media (min-width: 1441px) {
+  .conversation-sidebar {
+    width: 296px;
+    min-width: 296px;
+  }
+}
+
+@media (min-width: 1440px) {
+  :root {
+    --shell-nav-width: 248px;
+    --tool-panel-width: var(--shell-nav-width);
+    --statusbar-right-space: var(--tool-panel-width);
+  }
+}
+
+@media (min-width: 1920px) {
+  :root {
+    --shell-nav-width: 272px;
+    --tool-panel-width: var(--shell-nav-width);
+    --statusbar-right-space: var(--tool-panel-width);
+  }
+}
+
+/* data-tooltip 自适应提示：useAdaptiveTooltip 以 portal 渲染到 body，
+   水平位置由 JS 计算（默认居中，空间不足贴边/收进视口），这里只管外观 */
+.adaptive-tooltip {
+  box-sizing: border-box;
+  max-width: 320px;
+  padding: 7px 16px;
+  border-radius: 6px;
+  background: var(--color-surface-popover);
+  box-shadow: var(--effect-chat-tooltip-shadow);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  line-height: 18px;
+  pointer-events: none;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.cron-template-card:hover {
+  box-shadow: var(--effect-card-hover);
+}
+
+/* 页面工具栏主页签（agent-management / skill-panel / connector-market 共用）：
+   收敛原调用处 Tailwind 的 h-[34px] text-base gap-[32px]。ui/Tabs 基类 .tabs 是
+   unlayered，此规则必须同为 unlayered，且用 .tabs.page-tabs 复合选择器提权，
+   才能覆盖基类的 gap:18px */
+.tabs.page-tabs {
+  height: 34px;
+  font-size: var(--font-size-lg);
+  line-height: 24px;
+  gap: 32px;
+}
+
+/* 技能版本管理：版本文字与“默认”徽标行（8px 间距）。徽标复用 entity-header__tag
+   形态（20px 高药丸），配色用专属 token */
+.skill-version-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.skill-version-default-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  flex-shrink: 0;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: var(--color-skill-version-default-surface);
+  color: var(--color-skill-version-default-text);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
+  white-space: nowrap;
+}
