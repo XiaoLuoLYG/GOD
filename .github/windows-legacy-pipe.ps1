@@ -29,3 +29,20 @@ foreach ($choice in @($selectionWithLF, $selectionNoLF, $selectionAsCRLF, "yes`n
   if ($LASTEXITCODE -ne 0) { throw "Probe exited $LASTEXITCODE" }
   Get-Content -LiteralPath $log -Encoding UTF8 | Write-Host
 }
+function Show-EncodingProbe {
+  param([string]$Label)
+  Write-Host "$Label; OutputEncoding $($OutputEncoding.WebName), preamble $($OutputEncoding.GetPreamble().Length); console output $([Console]::OutputEncoding.WebName), preamble $([Console]::OutputEncoding.GetPreamble().Length)"
+  Remove-Item -LiteralPath $log -ErrorAction SilentlyContinue
+  $selectionWithLF | Invoke-NativeCommand -FilePath $uv -ArgumentList @('run', '--no-project', 'python', $probeFile) -LogPath $log
+  Get-Content -LiteralPath $log -Encoding UTF8 | Write-Host
+}
+$fixtureSource = $definition.Extent.Text.Replace('$previousEap = $ErrorActionPreference', '$OutputEncoding = [System.Text.UTF8Encoding]::new($false); $previousEap = $ErrorActionPreference')
+. ([ScriptBlock]::Create($fixtureSource))
+Show-EncodingProbe 'Function-local BOM-free OutputEncoding'
+. ([ScriptBlock]::Create($definition.Extent.Text))
+$OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+Show-EncodingProbe 'Caller BOM-free OutputEncoding'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+Show-EncodingProbe 'Caller and console BOM-free OutputEncoding'
+[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
+Show-EncodingProbe 'Caller, console output and console input BOM-free UTF-8'
