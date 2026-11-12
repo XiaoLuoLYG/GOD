@@ -179,8 +179,10 @@ function Update-ProcessPath {
   $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
   $userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
   $localBin = Join-Path $HOME ".local\bin"
-  $parts = @($currentPath, $machinePath, $userPath, $localBin) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-  $env:Path = ($parts -join [System.IO.Path]::PathSeparator)
+  $separator = [System.IO.Path]::PathSeparator
+  $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  $parts = @($currentPath, $machinePath, $userPath, $localBin) -split [regex]::Escape([string]$separator)
+  $env:Path = (($parts | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $seen.Add($_) }) -join $separator)
 }
 
 function Require-Winget {
@@ -405,7 +407,7 @@ function Load-CurrentExperiment {
     return
   }
   try {
-    $data = Get-Content $script:CurrentExperimentFile -Raw | ConvertFrom-Json
+    $data = Get-Content -LiteralPath $script:CurrentExperimentFile -Raw -Encoding UTF8 | ConvertFrom-Json
   } catch {
     return
   }
@@ -524,17 +526,20 @@ function Ensure-EnvFile {
 
 function Test-PortOpen {
   param([int]$Port)
-  foreach ($connectHost in @("127.0.0.1", "::1", "localhost")) {
-    $client = New-Object System.Net.Sockets.TcpClient
+  foreach ($address in @([System.Net.IPAddress]::Loopback, [System.Net.IPAddress]::IPv6Loopback)) {
+    $client = $null
     try {
-      $async = $client.BeginConnect($connectHost, $Port, $null, $null)
+      $client = [System.Net.Sockets.TcpClient]::new($address.AddressFamily)
+      $async = $client.BeginConnect($address, $Port, $null, $null)
       if ($async.AsyncWaitHandle.WaitOne(350)) {
         $client.EndConnect($async)
         return $true
       }
     } catch {
     } finally {
-      $client.Close()
+      if ($null -ne $client) {
+        $client.Close()
+      }
     }
   }
   return $false
@@ -625,7 +630,9 @@ function Open-BrowserWindow {
 function Open-FrontendPages {
   Write-GodLog "Opening frontend pages"
   Open-BrowserWindow (Get-ReplayUrl)
-  Open-BrowserWindow $script:RuntimeUiUrl
+  if (Test-PortOpen $script:RuntimeUiPort) {
+    Open-BrowserWindow $script:RuntimeUiUrl
+  }
 }
 
 function Open-SetupPage {
@@ -639,7 +646,7 @@ function Get-CurrentExperimentConfigPath {
     return $null
   }
   try {
-    $data = Get-Content $script:CurrentExperimentFile -Raw | ConvertFrom-Json
+    $data = Get-Content -LiteralPath $script:CurrentExperimentFile -Raw -Encoding UTF8 | ConvertFrom-Json
   } catch {
     return $null
   }
@@ -656,7 +663,22 @@ function Get-CurrentExperimentConfigPath {
 
 function Test-CurrentExperimentConfig {
   $configPath = Get-CurrentExperimentConfigPath
-  return (-not [string]::IsNullOrEmpty($configPath)) -and (Test-Path $configPath)
+  return (-not [string]::IsNullOrEmpty($configPath)) -and (Test-Path -LiteralPath $configPath -PathType Leaf)
+}
+
+function Get-ExperimentConfigPath {
+  return Join-PathMany $script:LiveWorkspacePath "hypothesis_$($script:GodExperiment)" "experiment_$($script:GodExperimentRun)" "init" "init_config.json"
+}
+
+function Test-ExperimentRequiresRuntime {
+  $configPath = Get-ExperimentConfigPath
+  if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+    Stop-God "Experiment config not found: $configPath"
+  }
+  $configPath = (Resolve-Path -LiteralPath $configPath).Path
+  $helperPath = Join-PathMany "packages" "agentsociety2" "agentsociety2" "agent" "brains" "config.py"
+  $required = Invoke-CheckedCommand -FilePath (Get-ToolPath @("uv")) -Arguments @("run", "--no-project", "--managed-python", "python", $helperPath, $configPath) -WorkingDirectory $script:BackendRoot
+  return ($required -eq "1")
 }
 
 function Test-PendingStartRequest {
@@ -821,15 +843,15 @@ function Start-DetachedService {
 
 function Stop-RuntimeInstance {
   param([string]$Name)
-  if (-not (Test-Path $script:RuntimeRoot)) {
+  if (-not (Test-Path -LiteralPath $script:RuntimeRoot -PathType Container)) {
     return
   }
-  if (-not (Test-CommandExists "uv")) {
-    return
-  }
-  Push-Location $script:RuntimeRoot
+  Push-Location -LiteralPath $script:RuntimeRoot
   try {
-    Invoke-NativeCommand -FilePath (Get-ToolPath @("uv")) -ArgumentList @("run", "--locked", "jiuwenswarm-start", "--stop", $Name) *> $null
+    $launcher = Join-PathMany (Get-EnvValue "UV_PROJECT_ENVIRONMENT" ".venv") "Scripts" "jiuwenswarm-start.exe"
+    if (Test-Path -LiteralPath $launcher -PathType Leaf) {
+      Invoke-NativeCommand -FilePath (Resolve-Path -LiteralPath $launcher).Path -ArgumentList @("--stop", $Name) *> $null
+    }
   } catch {
   } finally {
     Pop-Location
@@ -927,6 +949,8 @@ function Invoke-NativeCommand {
   )
   begin {
     $previousEap = $ErrorActionPreference
+    $previousOutputEncoding = $OutputEncoding
+    $previousInputEncoding = $null
     $ErrorActionPreference = "Continue"
     $pipelineInput = New-Object System.Collections.Generic.List[object]
   }
@@ -939,6 +963,12 @@ function Invoke-NativeCommand {
     try {
       $hasInput = $pipelineInput.Count -gt 0
       $inputText = if ($hasInput) { ($pipelineInput | ForEach-Object { [string]$_ }) -join [Environment]::NewLine } else { $null }
+      if ($hasInput) {
+        $utf8 = [System.Text.UTF8Encoding]::new($false)
+        $previousInputEncoding = [Console]::InputEncoding
+        [Console]::InputEncoding = $utf8
+        $OutputEncoding = $utf8
+      }
       if ($LogPath) {
         if ($hasInput) {
           $inputText | & $FilePath @ArgumentList 2>&1 | Out-File -FilePath $LogPath -Append -Encoding utf8
@@ -954,6 +984,10 @@ function Invoke-NativeCommand {
       }
     } finally {
       $ErrorActionPreference = $previousEap
+      $OutputEncoding = $previousOutputEncoding
+      if ($null -ne $previousInputEncoding) {
+        [Console]::InputEncoding = $previousInputEncoding
+      }
     }
   }
 }
@@ -999,10 +1033,15 @@ function Ensure-BackendDependencies {
 }
 
 function Setup-Dependencies {
+  param([Nullable[bool]]$RuntimeRequired = $null)
   Ensure-Prerequisites
   if ((Get-EnvValue "GOD_SKIP_SETUP" "0") -eq "1") {
     Write-GodLog "Skipping dependency setup (GOD_SKIP_SETUP=1)"
     return
+  }
+
+  if ($null -eq $RuntimeRequired) {
+    $RuntimeRequired = (-not (Test-Path -LiteralPath (Get-ExperimentConfigPath) -PathType Leaf)) -or (Test-ExperimentRequiresRuntime)
   }
 
   $uv = Get-ToolPath @("uv")
@@ -1011,14 +1050,18 @@ function Setup-Dependencies {
   Write-GodLog "Syncing backend Python dependencies"
   Invoke-CheckedCommand -FilePath $uv -Arguments @("sync", "--managed-python") -WorkingDirectory $script:BackendRoot
 
-  Write-GodLog "Syncing agent runtime Python dependencies"
-  Invoke-CheckedCommand -FilePath $uv -Arguments @("sync", "--locked", "--managed-python") -WorkingDirectory $script:RuntimeRoot
-
   $backendFrontend = Join-Path $script:BackendRoot "frontend"
   if ((-not (Test-Path (Join-Path $backendFrontend "node_modules"))) -or (Get-EnvValue "GOD_FORCE_SETUP" "0") -eq "1") {
     Write-GodLog "Installing control-room dependencies"
     Invoke-CheckedCommand -FilePath $npm -Arguments @("install", "--no-audit", "--no-fund", "--loglevel=error") -WorkingDirectory $backendFrontend
   }
+
+  if (-not $RuntimeRequired) {
+    return
+  }
+
+  Write-GodLog "Syncing agent runtime Python dependencies"
+  Invoke-CheckedCommand -FilePath $uv -Arguments @("sync", "--locked", "--managed-python") -WorkingDirectory $script:RuntimeRoot
 
   $runtimeFrontend = Join-PathMany $script:RuntimeRoot "jiuwenswarm" "channels" "web" "frontend"
   if ((-not (Test-Path (Join-Path $runtimeFrontend "node_modules"))) -or (Get-EnvValue "GOD_FORCE_SETUP" "0") -eq "1") {
@@ -1052,7 +1095,6 @@ function Sync-RuntimeModelEnv {
 }
 
 function Ensure-RuntimeInstance {
-  Setup-Dependencies
   $uv = Get-ToolPath @("uv")
   $helper = Join-PathMany $script:RootDir "scripts" "god_runtime_instance.py"
   $arguments = @(
@@ -1073,15 +1115,18 @@ function Ensure-RuntimeInstance {
 }
 
 function Prepare-Experiment {
-  $experimentPath = Join-PathMany $script:LiveWorkspacePath "hypothesis_$($script:GodExperiment)" "experiment_$($script:GodExperimentRun)"
-  $configPath = Join-PathMany $experimentPath "init" "init_config.json"
-  if (-not (Test-Path $configPath)) {
+  param([Nullable[bool]]$RuntimeRequired = $null)
+  $configPath = Get-ExperimentConfigPath
+  if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
     Stop-God "Experiment config not found: $configPath"
+  }
+  if ($null -eq $RuntimeRequired) {
+    $RuntimeRequired = Test-ExperimentRequiresRuntime
   }
 
   $sessionPrefix = Get-EnvValue "GOD_SESSION_PREFIX" "$($script:GodExperiment)_run_$($script:GodExperimentRun)"
   Write-GodLog "Preparing experiment: $($script:GodExperiment) (run $($script:GodExperimentRun))"
-  $config = Get-Content $configPath -Raw | ConvertFrom-Json
+  $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
   $agentRoot = (Resolve-Path $script:BackendRoot).Path
   $wsUrl = "ws://127.0.0.1:$($script:RuntimeAgentPort)"
   $requestedMapId = if ($script:InitialEnv.GOD_MAP_ID -ne $null) { Get-EnvValue "GOD_MAP_ID" "" } else { "" }
@@ -1114,7 +1159,7 @@ function Prepare-Experiment {
   }
 
   foreach ($agent in @(Get-ObjectPropertyValue -Object $config -Name "agents" -Default @())) {
-    if ($null -eq $agent) {
+    if (-not $RuntimeRequired -or (Get-ObjectPropertyValue $agent "agent_type" "") -cne "JiuwenClawAgent") {
       continue
     }
     if (-not $agent.PSObject.Properties["kwargs"] -or $null -eq $agent.kwargs) {
@@ -1240,7 +1285,7 @@ function Start-Frontend {
 }
 
 function Start-SetupServices {
-  Setup-Dependencies
+  Setup-Dependencies -RuntimeRequired $false
   Set-ProcessEnv "GOD_SETUP_MODE" "1"
   Ensure-EnvFile
   Remove-Item $script:StartRequestFile -Force -ErrorAction SilentlyContinue
@@ -1252,7 +1297,7 @@ function Start-SetupServices {
 
 function Receive-StartRequest {
   try {
-    $data = Get-Content $script:StartRequestFile -Raw | ConvertFrom-Json
+    $data = Get-Content -LiteralPath $script:StartRequestFile -Raw -Encoding UTF8 | ConvertFrom-Json
   } catch {
     Stop-God "Could not read setup start request"
   }
@@ -1349,10 +1394,13 @@ function New-LiveSession {
 function Start-All {
   Load-Env
   Require-CurrentExperimentConfig
-  Setup-Dependencies
   Ensure-EnvFile
-  Prepare-Experiment
-  Start-Runtime
+  $runtimeRequired = Test-ExperimentRequiresRuntime
+  Setup-Dependencies -RuntimeRequired $runtimeRequired
+  Prepare-Experiment -RuntimeRequired $runtimeRequired
+  if ($runtimeRequired) {
+    Start-Runtime
+  }
   Start-Backend
   Start-Frontend
   New-LiveSession
@@ -1373,7 +1421,7 @@ function Start-NewRun {
   Stop-All
   $runDir = Join-PathMany $script:LiveWorkspacePath "hypothesis_$($script:GodExperiment)" "experiment_$($script:GodExperimentRun)" "run"
   Write-GodLog "New run will clear: $runDir"
-  Remove-Item $runDir -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $runDir -Recurse -Force -ErrorAction SilentlyContinue
   Write-GodLog "Cleared previous run"
   Start-All
 }

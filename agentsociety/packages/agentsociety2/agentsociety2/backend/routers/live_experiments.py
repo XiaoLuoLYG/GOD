@@ -348,7 +348,10 @@ class LiveExperimentSession:
                 }
                 for agent in config.agents
             ]
-            agents = self.runner._create_agents(agent_args)
+            agents = self.runner._create_agents(
+                agent_args,
+                agent_backend=config.agent_backend,
+            )
 
             self.society = AgentSociety(
                 agents=agents,
@@ -556,7 +559,10 @@ class LiveExperimentSession:
             custom_root = _find_custom_root(self.run_dir)
             if custom_root is not None:
                 scan_and_register_custom_modules(custom_root)
-            new_agents = self.runner._create_agents(agent_args)
+            new_agents = self.runner._create_agents(
+                agent_args,
+                agent_backend=config.agent_backend,
+            )
 
             initial_locations: dict[str, str] = {}
             for module in config.env_modules:
