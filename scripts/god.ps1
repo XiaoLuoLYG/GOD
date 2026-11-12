@@ -947,6 +947,7 @@ function Invoke-NativeCommand {
   begin {
     $previousEap = $ErrorActionPreference
     $previousOutputEncoding = $OutputEncoding
+    $previousInputEncoding = $null
     $ErrorActionPreference = "Continue"
     $pipelineInput = New-Object System.Collections.Generic.List[object]
   }
@@ -960,7 +961,10 @@ function Invoke-NativeCommand {
       $hasInput = $pipelineInput.Count -gt 0
       $inputText = if ($hasInput) { ($pipelineInput | ForEach-Object { [string]$_ }) -join [Environment]::NewLine } else { $null }
       if ($hasInput) {
-        $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+        $utf8 = [System.Text.UTF8Encoding]::new($false)
+        $previousInputEncoding = [Console]::InputEncoding
+        [Console]::InputEncoding = $utf8
+        $OutputEncoding = $utf8
       }
       if ($LogPath) {
         if ($hasInput) {
@@ -978,6 +982,9 @@ function Invoke-NativeCommand {
     } finally {
       $ErrorActionPreference = $previousEap
       $OutputEncoding = $previousOutputEncoding
+      if ($null -ne $previousInputEncoding) {
+        [Console]::InputEncoding = $previousInputEncoding
+      }
     }
   }
 }
