@@ -180,8 +180,10 @@ function Update-ProcessPath {
   $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
   $userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
   $localBin = Join-Path $HOME ".local\bin"
-  $parts = @($currentPath, $machinePath, $userPath, $localBin) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-  $env:Path = ($parts -join [System.IO.Path]::PathSeparator)
+  $separator = [System.IO.Path]::PathSeparator
+  $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  $parts = @($currentPath, $machinePath, $userPath, $localBin) -split [regex]::Escape([string]$separator)
+  $env:Path = (($parts | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $seen.Add($_) }) -join $separator)
 }
 
 function Require-Winget {
