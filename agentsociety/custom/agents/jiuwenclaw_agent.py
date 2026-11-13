@@ -397,6 +397,7 @@ Initialization example:
             work_dir=work_dir,
             experiment_context=self._experiment_context,
             name=self.name,
+            enable_memory=self._enable_memory,
         )
         try:
             await self._brain.start(context)
@@ -426,13 +427,16 @@ Initialization example:
     ) -> str:
         if "ask" not in self._ask_brain.capabilities:
             raise RuntimeError(f"agent backend {self._ask_brain.name} does not support ask")
+        prompt = self._build_ask_prompt(message, readonly)
+        if "session" in self._ask_brain.capabilities:
+            prompt = self._with_resident_context(prompt, await self._observe_environment(include_inbox=True))
         answer = await self._ask_brain.ask(AskRequest(
             message=message,
             readonly=readonly,
             response_type=response_type,
             choices=choices,
             time=t,
-            prompt=self._build_ask_prompt(message, readonly),
+            prompt=prompt,
         ))
         self._last_response = answer
         self._recent_live_questions.append(
@@ -500,6 +504,10 @@ Initialization example:
             )
         return public_summary
 
+    @property
+    def uses_resident_session(self) -> bool:
+        return "session" in self._brain.capabilities
+
     def queue_intervention(self, instruction: str) -> str:
         self._pending_interventions.append(str(instruction))
         return (
@@ -508,8 +516,13 @@ Initialization example:
             "若识别为紧急公共事件，会先自动广播到小镇群组。"
         )
 
-    async def _observe_environment(self) -> Any:
+    async def _observe_environment(self, *, include_inbox: bool | None = None) -> Any:
+        if include_inbox is None:
+            include_inbox = self.uses_resident_session
         social_env = self._find_social_environment()
+        observe_with_inbox = getattr(social_env, "observe_agent_with_inbox", None)
+        if include_inbox and callable(observe_with_inbox):
+            return await observe_with_inbox(self.id)
         if social_env is not None and callable(getattr(social_env, "observe_agent", None)):
             try:
                 return await social_env.observe_agent(self.id)
@@ -702,6 +715,16 @@ Initialization example:
                 pending_interventions=pending_interventions,
                 reason="没有可用的已挂载技能。",
             )
+        prompt = self._build_skill_selection_prompt(
+            tick=tick,
+            t=t,
+            observation=observation,
+            catalog=catalog,
+            pending_interventions=pending_interventions,
+            broadcast_result=broadcast_result,
+        )
+        if self.uses_resident_session:
+            prompt = self._with_resident_context(prompt)
         request = SkillChoiceRequest(
             tick=tick,
             time=t,
@@ -711,14 +734,7 @@ Initialization example:
             broadcast_result=broadcast_result,
             catalog=list(catalog),
             mounted_skill_ids=list(mounted_skill_ids),
-            prompt=self._build_skill_selection_prompt(
-                tick=tick,
-                t=t,
-                observation=observation,
-                catalog=catalog,
-                pending_interventions=pending_interventions,
-                broadcast_result=broadcast_result,
-            ),
+            prompt=prompt,
         )
         try:
             if "choose_skill" not in self._brain.capabilities:
@@ -1656,6 +1672,39 @@ Initialization example:
         finally:
             if self._ask_brain is not self._brain:
                 await self._ask_brain.close()
+
+    def _with_resident_context(self, prompt: str, observation: Any = None) -> str:
+        context = []
+        if observation is not None:
+            context.append(f"当前环境及收件箱：\n{json.dumps(_json_safe(observation), ensure_ascii=False)}")
+            context.append(f"待处理实时干预：{json.dumps(self._pending_interventions, ensure_ascii=False)}")
+        if self._agent_work_dir is not None:
+            log = self._runtime_path(".runtime/logs/agent_state_snapshot.json")
+            if log is not None and log.is_file():
+                try:
+                    previous = json.loads(log.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    previous = {}
+                outcome = {
+                    key: previous[key] for key in ("last_skill_result", "last_environment_effects")
+                    if isinstance(previous, dict) and previous.get(key)
+                }
+            else:
+                outcome = {}
+            if outcome:
+                context.append(f"上一步技能与执行结果：\n{json.dumps(outcome, ensure_ascii=False)}")
+            if self._enable_memory:
+                memory = self._runtime_path("memory/skill_memory.jsonl")
+                if memory is not None and memory.is_file():
+                    with memory.open("rb") as handle:
+                        size = handle.seek(0, os.SEEK_END)
+                        handle.seek(max(0, size - 8192))
+                        if size > 8192:
+                            handle.readline()
+                        records = handle.read().decode("utf-8", errors="replace").splitlines()[-8:]
+                    if records:
+                        context.append("近期技能记忆：\n" + "\n".join(records))
+        return "\n\n".join([*context, prompt])
 
     def _build_ask_prompt(self, message: str, readonly: bool) -> str:
         readonly_text = (

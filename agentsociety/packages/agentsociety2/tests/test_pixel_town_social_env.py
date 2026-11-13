@@ -285,7 +285,8 @@ def test_pixel_town_load_replay_tail_infers_legacy_path_index(tmp_path: Path) ->
                     location_id TEXT,
                     movement_status TEXT,
                     target_location_id TEXT,
-                    path_json JSON
+                    path_json JSON,
+                    recent_messages JSON
                 )
                 """
             )
@@ -303,7 +304,7 @@ def test_pixel_town_load_replay_tail_infers_legacy_path_index(tmp_path: Path) ->
             conn.execute(
                 """
                 INSERT INTO pixel_town_social_agent_state
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     1,
@@ -313,13 +314,17 @@ def test_pixel_town_load_replay_tail_infers_legacy_path_index(tmp_path: Path) ->
                     "moving",
                     "ready",
                     "calm",
-                    "",
+                    "给阿莉的私信",
                     2,
                     0,
                     "park",
                     "moving",
                     "cafe",
                     path_json,
+                    json.dumps([
+                        {"type": "group", "content": "群消息"},
+                        {"type": "direct", "content": "给阿莉的私信"},
+                    ], ensure_ascii=False),
                 ),
             )
             conn.execute(
@@ -332,6 +337,11 @@ def test_pixel_town_load_replay_tail_infers_legacy_path_index(tmp_path: Path) ->
 
         result = await env.load_replay_tail(db_path, 0)
         assert result["restored"] is True
+        restored = await env.observe_agent_with_inbox(1)
+        assert restored["inbox_messages"] == [
+            {"type": "group", "content": "群消息"},
+            {"type": "direct", "content": "给阿莉的私信"},
+        ]
 
         await env.step(10, datetime(2026, 5, 9, 12, 0, 0))
         observed = await env.observe_agent(1)

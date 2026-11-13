@@ -1094,7 +1094,7 @@ create_session() {
     log "Priming live session (step 1)"
     curl -fsS -X POST "$(run_step_url)" \
       -H 'content-type: application/json' \
-      -d '{}' >/dev/null || die "Failed to run the first live step"
+      -d '{"initial_only":true}' >/dev/null || die "Failed to run the first live step"
   fi
 }
 

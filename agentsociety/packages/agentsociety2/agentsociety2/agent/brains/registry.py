@@ -144,12 +144,16 @@ def inject_experiment_backend(
 def _builtin_brains() -> dict[str, type[AgentBrain]]:
     global _BRAINS
     if _BRAINS is None:
+        from agentsociety2.agent.brains.codex import CodexBrain
         from agentsociety2.agent.brains.command import CommandBrain
         from agentsociety2.agent.brains.decision_api import DecisionAPIBrain, JevBrain, OpenAIDecisionsBrain
         from agentsociety2.agent.brains.jiuwenclaw import JiuwenClawBrain
         from agentsociety2.agent.brains.openai_compat import OpenAICompatBrain
 
-        backends = (JiuwenClawBrain, OpenAICompatBrain, CommandBrain, DecisionAPIBrain, JevBrain, OpenAIDecisionsBrain)
+        backends = (
+            JiuwenClawBrain, CodexBrain, OpenAICompatBrain, CommandBrain,
+            DecisionAPIBrain, JevBrain, OpenAIDecisionsBrain,
+        )
         _BRAINS = {backend.name: backend for backend in backends}
     return _BRAINS
 

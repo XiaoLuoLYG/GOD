@@ -102,7 +102,11 @@ The backend and control room should be `up`. JiuwenClaw services are needed when
 
 ### Choose an agent backend
 
-Set `agent_backend` in the current experiment's `init/init_config.json`. A resident can override it with `kwargs.brain`. GOD then falls back to the local `GOD_AGENT_BACKEND` setting and finally to `jiuwenclaw`. Existing `JiuwenClawAgent` records can use any backend through these settings.
+Run `./scripts/god.sh configure` (`.\scripts\god.cmd configure` on Windows). On the Setup Wizard's Model page, select Codex under **Default resident runtime**. The wizard checks your local sign-in. First-time users can install the CLI and run `codex login` in a terminal. Keep the GOD API settings for drafts and global summaries. Click **Save and Resume Current Experiment** or click **Save and Choose Experiment** to run a different one. [Install Codex CLI](https://learn.chatgpt.com/docs/codex/cli)
+
+Each resident has a Codex conversation for its incoming messages, observations, interventions, and targeted Ask questions. Codex stores the conversation history. GOD stores world state, skill memory, and replay, and sends skill outcomes back on the next turn. The `restart` command resumes the current run's conversations. The `new-run` command starts fresh conversations. A resident with memory disabled in the experiment uses a temporary conversation for each turn.
+
+Set `agent_backend` in an experiment's `init/init_config.json` to override the wizard's default. A resident can override the experiment with `kwargs.brain`. Existing `JiuwenClawAgent` records support both settings.
 
 ```json
 {
@@ -113,6 +117,7 @@ Set `agent_backend` in the current experiment's `init/init_config.json`. A resid
 | Backend | Local settings | Capabilities |
 | --- | --- | --- |
 | `jiuwenclaw` | Standard GOD model settings | Skill selection and Ask |
+| `codex` | Local Codex sign-in | A separate resident conversation for world messages, interventions, and targeted Ask |
 | `openai_compat` | `GOD_LLM_API_BASE`, `GOD_LLM_API_KEY`, `GOD_LLM_MODEL` | Skill selection and Ask |
 | `command` | `GOD_AGENT_COMMANDS`, a JSON object mapping profile names to argument arrays | Skill selection and Ask |
 | `jev` | `TYPESAFE_API_KEY` | Skill selection |

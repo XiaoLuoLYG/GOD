@@ -27,6 +27,7 @@ def _configure_tmp_god(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("GOD_ENV_FILE", str(tmp_path / ".env"))
     monkeypatch.setenv("LIVE_WORKSPACE_PATH", str(tmp_path / "quick_experiments"))
     for key in (
+        "GOD_AGENT_BACKEND",
         "GOD_LLM_API_KEY",
         "GOD_LLM_API_BASE",
         "GOD_LLM_MODEL",
@@ -221,6 +222,44 @@ def test_setup_status_exposes_setup_mode(monkeypatch, tmp_path):
     status = anyio.run(god_setup.setup_status)
 
     assert status["setup_mode"] is True
+
+
+def test_setup_saves_the_codex_runtime_without_exposing_credentials(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    (tmp_path / ".env").write_text("GOD_LLM_API_KEY=sk-test-secret\nGOD_LLM_MODEL=gpt-test\n", encoding="utf-8")
+
+    async def ready():
+        return "ready"
+
+    monkeypatch.setattr(god_setup, "codex_login_status", ready)
+    app = FastAPI()
+    app.include_router(god_setup.router)
+    client = TestClient(app)
+    assert client.get("/api/v1/god/setup/codex-status").json() == {"status": "ready"}
+    assert client.get("/api/v1/god/setup/status").json()["can_resume_current"] is False
+    workspace = tmp_path / "quick_experiments"
+    init_dir = workspace / "hypothesis_demo" / "experiment_1" / "init"
+    init_dir.mkdir(parents=True)
+    (init_dir / "init_config.json").write_text("{}", encoding="utf-8")
+    god_setup._write_current_experiment("demo", "1", workspace)
+    response = client.post("/api/v1/god/setup/model-config", json={"GOD_AGENT_BACKEND": "codex"})
+    assert response.status_code == 200
+    assert response.json()["codex_status"] == "ready"
+    assert response.json()["model_config"]["GOD_AGENT_BACKEND"]["value"] == "codex"
+    assert response.json()["can_resume_current"] is True
+    start_request = client.post("/api/v1/god/setup/start-request", json={})
+    assert start_request.status_code == 200
+    assert start_request.json()["hypothesis_id"] == "demo"
+    assert "sk-test-secret" not in response.text
+    assert "GOD_AGENT_BACKEND=codex\n" in (tmp_path / ".env").read_text()
+
+    async def missing():
+        return "missing"
+
+    monkeypatch.setattr(god_setup, "codex_login_status", missing)
+    before = (tmp_path / ".env").read_bytes()
+    assert client.post("/api/v1/god/setup/model-config", json={"GOD_AGENT_BACKEND": "codex"}).status_code == 400
+    assert (tmp_path / ".env").read_bytes() == before
 
 
 def test_setup_status_does_not_invent_default_llm_model(monkeypatch, tmp_path):

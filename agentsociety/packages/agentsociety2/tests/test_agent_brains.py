@@ -202,7 +202,7 @@ def test_jiuwenclaw_agent_type_remains_default_brain_alias(monkeypatch):
 
 def test_backend_failure_uses_existing_skill_fallback(monkeypatch):
     monkeypatch.delenv("GOD_AGENT_BACKEND", raising=False)
-    agent = _agent(brain={"type": "codex"})
+    agent = _agent(brain={"type": "unregistered-test-backend"})
 
     async def run_case():
         failed = await agent._select_next_skill(**_choice_kwargs())
@@ -215,7 +215,7 @@ def test_backend_failure_uses_existing_skill_fallback(monkeypatch):
     assert failed["fallback"] is True
     assert failed["selected_skill_id"] == "routine.daily"
     assert failed["args"] == {}
-    assert "unknown agent backend: codex" in failed["reason"]
+    assert "unknown agent backend: unregistered_test_backend" in failed["reason"]
     assert urgent_decision["selected_skill_id"] == "safety.respond"
     assert "九问" not in agent._last_response
 
@@ -507,6 +507,9 @@ def test_launcher_and_agents_use_the_same_backend_priority():
     agent = {"agent_id": 1, "agent_type": "JiuwenClawAgent", "kwargs": {}}
     assert requires_jiuwenclaw({"agents": [agent]}, {})
     assert not requires_jiuwenclaw({"agents": [agent]}, {"GOD_AGENT_BACKEND": "openai_compat"})
+    assert not requires_jiuwenclaw(
+        {"agents": [agent]}, {"GOD_AGENT_BACKEND": "codex", "GOD_AGENT_ASK_BACKEND": "jiuwenclaw"}
+    )
     assert not requires_jiuwenclaw({"agents": [agent], "agent_backend": "jev"}, {})
     assert requires_jiuwenclaw(
         {"agents": [agent], "agent_backend": {"type": "jev", "ask_backend": "jiuwenclaw"}}, {}
@@ -595,3 +598,79 @@ def test_command_backend_reads_request_and_returns_a_typed_decision(monkeypatch)
     assert decision["selected_skill_id"] == "social.reply"
     assert decision["args"] == {"tone": "warm"}
     assert decision.get("fallback") is not True
+
+
+def test_codex_routes_steps_and_ask_to_the_same_resident_session(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from agentsociety2.agent.brains import codex
+
+    calls = []
+    session_ids = [f"01a1d000-0000-7000-8000-{index:012d}" for index in range(1, 5)]
+    monkeypatch.setattr(codex, "find_codex", lambda: "/fake/codex")
+    monkeypatch.setenv("GOD_AGENT_ASK_BACKEND", "jiuwenclaw")
+
+    async def run_codex(command, prompt, **_):
+        calls.append((command, prompt))
+        session_id = command[-2] if "resume" in command else session_ids.pop(0)
+        content = (
+            json.dumps({"selected_skill_id": "memory.record", "args": {"content": "记录了蓝灯暗号"}})
+            if "选择本步骤唯一要执行的技能" in prompt else "记得蓝灯暗号"
+        )
+        events = [
+            {"type": "thread.started", "thread_id": session_id},
+            {"type": "item.completed", "item": {"type": "agent_message", "text": content}},
+            {"type": "turn.completed"},
+        ]
+        return 0, "\n".join(json.dumps(event) for event in events).encode()
+
+    monkeypatch.setattr(codex, "run_agent_command", run_codex)
+
+    class Town:
+        async def observe_agent_with_inbox(self, agent_id):
+            return {"location_id": "park", "inbox_messages": [{"content": f"居民{agent_id}的私信{i}"} for i in range(7)]}
+
+        async def send_group_message(self, **_):
+            raise AssertionError("ordinary intervention does not broadcast")
+
+    async def run_case():
+        env = SimpleNamespace(run_dir=tmp_path, env_modules=[Town()])
+        t = _choice_kwargs()["t"]
+        ada = _agent(brain="codex", common_skill_ids=["memory.record"])
+        await ada.init(env)
+        ada.queue_intervention("请记住蓝灯暗号")
+        await ada.step(60, t)
+        assert ada._last_skill_decision["decision_backend"] == "codex"
+        assert not ada._last_skill_decision.get("fallback")
+        assert "蓝灯暗号" in (ada._agent_work_dir / "memory/skill_memory.jsonl").read_text()
+        assert "居民7的私信0" in calls[0][1] and "居民7的私信6" in calls[0][1]
+        assert "请记住蓝灯暗号" in calls[0][1]
+        await ada.close()
+
+        restarted = _agent(brain="codex", common_skill_ids=["memory.record"])
+        await restarted.init(env)
+        assert "蓝灯暗号" in await restarted.answer_external_question("暗号是什么？", t=t)
+        assert calls[1][0][-3:] == ["--json", "01a1d000-0000-7000-8000-000000000001", "-"]
+        assert "resume" in calls[1][0]
+        assert "记录了蓝灯暗号" in calls[1][1] and "上一步技能" in calls[1][1]
+        assert "居民7的私信0" in calls[1][1]
+        await restarted.close()
+
+        other = _agent(id=8, brain="codex", common_skill_ids=["memory.record"])
+        await other.init(env)
+        await other.answer_external_question("你收到什么私信？", t=t)
+        assert "resume" not in calls[2][0]
+        assert "居民8的私信0" in calls[2][1] and "居民7的私信" not in calls[2][1]
+        assert "记录了蓝灯暗号" not in calls[2][1]
+        await other.close()
+
+        forgetful = _agent(brain="codex", enable_memory=False, common_skill_ids=["memory.record"])
+        await forgetful.init(env)
+        await forgetful.answer_external_question("你好", t=t)
+        await forgetful.answer_external_question("你好", t=t)
+        for command, prompt in calls[3:]:
+            assert "--ephemeral" in command and "resume" not in command
+            assert "近期技能记忆" not in prompt
+        await forgetful.close()
+
+    anyio.run(run_case)
