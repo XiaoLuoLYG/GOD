@@ -102,7 +102,11 @@ http://127.0.0.1:5174/pixel-replay/god_town/1
 
 ### 选择 Agent 后端
 
-在当前实验的 `init/init_config.json` 中设置 `agent_backend`。居民可以用 `kwargs.brain` 覆盖实验配置。两者都未设置时，GOD 先读取本机的 `GOD_AGENT_BACKEND`，再使用默认的 `jiuwenclaw`。已有的 `JiuwenClawAgent` 记录也可以这样切换后端。
+运行 `./scripts/god.sh configure`（Windows 用 `.\scripts\god.cmd configure`）。在 Setup Wizard 的「模型」页把「默认居民运行时」设为 Codex。向导会检查本机登录状态。首次使用时，先安装 CLI，再在终端运行 `codex login`。保留 GOD 的 API 配置，用于实验草案和全局摘要。接着点「保存并继续当前实验」，或点「保存并选择实验」启动另一个实验。[安装 Codex CLI](https://learn.chatgpt.com/docs/codex/cli)
+
+仿真推进时，居民收到的消息、环境变化和待处理的干预会发到该居民的 Codex 会话。点名 Ask 也会发到同一个会话。Codex 保存对话历史，GOD 继续保存世界状态、技能记忆和回放，并把上一轮技能执行结果带回会话。`restart` 会续接当前 run 的会话，`new-run` 会开始新的会话。对于实验中关闭记忆的居民，Codex 每次使用临时会话。
+
+实验可在 `init/init_config.json` 中用 `agent_backend` 覆盖向导默认值，单个居民还可以用 `kwargs.brain` 覆盖实验设置。已有的 `JiuwenClawAgent` 记录同样适用。
 
 ```json
 {
@@ -113,6 +117,7 @@ http://127.0.0.1:5174/pixel-replay/god_town/1
 | 后端 | 本机配置 | 能力 |
 | --- | --- | --- |
 | `jiuwenclaw` | GOD 的常规模型配置 | 技能选择和 Ask |
+| `codex` | 本机 Codex 登录 | 独立的居民会话，接收世界消息、干预和点名 Ask |
 | `openai_compat` | `GOD_LLM_API_BASE`、`GOD_LLM_API_KEY`、`GOD_LLM_MODEL` | 技能选择和 Ask |
 | `command` | `GOD_AGENT_COMMANDS`，用 JSON 对象把命令配置名映射到参数数组 | 技能选择和 Ask |
 | `jev` | `TYPESAFE_API_KEY` | 技能选择 |

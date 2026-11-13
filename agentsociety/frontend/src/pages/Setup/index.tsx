@@ -109,11 +109,13 @@ type SetupStatus = {
     workspace_path: string;
     env_file: string;
     model_config: Record<string, RedactedValue>;
+    codex_status?: CodexStatus | null;
     current_experiment?: {
         hypothesis_id?: string;
         experiment_id?: string;
         workspace_path?: string;
     } | null;
+    can_resume_current?: boolean;
     setup_mode?: boolean;
     default_experiment?: {
         key?: string;
@@ -179,6 +181,8 @@ type LaunchResult = {
     workspace_path: string;
 };
 
+type CodexStatus = 'ready' | 'logged_out' | 'missing' | 'unavailable';
+
 type ModelForm = {
     GOD_LLM_API_KEY?: string;
     GOD_LLM_API_BASE?: string;
@@ -189,6 +193,7 @@ type ModelForm = {
     GOD_BACKEND_HOST?: string;
     GOD_BACKEND_PORT?: string;
     GOD_FRONTEND_PORT?: string;
+    GOD_AGENT_BACKEND?: string;
 };
 
 type BasicsForm = {
@@ -410,6 +415,8 @@ export default function SetupPage() {
     const [draft, setDraft] = useState<DraftPayload | null>(null);
     const [loadingStatus, setLoadingStatus] = useState(true);
     const [savingModel, setSavingModel] = useState(false);
+    const [codexStatus, setCodexStatus] = useState<CodexStatus | null>(null);
+    const [checkingCodex, setCheckingCodex] = useState(false);
     const [generating, setGenerating] = useState(false);
     const [publishing, setPublishing] = useState(false);
     const [builtinModalOpen, setBuiltinModalOpen] = useState(false);
@@ -430,6 +437,10 @@ export default function SetupPage() {
     const requestedMapId = String(searchParams.get('map_id') || '').trim();
     const [agentForm] = Form.useForm<AgentFormValues>();
     const [modelForm] = Form.useForm<ModelForm>();
+    const selectedRuntime = Form.useWatch('GOD_AGENT_BACKEND', modelForm);
+    const hideConfiguredServiceSettings = selectedRuntime === 'codex'
+        && status?.model_config.GOD_LLM_API_KEY?.configured
+        && status.model_config.GOD_LLM_MODEL?.configured;
     const [basicsForm] = Form.useForm<BasicsForm>();
     const selectedMapId = String(
         draft?.init_config?.env_modules?.[0]?.kwargs?.map_id
@@ -512,6 +523,7 @@ export default function SetupPage() {
         try {
             const payload = await fetchJson<SetupStatus>('/api/v1/god/setup/status');
             setStatus(payload);
+            setCodexStatus(payload.codex_status || null);
             const storedBasics = basicsRef.current;
             const defaultMapId = localizedDefaultBasics.map_id || 'the_ville';
             const selectedMapId = payload.selected_map_id || defaultMapId;
@@ -535,6 +547,7 @@ export default function SetupPage() {
                 GOD_BACKEND_HOST: payload.model_config.GOD_BACKEND_HOST?.value || '127.0.0.1',
                 GOD_BACKEND_PORT: payload.model_config.GOD_BACKEND_PORT?.value || '8001',
                 GOD_FRONTEND_PORT: payload.model_config.GOD_FRONTEND_PORT?.value || '5174',
+                GOD_AGENT_BACKEND: payload.model_config.GOD_AGENT_BACKEND?.value || 'jiuwenclaw',
             });
             void loadLatestDraft(false);
             return payload;
@@ -573,16 +586,45 @@ export default function SetupPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentStep]);
 
-    const saveModelConfig = async () => {
+    const checkCodex = async () => {
+        setCheckingCodex(true);
+        try {
+            const result = await fetchJson<{ status: CodexStatus }>('/api/v1/god/setup/codex-status');
+            setCodexStatus(result.status);
+        } catch {
+            setCodexStatus('unavailable');
+        } finally {
+            setCheckingCodex(false);
+        }
+    };
+
+    const saveModelConfig = async (resumeCurrent = false) => {
         const values = await modelForm.validateFields();
         setSavingModel(true);
         try {
             const payload = await persistModelConfig(values);
             setStatus(payload);
+            setCodexStatus(payload.codex_status || null);
+            if (resumeCurrent) {
+                if (!payload.model_config.GOD_LLM_API_KEY?.configured) {
+                    messageApi.warning(copy('messages.apiKeyRequired'));
+                    return;
+                }
+                const result = await fetchJson<LaunchResult>('/api/v1/god/setup/start-request', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: '{}',
+                });
+                completeLaunch(result, true, 0);
+                return;
+            }
             messageApi.success(copy('messages.modelSaved'));
             setCurrentStep(1);
         } catch (error) {
-            messageApi.error(copy('messages.saveModelFailed', { error: errorText(error) }));
+            messageApi.error(copy(
+                resumeCurrent ? 'messages.resumeCurrentFailed' : 'messages.saveModelFailed',
+                { error: errorText(error) },
+            ));
         } finally {
             setSavingModel(false);
         }
@@ -787,29 +829,25 @@ export default function SetupPage() {
         }
         let cancelled = false;
         const pending = launchPending;
-        const checkFirstFrame = async () => {
-            const url = `/api/v1/replay/${encodeURIComponent(pending.hypothesis_id)}`
-                + `/${encodeURIComponent(pending.experiment_id)}/timeline`
+        const checkLiveSession = async () => {
+            const url = `/api/v1/live-experiments/${encodeURIComponent(pending.hypothesis_id)}`
+                + `/${encodeURIComponent(pending.experiment_id)}/status`
                 + `?workspace_path=${encodeURIComponent(pending.workspace_path)}`;
             try {
-                const response = await fetchCustom(url);
-                if (!response.ok) {
-                    return;
-                }
-                const timeline = await response.json() as unknown;
-                if (cancelled || !Array.isArray(timeline) || timeline.length === 0) {
+                const live = await fetchJson<{ step_count: number; status: string }>(url);
+                if (cancelled || live.step_count === 0 || live.status === 'stopped' || live.status === 'failed') {
                     return;
                 }
                 writePendingLaunch(null);
                 setLaunchPending(null);
                 navigate(replayPathForLaunch(pending));
             } catch {
-                // The backend is restarting, or the replay database does not exist yet.
+                // The launcher is restarting the backend or creating the live session.
             }
         };
-        void checkFirstFrame();
+        void checkLiveSession();
         const timer = window.setInterval(() => {
-            void checkFirstFrame();
+            void checkLiveSession();
         }, 2000);
         return () => {
             cancelled = true;
@@ -1175,76 +1213,111 @@ export default function SetupPage() {
             />
             {renderLaunchPendingAlert()}
             <Form form={modelForm} layout="vertical">
-                <Row gutter={16}>
-                    <Col xs={24} lg={8}>
-                        <Form.Item
-                            name="GOD_LLM_API_KEY"
-                            label={formLabel(copy('model.apiKey'), copy('model.apiKeyTooltip'))}
-                        >
-                            <Input.Password placeholder={status?.model_config.GOD_LLM_API_KEY?.configured ? copy('model.apiKeyConfiguredPlaceholder') : copy('model.apiKeyPlaceholder')} />
-                        </Form.Item>
-                    </Col>
-                    <Col xs={24} lg={8}>
-                        <Form.Item
-                            name="GOD_LLM_API_BASE"
-                            label={formLabel(copy('model.apiBase'), copy('model.apiBaseTooltip'))}
-                            rules={[{ required: true }]}
-                        >
-                            <Input />
-                        </Form.Item>
-                    </Col>
-                    <Col xs={24} lg={8}>
-                        <Form.Item
-                            name="GOD_LLM_MODEL"
-                            label={formLabel(copy('model.modelName'), copy('model.modelTooltip'))}
-                            rules={[{ required: true, message: copy('model.modelRequired') }]}
-                        >
-                            <Input placeholder={copy('model.modelPlaceholder')} />
-                        </Form.Item>
-                    </Col>
-                    <Col xs={24} lg={8}>
-                        <Form.Item
-                            name="GOD_EMBEDDING_API_KEY"
-                            label={formLabel(copy('model.embeddingKey'), copy('model.embeddingKeyTooltip'))}
-                        >
-                            <Input.Password placeholder={status?.model_config.GOD_EMBEDDING_API_KEY?.configured ? copy('model.embeddingConfiguredPlaceholder') : copy('model.embeddingPlaceholder')} />
-                        </Form.Item>
-                    </Col>
-                    <Col xs={24} lg={8}>
-                        <Form.Item
-                            name="GOD_EMBEDDING_API_BASE"
-                            label={formLabel(copy('model.embeddingBase'), copy('model.embeddingBaseTooltip'))}
-                        >
-                            <Input />
-                        </Form.Item>
-                    </Col>
-                    <Col xs={24} lg={8}>
-                        <Form.Item
-                            name="GOD_EMBEDDING_MODEL"
-                            label={formLabel(copy('model.embeddingModel'), copy('model.embeddingModelTooltip'))}
-                        >
-                            <Input />
-                        </Form.Item>
-                    </Col>
-                    <Col xs={24} lg={8}>
-                        <Form.Item name="GOD_BACKEND_HOST" label={formLabel(copy('model.backendHost'), copy('model.backendHostTooltip'))}>
-                            <Input />
-                        </Form.Item>
-                    </Col>
-                    <Col xs={12} lg={8}>
-                        <Form.Item name="GOD_BACKEND_PORT" label={formLabel(copy('model.backendPort'), copy('model.backendPortTooltip'))}>
-                            <Input />
-                        </Form.Item>
-                    </Col>
-                    <Col xs={12} lg={8}>
-                        <Form.Item name="GOD_FRONTEND_PORT" label={formLabel(copy('model.frontendPort'), copy('model.frontendPortTooltip'))}>
-                            <Input />
-                        </Form.Item>
-                    </Col>
-                </Row>
+                <Form.Item name="GOD_AGENT_BACKEND" label={copy('model.residentRuntime')} initialValue="jiuwenclaw">
+                    <Select
+                        onChange={(runtime) => { if (runtime === 'codex' && !codexStatus) void checkCodex(); }}
+                        options={[
+                            { value: 'jiuwenclaw', label: copy('model.jiuwenRuntime') },
+                            { value: 'codex', label: 'Codex' },
+                            { value: 'openai_compat', label: copy('model.apiRuntime') },
+                            ...(selectedRuntime && !['jiuwenclaw', 'codex', 'openai_compat'].includes(selectedRuntime)
+                                ? [{ value: selectedRuntime, label: copy('model.advancedRuntime', { name: selectedRuntime }) }]
+                                : []),
+                        ]}
+                    />
+                </Form.Item>
+                {selectedRuntime === 'codex' && (
+                    <Alert
+                        showIcon
+                        type={codexStatus === 'ready' ? 'success' : codexStatus ? 'warning' : 'info'}
+                        message={copy(checkingCodex ? 'model.codexChecking' : `model.codexStatus.${codexStatus || 'unchecked'}`)}
+                        description={copy('model.codexSessionDescription')}
+                        action={<Button onClick={() => void checkCodex()} loading={checkingCodex}>{copy('model.checkCodex')}</Button>}
+                        style={{ marginBottom: 18 }}
+                    />
+                )}
+                <details
+                    key={hideConfiguredServiceSettings ? 'configured-codex' : 'model-settings'}
+                    open={!hideConfiguredServiceSettings}
+                    style={{ marginBottom: 16 }}
+                >
+                    <summary style={{ cursor: 'pointer' }}>{copy('model.godServiceSettings')}</summary>
+                    <Row gutter={16} style={{ marginTop: 12 }}>
+                        <Col xs={24} lg={8}>
+                            <Form.Item
+                                name="GOD_LLM_API_KEY"
+                                label={formLabel(copy('model.apiKey'), copy('model.apiKeyTooltip'))}
+                            >
+                                <Input.Password placeholder={status?.model_config.GOD_LLM_API_KEY?.configured ? copy('model.apiKeyConfiguredPlaceholder') : copy('model.apiKeyPlaceholder')} />
+                            </Form.Item>
+                        </Col>
+                        <Col xs={24} lg={8}>
+                            <Form.Item
+                                name="GOD_LLM_API_BASE"
+                                label={formLabel(copy('model.apiBase'), copy('model.apiBaseTooltip'))}
+                                rules={[{ required: true }]}
+                            >
+                                <Input />
+                            </Form.Item>
+                        </Col>
+                        <Col xs={24} lg={8}>
+                            <Form.Item
+                                name="GOD_LLM_MODEL"
+                                label={formLabel(copy('model.modelName'), copy('model.modelTooltip'))}
+                                rules={[{ required: true, message: copy('model.modelRequired') }]}
+                            >
+                                <Input placeholder={copy('model.modelPlaceholder')} />
+                            </Form.Item>
+                        </Col>
+                        <Col xs={24} lg={8}>
+                            <Form.Item
+                                name="GOD_EMBEDDING_API_KEY"
+                                label={formLabel(copy('model.embeddingKey'), copy('model.embeddingKeyTooltip'))}
+                            >
+                                <Input.Password placeholder={status?.model_config.GOD_EMBEDDING_API_KEY?.configured ? copy('model.embeddingConfiguredPlaceholder') : copy('model.embeddingPlaceholder')} />
+                            </Form.Item>
+                        </Col>
+                        <Col xs={24} lg={8}>
+                            <Form.Item
+                                name="GOD_EMBEDDING_API_BASE"
+                                label={formLabel(copy('model.embeddingBase'), copy('model.embeddingBaseTooltip'))}
+                            >
+                                <Input />
+                            </Form.Item>
+                        </Col>
+                        <Col xs={24} lg={8}>
+                            <Form.Item
+                                name="GOD_EMBEDDING_MODEL"
+                                label={formLabel(copy('model.embeddingModel'), copy('model.embeddingModelTooltip'))}
+                            >
+                                <Input />
+                            </Form.Item>
+                        </Col>
+                        <Col xs={24} lg={8}>
+                            <Form.Item name="GOD_BACKEND_HOST" label={formLabel(copy('model.backendHost'), copy('model.backendHostTooltip'))}>
+                                <Input />
+                            </Form.Item>
+                        </Col>
+                        <Col xs={12} lg={8}>
+                            <Form.Item name="GOD_BACKEND_PORT" label={formLabel(copy('model.backendPort'), copy('model.backendPortTooltip'))}>
+                                <Input />
+                            </Form.Item>
+                        </Col>
+                        <Col xs={12} lg={8}>
+                            <Form.Item name="GOD_FRONTEND_PORT" label={formLabel(copy('model.frontendPort'), copy('model.frontendPortTooltip'))}>
+                                <Input />
+                            </Form.Item>
+                        </Col>
+                    </Row>
+                </details>
             </Form>
             <Space wrap>
-                <Button icon={<SaveOutlined />} loading={savingModel} onClick={saveModelConfig}>
+                {status?.setup_mode && status.can_resume_current && (
+                    <Button type="primary" loading={savingModel} disabled={!!launchPending} onClick={() => void saveModelConfig(true)}>
+                        {copy('model.resumeCurrent')}
+                    </Button>
+                )}
+                <Button icon={<SaveOutlined />} loading={savingModel} disabled={!!launchPending} onClick={() => void saveModelConfig()}>
                     {copy('model.save')}
                 </Button>
                 {status && (

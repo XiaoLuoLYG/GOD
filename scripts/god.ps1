@@ -1384,7 +1384,7 @@ function New-LiveSession {
   if ((Get-EnvValue "GOD_PRIME_FIRST_STEP" "1") -ne "0" -and $stepCount -eq 0) {
     Write-GodLog "Priming live session (step 1)"
     try {
-      Invoke-RestMethod -Method Post -Uri (Get-RunStepUrl) -ContentType "application/json" -Body "{}" | Out-Null
+      Invoke-RestMethod -Method Post -Uri (Get-RunStepUrl) -ContentType "application/json" -Body '{"initial_only":true}' | Out-Null
     } catch {
       Stop-God "Failed to run the first live step"
     }
