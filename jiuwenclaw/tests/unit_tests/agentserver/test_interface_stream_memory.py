@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -430,3 +431,46 @@ async def test_producer_close_cancellation_does_not_leave_consumer_waiting(
 
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(consume(), timeout=1.0)
+
+
+
+@pytest.mark.asyncio
+async def test_first_resident_turns_share_the_sdk_memory_index(monkeypatch, tmp_path):
+    from openjiuwen.core.memory.lite import manager as sdk_memory
+
+    from jiuwenswarm.server.runtime.agent_adapter import interface_deep
+
+    initialized = []
+    started = asyncio.Event()
+    finish = asyncio.Event()
+
+    async def initialize(manager):
+        initialized.append(manager)
+        started.set()
+        await finish.wait()
+
+    monkeypatch.setattr(sdk_memory, "INDEX_CACHE", {})
+    monkeypatch.setattr(sdk_memory.MemoryIndexManager, "initialize", initialize)
+    monkeypatch.setattr(interface_deep, "get_config", lambda: {
+        "embed": {
+            "embed_api_key": "fixture",
+            "embed_base_url": "http://127.0.0.1:1/v1",
+            "embed_model": "fixture",
+        },
+    })
+    monkeypatch.setattr(interface_deep, "is_proactive_memory", lambda *_args: True)
+    adapter = object.__new__(interface_deep.JiuWenSwarmDeepAdapter)
+    workspace = interface_deep.Workspace(root_path=str(tmp_path), language="en")
+    ctx = SimpleNamespace(agent=SimpleNamespace(card=SimpleNamespace(id="jiuwenswarm")), inputs=None)
+    rails = [adapter._build_memory_rail("agent") for _ in range(22)]
+    for rail in rails:
+        rail.set_workspace(workspace)
+
+    tasks = [asyncio.create_task(rail.before_invoke(ctx)) for rail in rails]
+    await asyncio.wait_for(started.wait(), timeout=2)
+    finish.set()
+    await asyncio.gather(*tasks)
+
+    assert len(initialized) == 1
+    assert all(rail._manager_initialized for rail in rails)
+    await sdk_memory.aclose_memory_manager_cache()

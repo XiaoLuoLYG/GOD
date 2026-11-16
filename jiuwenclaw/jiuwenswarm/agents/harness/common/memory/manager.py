@@ -11,7 +11,6 @@ import asyncio
 import datetime
 from typing import List, Optional, Dict, Any, Set
 from dataclasses import dataclass
-from weakref import WeakValueDictionary
 
 from .types import (
     MemorySearchResult, MemoryFileEntry, MemoryChunk, MemorySource
@@ -33,7 +32,6 @@ EMBEDDING_CACHE_TABLE = "embedding_cache"
 SESSION_DIRTY_DEBOUNCE_MS = 5000
 
 INDEX_CACHE: Dict[str, 'MemoryIndexManager'] = {}
-_INDEX_INIT_LOCKS: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
 
 @dataclass
@@ -112,24 +110,21 @@ class MemoryIndexManager:
         """Get or create memory index manager."""
         cache_key = f"{agent_id}:{workspace_dir}"
 
-        # Concurrent first turns share the workspace's SQLite index.
-        lock = _INDEX_INIT_LOCKS.setdefault(workspace_dir, asyncio.Lock())
-        async with lock:
-            manager = INDEX_CACHE.get(cache_key)
-            if manager is not None and not manager.closed:
+        if cache_key in INDEX_CACHE:
+            manager = INDEX_CACHE[cache_key]
+            if not manager.closed:
                 return manager
 
-            manager = cls(agent_id, workspace_dir, settings or MemorySettings())
-            try:
-                await manager._initialize()
-                INDEX_CACHE[cache_key] = manager
-                return manager
-            except Exception as e:
-                logger.error(f"Failed to initialize memory manager: {e}")
-                return None
-            finally:
-                if INDEX_CACHE.get(cache_key) is not manager:
-                    await manager.close()
+        settings = settings or MemorySettings()
+        manager = cls(agent_id, workspace_dir, settings)
+
+        try:
+            await manager._initialize()
+            INDEX_CACHE[cache_key] = manager
+            return manager
+        except Exception as e:
+            logger.error(f"Failed to initialize memory manager: {e}")
+            return None
 
     async def _initialize(self) -> None:
         """Initialize the memory manager."""

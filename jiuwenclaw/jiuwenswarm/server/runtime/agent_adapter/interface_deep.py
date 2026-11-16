@@ -28,6 +28,7 @@ from pathlib import Path
 from shutil import copytree, ignore_patterns, which
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, List, Optional, Tuple
+from weakref import WeakValueDictionary
 
 if TYPE_CHECKING:
     from jiuwenswarm.common.model_selection import ModelSelection
@@ -72,6 +73,7 @@ from openjiuwen.core.single_agent import (
     create_agent_session,
 )
 from openjiuwen.core.single_agent.interrupt.state import INTERRUPTION_KEY
+from openjiuwen.core.single_agent.rail.base import AgentCallbackContext
 from openjiuwen.core.sys_operation import (
     SysOperation,
     SysOperationCard,
@@ -1716,6 +1718,22 @@ def _build_context_processor_rail(config: dict[str, Any]) -> ContextProcessorRai
     except Exception as exc:
         logger.warning("[JiuWenSwarmDeepAdapter] ContextProcessorRail create failed: %s", exc)
         return None
+
+
+_MEMORY_INIT_LOCKS: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
+
+
+def _memory_init_lock(workspace: Workspace | None) -> asyncio.Lock:
+    memory_root = workspace.get_node_path("memory") if workspace else None
+    key = os.path.normcase(os.path.abspath(str(memory_root or ".")))
+    return _MEMORY_INIT_LOCKS.setdefault(key, asyncio.Lock())
+
+
+class _WorkspaceMemoryRail(MemoryRail):
+    async def before_invoke(self, ctx: AgentCallbackContext) -> None:
+        # The SDK caches the manager after initialization, so cold turns must take turns opening the index.
+        async with _memory_init_lock(self.workspace):
+            await super().before_invoke(ctx)
 
 
 async def ensure_persistent_checkpointer() -> None:
@@ -10274,12 +10292,13 @@ class JiuWenSwarmDeepAdapter:
         workspace = self._get_memory_workspace()
         agent_id = getattr(getattr(self._instance, "card", None), "id", None) or "default"
         try:
-            return await init_memory_manager_async(
-                workspace=workspace,
-                agent_id=agent_id,
-                embedding_config=embedding_config,
-                sys_operation=self._sys_operation,
-            )
+            async with _memory_init_lock(workspace):
+                return await init_memory_manager_async(
+                    workspace=workspace,
+                    agent_id=agent_id,
+                    embedding_config=embedding_config,
+                    sys_operation=self._sys_operation,
+                )
         except Exception as e:
             logger.warning("[JiuWenSwarmDeepAdapter] init memory manager failed: %s", e)
             return None
@@ -10305,7 +10324,7 @@ class JiuWenSwarmDeepAdapter:
                     "[JiuWenSwarmDeepAdapter] MemoryRail create failed: No available embedding config"
                 )
             self._is_proactive_memory = is_proactive_memory(mode, config)
-            memory_rail = MemoryRail(
+            memory_rail = _WorkspaceMemoryRail(
                 embedding_config=EmbeddingConfig(
                     model_name=embed_config.get("embed_model"),
                     base_url=embed_config.get("embed_base_url"),
