@@ -131,6 +131,21 @@ jobs:
             packages/agentsociety2/tests/test_map_packages.py \
             packages/agentsociety2/tests/test_pixel_town_social_env.py
 
+  launcher-ports:
+    name: Launcher ports (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v7
+      - run: python scripts/test_god_launcher.py
+
   frontend-build:
     name: Frontend build
     runs-on: ubuntu-latest
