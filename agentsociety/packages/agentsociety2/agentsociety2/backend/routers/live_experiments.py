@@ -948,7 +948,9 @@ class LiveExperimentSession:
         patterns = [
             r"(?:集中到|集合到|集结到|移动到|前往|去到|去)\s*(?P<location>[^，。,；;！!\n]+)",
             r"(?:在|于|到)\s*(?P<location>[^，。,；;！!\n]+?)\s*(?:集合|集结|集中|待命)",
-            r"\b(?:gather|meet|move)\s+(?:around|at|to|in)\s+(?:the\s+)?(?P<location>[A-Za-z0-9_-]+)",
+            r"\b(?:gather|meet|move)\s+(?:around|at|to|in)\s+(?:the\s+)?"
+            r"(?P<location>[A-Za-z0-9_-]+(?: [A-Za-z0-9_-]+)*?)"
+            r"(?=\s+(?:and|then|before|after|while)\b|[,.!?;:，。！？；：]|$)",
         ]
         for pattern in patterns:
             match = re.search(pattern, text, flags=re.IGNORECASE)
@@ -980,7 +982,9 @@ class LiveExperimentSession:
             return ""
 
         for env_module in env_modules:
-            publish_event = getattr(env_module, "publish_event", None)
+            publish_event = getattr(env_module, "publish_operator_event", None)
+            if not callable(publish_event):
+                publish_event = getattr(env_module, "publish_event", None)
             if not callable(publish_event):
                 continue
 

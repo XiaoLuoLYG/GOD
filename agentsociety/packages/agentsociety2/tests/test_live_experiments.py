@@ -273,6 +273,16 @@ async def _live_intervene_directly_moves_agents_for_english_gather_instruction(t
     assert "Alice (agent_id=1): moving -> park, path_length=4" in result
     assert not any("\u4e00" <= char <= "\u9fff" for char in result)
 
+    env.calls.clear()
+    result = await session._intervene_with_target(
+        society,
+        "Please gather at Hobbs Cafe.",
+        AskTarget(type="agent", agent_id=1),
+        response_language="en",
+    )
+    assert env.calls == [(1, "Hobbs Cafe")]
+    assert "Started environment pathfinding to: Hobbs Cafe" in result
+
 
 async def _system_intervene_hides_non_english_model_result_in_english_ui(tmp_path):
     prompts: list[str] = []
