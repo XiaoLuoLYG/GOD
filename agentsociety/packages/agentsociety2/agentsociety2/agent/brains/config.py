@@ -89,6 +89,8 @@ def _parse_brain_value(value: Any) -> tuple[str, dict[str, Any]] | None:
 def resolve_ask_brain_spec(
     decision: ResolvedBrain, environ: Mapping[str, str] | None = None
 ) -> ResolvedBrain | None:
+    if decision.name == "codex":
+        return None
     env = os.environ if environ is None else environ
     for source, value in (
         (decision.source, decision.overrides.get("ask_backend")),

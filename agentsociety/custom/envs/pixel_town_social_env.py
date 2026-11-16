@@ -397,6 +397,12 @@ supports direct/group messages between agents.
     @tool(readonly=True, kind="observe")
     async def observe_agent(self, agent_id: int) -> dict[str, Any]:
         """Observe one agent's current state and unread messages."""
+        return await self._observe_agent(agent_id, include_inbox=False)
+
+    async def observe_agent_with_inbox(self, agent_id: int) -> dict[str, Any]:
+        return await self._observe_agent(agent_id, include_inbox=True)
+
+    async def _observe_agent(self, agent_id: int, *, include_inbox: bool) -> dict[str, Any]:
         async with self._lock:
             snapshot = self._snapshot_agent(agent_id)
             snapshot["known_locations"] = [
@@ -407,6 +413,8 @@ supports direct/group messages between agents.
                 self._public_interaction(interaction)
                 for interaction in self._interactions_by_id.values()
             ]
+            if include_inbox:
+                snapshot["inbox_messages"] = list(self._mailboxes.get(agent_id, []))
             return snapshot
 
     @tool(readonly=True)
@@ -813,6 +821,7 @@ supports direct/group messages between agents.
                         "movement_segment_json",
                         "movement_path_index",
                         "movement_path_length",
+                        "recent_messages",
                     )
                     if column in columns
                 ]
@@ -906,19 +915,20 @@ supports direct/group messages between agents.
                 self._actions[agent_id] = str(row["action"] or "waiting")
                 self._statuses[agent_id] = str(row["status"] or "ready")
                 self._emotions[agent_id] = str(row["emotion"] or "neutral")
+                try:
+                    recent = json.loads(row["recent_messages"] or "[]") if "recent_messages" in columns else []
+                except (ValueError, TypeError):
+                    recent = []
                 last_message = str(row["last_message"] or "")
-                self._mailboxes[agent_id] = (
-                    [
-                        self._build_message(
-                            "restored",
-                            0,
-                            last_message,
-                            group_id=1,
-                        )
-                    ]
-                    if last_message
-                    else []
-                )
+                if isinstance(recent, list) and recent and all(
+                    isinstance(message, dict) and isinstance(message.get("content"), str)
+                    for message in recent
+                ):
+                    self._mailboxes[agent_id] = recent
+                elif last_message:
+                    self._mailboxes[agent_id] = [self._build_message("restored", 0, last_message, group_id=1)]
+                else:
+                    self._mailboxes[agent_id] = []
 
             if env_row is not None:
                 self._total_messages_sent = int(env_row["total_messages_sent"] or 0)

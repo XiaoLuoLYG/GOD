@@ -21,6 +21,7 @@ class BrainContext:
     work_dir: str | None
     experiment_context: Any
     name: str | None = None
+    enable_memory: bool = True
 
 
 @dataclass

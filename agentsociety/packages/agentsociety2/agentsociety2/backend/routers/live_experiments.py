@@ -61,6 +61,7 @@ class LiveSessionRequest(BaseModel):
 
 class RunStepRequest(BaseModel):
     tick: Optional[int] = Field(None, gt=0)
+    initial_only: bool = False
 
 
 class AutoRequest(BaseModel):
@@ -487,8 +488,12 @@ class LiveExperimentSession:
             )
         return society
 
-    async def run_step(self, tick: Optional[int] = None) -> LiveExperimentStatus:
+    async def run_step(
+        self, tick: Optional[int] = None, *, initial_only: bool = False
+    ) -> LiveExperimentStatus:
         async with self._lock:
+            if initial_only and self._ensure_ready().step_count:
+                return self.to_status()
             society = self._ensure_waiting()
             step_tick = tick or self.default_tick
             self.status = "running_step"
@@ -791,14 +796,19 @@ class LiveExperimentSession:
                 detail="No agents matched intervene target",
             )
 
+        direct_move_agents = [
+            agent for agent in agents if not getattr(agent, "uses_resident_session", False)
+        ]
         moved = await self._apply_targeted_movement_intervention(
             society,
             instruction,
-            agents,
+            direct_move_agents,
             response_language,
         )
         if moved:
-            return moved
+            agents = [agent for agent in agents if getattr(agent, "uses_resident_session", False)]
+            if not agents:
+                return moved
 
         results: list[str] = []
         for agent in agents:
@@ -818,6 +828,8 @@ class LiveExperimentSession:
                     f"{'intervention delivered.' if response_language == 'en' else answer}"
                 )
 
+        if moved:
+            return moved + "\n" + "\n".join(results)
         if response_language == "en":
             return (
                 f"Intervention accepted and delivered to "
@@ -1398,7 +1410,8 @@ async def run_live_step(
         hypothesis_id=hypothesis_id,
         experiment_id=experiment_id,
     )
-    return await session.run_step(request.tick if request else None)
+    options = request or RunStepRequest()
+    return await session.run_step(options.tick, initial_only=options.initial_only)
 
 
 @router.post(

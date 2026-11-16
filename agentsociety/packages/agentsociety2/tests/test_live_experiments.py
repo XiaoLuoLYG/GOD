@@ -61,6 +61,20 @@ class FakeMoveEnv:
         }
 
 
+def test_session_resident_receives_the_whole_movement_instruction(tmp_path):
+    agent = FakeInterventionAgent(1, "Alice")
+    agent.uses_resident_session = True
+    env = FakeMoveEnv()
+    society = SimpleNamespace(_agents=[agent], _env_router=SimpleNamespace(env_modules=[env]))
+    session = LiveExperimentSession(workspace_path=tmp_path, hypothesis_id="demo", experiment_id="1")
+    instruction = "去公园集合，并告诉我到了以后看到什么。"
+
+    asyncio.run(session._intervene_with_target(society, instruction, AskTarget(type="agent", agent_id=1)))
+
+    assert agent.queued == [instruction]
+    assert env.calls == []
+
+
 class FakeReplayWriter:
     def __init__(self) -> None:
         self.rows: list[dict] = []
@@ -68,6 +82,32 @@ class FakeReplayWriter:
 
 async def fake_write_operator_command(writer, **kwargs):
     writer.rows.append(kwargs)
+
+
+def test_two_initial_frame_requests_advance_only_one_step(tmp_path):
+    async def run_case():
+        session = LiveExperimentSession(
+            workspace_path=tmp_path,
+            hypothesis_id="demo",
+            experiment_id="1",
+            default_tick=1,
+        )
+        session.status = "waiting"
+        session.society = SimpleNamespace(step_count=0, current_time=datetime(2026, 5, 31))
+
+        async def step(tick):
+            await asyncio.sleep(0)
+            session.society.step_count += 1
+
+        session.society.step = step
+        statuses = await asyncio.gather(
+            session.run_step(initial_only=True),
+            session.run_step(initial_only=True),
+        )
+        assert [status.step_count for status in statuses] == [1, 1]
+        assert (await session.run_step()).step_count == 2
+
+    asyncio.run(run_case())
 
 
 def test_targeted_live_ask_uses_external_question_api(tmp_path):

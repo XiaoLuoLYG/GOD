@@ -24,6 +24,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 from PIL import Image, UnidentifiedImageError
 
+from agentsociety2.agent.brains.codex import codex_login_status
+from agentsociety2.agent.brains.config import DEFAULT_BRAIN_NAME
 from agentsociety2.config import extract_json
 from agentsociety2.backend.services import agent_packs as agent_pack_service
 from agentsociety2.backend.services import experiment_registry
@@ -49,6 +51,7 @@ ENV_DEFAULTS = {
     "GOD_BACKEND_HOST": "127.0.0.1",
     "GOD_BACKEND_PORT": "8001",
     "GOD_FRONTEND_PORT": "5174",
+    "GOD_AGENT_BACKEND": DEFAULT_BRAIN_NAME,
 }
 
 DEFAULT_EXPERIMENT_KEY = experiment_registry.DEFAULT_EXPERIMENT_KEY
@@ -63,6 +66,7 @@ MODEL_KEYS = (
     "GOD_BACKEND_HOST",
     "GOD_BACKEND_PORT",
     "GOD_FRONTEND_PORT",
+    "GOD_AGENT_BACKEND",
 )
 
 SENSITIVE_KEYS = {"GOD_LLM_API_KEY", "GOD_EMBEDDING_API_KEY"}
@@ -166,6 +170,7 @@ class ModelConfigPayload(BaseModel):
     GOD_BACKEND_HOST: str | None = None
     GOD_BACKEND_PORT: str | None = None
     GOD_FRONTEND_PORT: str | None = None
+    GOD_AGENT_BACKEND: str | None = None
 
 
 class DraftBasics(BaseModel):
@@ -2063,8 +2068,10 @@ async def setup_status() -> dict[str, Any]:
         "maps": maps,
         "map_locations": _map_locations_for_status(selected_map_id),
         "model_config": {key: _redact_value(key, env.get(key)) for key in MODEL_KEYS},
+        "codex_status": await codex_login_status() if env.get("GOD_AGENT_BACKEND") == "codex" else None,
         "image_model_config": {key: _redact_value(key, image_env.get(key)) for key in IMAGE_MODEL_KEYS},
         "current_experiment": current,
+        "can_resume_current": has_current,
         "setup_mode": os.environ.get("GOD_SETUP_MODE") == "1",
         "default_experiments": default_experiments,
         "default_experiment": next(
@@ -2087,6 +2094,16 @@ async def latest_draft() -> dict[str, Any]:
     return payload
 
 
+@router.get("/codex-status")
+async def setup_codex_status() -> dict[str, str]:
+    return {"status": await codex_login_status()}
+
+
+async def _validate_agent_runtime(values: dict[str, str]) -> None:
+    if values.get("GOD_AGENT_BACKEND") == "codex" and await codex_login_status() != "ready":
+        raise HTTPException(status_code=400, detail="Codex CLI is not ready. Install or update it and run codex login.")
+
+
 @router.post("/model-config")
 async def save_model_config(payload: ModelConfigPayload) -> dict[str, Any]:
     values = {
@@ -2094,6 +2111,7 @@ async def save_model_config(payload: ModelConfigPayload) -> dict[str, Any]:
         for key, value in payload.model_dump().items()
         if value is not None and str(value).strip() != ""
     }
+    await _validate_agent_runtime(values)
     for key, default in ENV_DEFAULTS.items():
         if key in MODEL_KEYS and key not in values:
             fallback = _merged_env().get(key, default)
@@ -2300,6 +2318,7 @@ async def publish_experiment(request: PublishRequest) -> dict[str, Any]:
         if value is not None and str(value).strip() != ""
     }
     _validate_env_values(env_values)
+    await _validate_agent_runtime(env_values)
     draft_context = request.draft.get("experiment_context", {}) if isinstance(request.draft.get("experiment_context"), dict) else {}
     draft_env_modules = request.draft.get("init_config", {}).get("env_modules", []) if isinstance(request.draft.get("init_config"), dict) else []
     draft_env_kwargs: dict[str, Any] = {}

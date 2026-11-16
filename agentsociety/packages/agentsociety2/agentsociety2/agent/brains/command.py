@@ -49,32 +49,41 @@ class CommandBrain(AgentBrain):
         except (TypeError, ValueError):
             timeout = 60
         timeout = min(180, max(1, timeout)) if math.isfinite(timeout) else 60
-        env = {key: os.environ[key] for key in _ENVIRONMENT_KEYS if key in os.environ}
-        own_group = os.name == "posix"
         with TemporaryDirectory(prefix="god-agent-") as workspace:
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                cwd=workspace,
-                env=env,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-                start_new_session=own_group,
-            )
-            try:
-                output, _ = await asyncio.wait_for(process.communicate(prompt.encode("utf-8")), timeout)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
-                with suppress(ProcessLookupError):
-                    if own_group:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    elif process.returncode is None:
-                        process.kill()
-                await process.wait()
-                raise
-            if process.returncode:
-                raise RuntimeError(f"agent command exited with status {process.returncode}")
+            returncode, output = await run_agent_command(command, prompt, cwd=workspace, timeout=timeout)
+        if returncode:
+            raise RuntimeError(f"agent command exited with status {returncode}")
 
         answer = output.decode("utf-8").strip()
         if not answer:
             raise RuntimeError("agent command returned empty output")
         return answer
+
+
+async def run_agent_command(
+    command: list[str], prompt: str, *, cwd: str, timeout: float,
+) -> tuple[int, bytes]:
+    env = {key: os.environ[key] for key in _ENVIRONMENT_KEYS if key in os.environ}
+    own_group = os.name == "posix"
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=cwd,
+        env=env,
+        stdin=asyncio.subprocess.PIPE if prompt else asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+        start_new_session=own_group,
+    )
+    try:
+        output, _ = await asyncio.wait_for(
+            process.communicate(prompt.encode("utf-8") if prompt else None), timeout
+        )
+    except (asyncio.TimeoutError, asyncio.CancelledError):
+        with suppress(ProcessLookupError):
+            if own_group:
+                os.killpg(process.pid, signal.SIGKILL)
+            elif process.returncode is None:
+                process.kill()
+        await process.wait()
+        raise
+    return process.returncode, output

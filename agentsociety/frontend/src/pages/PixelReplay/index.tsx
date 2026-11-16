@@ -1316,6 +1316,7 @@ async function ensureInitialLiveReplayFrame(
     if (status.status === 'waiting' && status.step_count === 0) {
         return postJson<LiveStatus>(withLiveWorkspace('/run-step'), {
             tick: status.default_tick,
+            initial_only: true,
         });
     }
     return status;
