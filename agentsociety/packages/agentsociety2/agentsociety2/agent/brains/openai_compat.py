@@ -58,7 +58,7 @@ class OpenAICompatBrain(AgentBrain):
         if not settings.api_key or not settings.model:
             raise RuntimeError("openai_compat requires GOD_LLM_API_KEY and GOD_LLM_MODEL")
         body = await _post_json(
-            _chat_url(settings.api_base),
+            chat_completion_url(settings.api_base),
             settings.api_key,
             {
                 "model": settings.model,
@@ -66,7 +66,7 @@ class OpenAICompatBrain(AgentBrain):
             },
             settings.timeout_s,
         )
-        return _message_content(body), _compact_usage(body.get("usage"))
+        return chat_completion_content(body), _compact_usage(body.get("usage"))
 
 
 def resolve_llm_settings(config: dict[str, Any] | None = None) -> LLMSettings:
@@ -89,7 +89,7 @@ def resolve_llm_settings(config: dict[str, Any] | None = None) -> LLMSettings:
     return LLMSettings(api_key=api_key, api_base=api_base, model=model, timeout_s=timeout_s)
 
 
-def _chat_url(api_base: str) -> str:
+def chat_completion_url(api_base: str) -> str:
     base = api_base.rstrip("/")
     if base.endswith("/chat/completions"):
         return base
@@ -104,7 +104,7 @@ def _timeout_s(value: Any) -> float:
     return max(1.0, timeout_s) if math.isfinite(timeout_s) else _DEFAULT_TIMEOUT_S
 
 
-def _message_content(body: dict[str, Any]) -> str:
+def chat_completion_content(body: dict[str, Any]) -> str:
     choices = body.get("choices")
     if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
         raise RuntimeError("openai_compat response missing choices")

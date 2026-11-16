@@ -14,7 +14,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import aiohttp
 import json_repair
@@ -24,8 +24,11 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 from PIL import Image, UnidentifiedImageError
 
-from agentsociety2.agent.brains.codex import codex_login_status
+from agentsociety2.agent.brains.base import AskRequest, BrainContext
+from agentsociety2.agent.brains.codex import CodexBrain, codex_login_status
 from agentsociety2.agent.brains.config import DEFAULT_BRAIN_NAME
+from agentsociety2.agent.brains.http import BackendHTTPError, post_json
+from agentsociety2.agent.brains.openai_compat import chat_completion_content, chat_completion_url
 from agentsociety2.config import extract_json
 from agentsociety2.backend.services import agent_packs as agent_pack_service
 from agentsociety2.backend.services import experiment_registry
@@ -1756,8 +1759,7 @@ async def _call_openai_compatible(
     basics: DraftBasics,
     package: MapPackage,
 ) -> dict[str, Any]:
-    base = api_base.rstrip("/")
-    url = base if base.endswith("/chat/completions") else f"{base}/chat/completions"
+    url = chat_completion_url(api_base)
     known_locations = _known_location_ids_for_package(package)
     schema = {
         "experiment_context": {
@@ -2097,6 +2099,72 @@ async def latest_draft() -> dict[str, Any]:
 @router.get("/codex-status")
 async def setup_codex_status() -> dict[str, str]:
     return {"status": await codex_login_status()}
+
+
+def _model_origin(api_base: str) -> tuple[str, str, int] | None:
+    try:
+        url = urlsplit(api_base)
+        if url.scheme not in ("http", "https") or not url.hostname or url.username is not None or url.query or url.fragment:
+            return None
+        port = url.port if url.port is not None else (443 if url.scheme == "https" else 80)
+        return url.scheme, url.hostname, port
+    except ValueError:
+        return None
+
+
+_CONNECTION_PROMPT = "Reply with OK."
+
+
+async def _test_model_completion(payload: ModelConfigPayload, env: dict[str, str]) -> str:
+    saved_base = env.get("GOD_LLM_API_BASE") or ENV_DEFAULTS["GOD_LLM_API_BASE"]
+    api_base = (payload.GOD_LLM_API_BASE or "").strip() or saved_base
+    origin = _model_origin(api_base)
+    if origin is None:
+        return "invalid_base"
+    api_key = (payload.GOD_LLM_API_KEY or "").strip()
+    if not api_key and origin == _model_origin(saved_base):
+        api_key = env.get("GOD_LLM_API_KEY") or ""
+    if not api_key:
+        return "missing_key"
+    model = (payload.GOD_LLM_MODEL or "").strip() or env.get("GOD_LLM_MODEL")
+    if not model:
+        return "missing_model"
+    try:
+        result = await post_json(chat_completion_url(api_base), api_key, {
+            "model": model,
+            "messages": [{"role": "user", "content": _CONNECTION_PROMPT}],
+        }, timeout_s=15)
+        return "connected" if chat_completion_content(result).strip() else "failed"
+    except BackendHTTPError as exc:
+        return {401: "unauthorized", 403: "unauthorized", 404: "not_found", 429: "rate_limited"}.get(
+            exc.status, "failed",
+        )
+    except RuntimeError:
+        return "failed"
+
+
+async def _test_codex_connection() -> str:
+    status = await codex_login_status()
+    if status != "ready":
+        return status
+    brain = CodexBrain()
+    await brain.start(BrainContext(agent_id=0, work_dir=None, experiment_context=None, enable_memory=False))
+    try:
+        await asyncio.wait_for(brain.ask(AskRequest(message=_CONNECTION_PROMPT, prompt=_CONNECTION_PROMPT)), timeout=30)
+    except (OSError, RuntimeError, TimeoutError):
+        return "failed"
+    return "connected"
+
+
+@router.post("/test-connection")
+async def test_model_connection(payload: ModelConfigPayload) -> dict[str, str | None]:
+    env = _merged_env()
+    model_check = _test_model_completion(payload, env)
+    runtime = payload.GOD_AGENT_BACKEND or env.get("GOD_AGENT_BACKEND")
+    if runtime == "codex":
+        model, codex = await asyncio.gather(model_check, _test_codex_connection())
+        return {"model": model, "codex": codex}
+    return {"model": await model_check, "codex": None}
 
 
 async def _validate_agent_runtime(values: dict[str, str]) -> None:

@@ -752,6 +752,91 @@ def test_merged_env_prefers_saved_env_file_over_stale_process_env(monkeypatch, t
     assert env["GOD_LLM_MODEL"] == "qwen-plus"
 
 
+@pytest.mark.parametrize(("provider_status", "provider_body", "expected"), [
+    (200, {"choices": [{"message": {"content": "OK"}}]}, "connected"),
+    (200, {"answer": "unsupported response"}, "failed"),
+    (401, {"error": "fixture-secret"}, "unauthorized"),
+    (404, {"error": "fixture-secret"}, "not_found"),
+    (429, {"error": "fixture-secret"}, "rate_limited"),
+])
+def test_connection_uses_unsaved_model_and_keeps_saved_key(
+    monkeypatch, tmp_path, provider_status, provider_body, expected,
+):
+    from aiohttp import web
+
+    _configure_tmp_god(monkeypatch, tmp_path)
+
+    async def run():
+        async def completion(request):
+            assert request.headers["Authorization"] == "Bearer fixture-secret"
+            body = await request.json()
+            assert body["model"] == "unsaved-model"
+            assert body["messages"] == [{"role": "user", "content": "Reply with OK."}]
+            return web.json_response(provider_body, status=provider_status)
+
+        app = web.Application()
+        app.router.add_post("/v1/chat/completions", completion)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        try:
+            await web.TCPSite(runner, "127.0.0.1", 0).start()
+            port = runner.addresses[0][1]
+            saved = (
+                f"GOD_LLM_API_BASE=http://127.0.0.1:{port}/v1\n"
+                "GOD_LLM_API_KEY=fixture-secret\nGOD_LLM_MODEL=saved-model\n"
+            )
+            env_file = tmp_path / ".env"
+            env_file.write_text(saved, encoding="utf-8")
+            result = await god_setup.test_model_connection(ModelConfigPayload(
+                GOD_LLM_API_KEY=" ", GOD_LLM_MODEL="unsaved-model",
+                GOD_LLM_API_BASE=f"http://127.0.0.1:{port}/v1/chat/completions",
+            ))
+            assert result == {"model": expected, "codex": None}
+            assert env_file.read_text(encoding="utf-8") == saved
+        finally:
+            await runner.cleanup()
+
+    anyio.run(run)
+
+
+def test_connection_requires_a_new_key_for_a_different_origin(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    (tmp_path / ".env").write_text(
+        "GOD_LLM_API_BASE=https://saved.example/v1\nGOD_LLM_API_KEY=fixture-secret\n"
+        "GOD_LLM_MODEL=saved-model\n",
+        encoding="utf-8",
+    )
+    app = FastAPI()
+    app.include_router(god_setup.router)
+    response = TestClient(app).post(
+        "/api/v1/god/setup/test-connection",
+        json={"GOD_LLM_API_BASE": "https://new.example/v1"},
+    )
+    assert response.json() == {"model": "missing_key", "codex": None}
+
+
+def test_codex_connection_runs_a_temporary_turn(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+
+    async def ready():
+        return "ready"
+
+    async def start(_brain, context):
+        assert not context.enable_memory and context.work_dir is None
+
+    async def ask(_brain, request):
+        assert request.prompt == "Reply with OK."
+        return "OK"
+
+    monkeypatch.setattr(god_setup, "codex_login_status", ready)
+    monkeypatch.setattr("agentsociety2.agent.brains.codex.CodexBrain.start", start)
+    monkeypatch.setattr("agentsociety2.agent.brains.codex.CodexBrain.ask", ask)
+    assert anyio.run(god_setup.test_model_connection, ModelConfigPayload(
+        GOD_AGENT_BACKEND="codex",
+    )) == {"model": "missing_key", "codex": "connected"}
+    assert not (tmp_path / ".env").exists()
+
+
 def test_save_model_config_does_not_write_empty_model_default(monkeypatch, tmp_path):
     _configure_tmp_god(monkeypatch, tmp_path)
 
