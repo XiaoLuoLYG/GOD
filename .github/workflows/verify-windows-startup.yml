@@ -1,0 +1,39 @@
+name: Native Windows startup verification
+
+on:
+  push:
+    branches: [luoyige/god-first-run-windows-check]
+
+permissions:
+  contents: read
+
+jobs:
+  start:
+    name: Windows startup (${{ matrix.mode }})
+    runs-on: windows-2025
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [external, migration]
+    steps:
+      - run: git config --global core.longpaths true
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: false
+      - name: Exercise the Windows launcher with a local model
+        env:
+          UV_PYTHON: '3.11'
+          UV_NO_PROGRESS: '1'
+          LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+          DO_NOT_TRACK: '1'
+        run: python -u .github/windows-validation.py . '${{ matrix.mode }}'
