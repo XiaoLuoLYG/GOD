@@ -176,6 +176,24 @@ def test_export_experiment_pack_can_embed_map_and_agent_dependencies(tmp_path: P
     assert any(name.startswith("dependencies/agent_packs/") and name.endswith("/agent_pack.yaml") for name in names)
 
 
+def test_imported_experiment_pack_can_be_exported_again(tmp_path: Path) -> None:
+    source_root = tmp_path / "source"
+    target_root = tmp_path / "target"
+    first_zip = tmp_path / "first.zip"
+    second_zip = tmp_path / "second.zip"
+    experiment_packs.export_experiment_pack(_write_experiment(source_root), first_zip, agentsociety_root=source_root)
+    installed = experiment_packs.import_experiment_pack_zip(
+        first_zip,
+        workspace_root=target_root / "quick_experiments",
+        agentsociety_root=target_root,
+    )
+
+    experiment_packs.export_experiment_pack(installed.package_path, second_zip, agentsociety_root=target_root)
+
+    with ZipFile(second_zip) as archive:
+        assert "dependencies/agent_packs/demo-experiment_1-agents/agent_pack.yaml" in archive.namelist()
+
+
 def test_import_old_public_experiment_pack_warns_and_ignores_run_artifacts(tmp_path: Path) -> None:
     source = _write_experiment(tmp_path / "source")
     (source / "run.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")

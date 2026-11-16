@@ -166,7 +166,10 @@ def _stage_dependencies(package_path: Path, *, agentsociety_root: Path) -> None:
                 agents=[item for item in agents if isinstance(item, dict)],
                 initial_locations=initial_locations,
             )
-            shutil.copytree(pack.package_path, dependencies_root / "agent_packs" / pack.pack_id)
+            target = dependencies_root / "agent_packs" / pack.pack_id
+            if target.exists():
+                shutil.rmtree(target)
+            shutil.copytree(pack.package_path, target)
 
 
 def _install_dependencies(package_path: Path, *, agentsociety_root: Path) -> None:

@@ -21,6 +21,8 @@ from zipfile import BadZipFile, ZIP_DEFLATED, ZipFile
 
 DEFAULT_RELEASE_TAG = "public-site-packs"
 MAX_RELEASE_ASSET_BYTES = 2 * 1024 * 1024 * 1024
+MAP_PACK_SUFFIX = "-map-pack.zip"
+MAP_MANIFESTS = ("map.yaml", "map.yml", "town.yaml", "town.yml", "map.json", "town.json")
 RELEASE_URL_RE = re.compile(
     r"https://github\.com/(?P<repo>[^/]+/[^/]+)/releases/download/"
     r"(?P<tag>[^/]+)/(?P<asset>[^\"'()<>\s]+?\.zip)"
@@ -44,7 +46,7 @@ def main() -> int:
     parser.add_argument(
         "--staging-dir",
         type=Path,
-        help="Copy or rebuild clean release ZIPs here before validation/upload.",
+        help="Stage clean ZIPs here. Rebuild preview-only MapPacks from the matching ExperimentPack's native map.",
     )
     parser.add_argument(
         "--allow-missing",
@@ -153,6 +155,10 @@ class AssetValidationError(ValueError):
     pass
 
 
+class NativeMapManifestMissing(AssetValidationError):
+    pass
+
+
 def validate_zip_asset(path: Path) -> None:
     size = path.stat().st_size
     if size > MAX_RELEASE_ASSET_BYTES:
@@ -171,22 +177,68 @@ def validate_zip_asset(path: Path) -> None:
                     raise AssetValidationError(f"{path} contains nested download artifact: {name}")
                 if any(part.startswith(".") for part in parts):
                     raise AssetValidationError(f"{path} contains hidden/system ZIP member: {name}")
+            if path.name.endswith(MAP_PACK_SUFFIX) and not has_native_map_manifest(archive):
+                raise NativeMapManifestMissing(f"{path} has no native MapPack manifest")
     except BadZipFile as exc:
         raise AssetValidationError(f"{path} is not a readable ZIP file") from exc
+
+
+def has_native_map_manifest(archive: ZipFile, prefix: str = "") -> bool:
+    for name in MAP_MANIFESTS:
+        try:
+            with archive.open(prefix + name) as manifest:
+                if not name.endswith(".json"):
+                    return True
+                value = json.load(manifest)
+                return isinstance(value, dict) and bool(value.get("tiled_map_path"))
+        except KeyError:
+            continue
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return False
+    return False
 
 
 def stage_zip_asset(*, source_zip: Path, asset_root: Path, target_dir: Path) -> Path:
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / source_zip.name
+    if target.resolve() == source_zip.resolve():
+        raise SystemExit("Staging directory must differ from the source ZIP's directory")
     try:
         validate_zip_asset(source_zip)
     except AssetValidationError as exc:
-        if "nested download artifact" not in str(exc):
+        nested_download = "nested download artifact" in str(exc)
+        if source_zip.name.endswith(MAP_PACK_SUFFIX) and (nested_download or isinstance(exc, NativeMapManifestMissing)):
+            rebuild_native_map_zip(source_zip=source_zip, asset_root=asset_root, target=target)
+        elif nested_download:
+            rebuild_zip_without_downloads(source_zip=source_zip, asset_root=asset_root, target=target)
+        else:
             raise SystemExit(str(exc)) from exc
-        rebuild_zip_without_downloads(source_zip=source_zip, asset_root=asset_root, target=target)
     else:
         shutil.copy2(source_zip, target)
     return target
+
+
+def rebuild_native_map_zip(*, source_zip: Path, asset_root: Path, target: Path) -> None:
+    prefix = ""
+    with ZipFile(source_zip) as source:
+        native = has_native_map_manifest(source)
+    if not native:
+        slug = source_zip.name.removesuffix(MAP_PACK_SUFFIX)
+        donor = next(iter(sorted(asset_root.rglob(f"{slug}-experiment-pack.zip"))), None)
+        if donor is None:
+            raise SystemExit(f"{source_zip} has no native MapPack manifest; provide a native ZIP or {slug}-experiment-pack.zip")
+        source_zip = donor
+        prefix = f"dependencies/maps/{slug}/"
+    with ZipFile(source_zip) as source:
+        if not has_native_map_manifest(source, prefix):
+            raise SystemExit(f"{source_zip} has no native MapPack manifest under {prefix}")
+        with ZipFile(target, "w", ZIP_DEFLATED) as output:
+            for info in source.infolist():
+                name = info.filename.removeprefix(prefix)
+                if info.is_dir() or not info.filename.startswith(prefix) or "downloads" in PurePosixPath(name).parts:
+                    continue
+                with source.open(info) as original, output.open(name, "w") as staged:
+                    shutil.copyfileobj(original, staged)
 
 
 def rebuild_zip_without_downloads(*, source_zip: Path, asset_root: Path, target: Path) -> None:
@@ -195,10 +247,6 @@ def rebuild_zip_without_downloads(*, source_zip: Path, asset_root: Path, target:
     if "agent-packs" in parts:
         slug = parts[parts.index("agent-packs") + 1]
         zip_directory(asset_root / "agent-packs" / slug, target)
-        return
-    if "map-packs" in parts:
-        slug = parts[parts.index("map-packs") + 1]
-        zip_directory(asset_root / "map-packs" / slug, target)
         return
     if "replays" in parts:
         slug = parts[parts.index("replays") + 1]
@@ -209,9 +257,6 @@ def rebuild_zip_without_downloads(*, source_zip: Path, asset_root: Path, target:
             return
         if source_zip.name.endswith("-agent-pack.zip"):
             zip_directory(asset_root / "agent-packs" / str(manifest["agent_pack"]), target)
-            return
-        if source_zip.name.endswith("-map-pack.zip"):
-            zip_directory(asset_root / "map-packs" / str(manifest["map_pack"]), target)
             return
     raise SystemExit(f"{source_zip} contains nested downloads and cannot be repaired automatically")
 

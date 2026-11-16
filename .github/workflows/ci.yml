@@ -129,6 +129,10 @@ jobs:
             packages/agentsociety2/tests/test_agent_brains.py \
             packages/agentsociety2/tests/test_jiuwenclaw_agent_runtime.py \
             packages/agentsociety2/tests/test_map_packages.py \
+            packages/agentsociety2/tests/test_live_experiments.py \
+            packages/agentsociety2/tests/test_package_imports.py \
+            packages/agentsociety2/tests/test_experiment_packs.py \
+            packages/agentsociety2/tests/test_public_replay_export.py \
             packages/agentsociety2/tests/test_pixel_town_social_env.py
 
   launcher-ports:

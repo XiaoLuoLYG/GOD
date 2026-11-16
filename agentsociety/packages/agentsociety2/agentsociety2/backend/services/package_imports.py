@@ -93,37 +93,32 @@ def install_preview(
     overwrite = conflict_strategy == "overwrite"
     staged_zip: Path | None = None
     try:
+        target_id = requested_id or preview.resource_id
+        target = Path(preview.install_path)
+        if not requested_id and not overwrite and target.exists():
+            if preview.package_type == "experiment":
+                hypothesis = target.parent
+                target_id = package_archives.next_available_id(hypothesis.parent, hypothesis.name).removeprefix("hypothesis_")
+            else:
+                target_id = package_archives.next_available_id(target.parent, target_id)
         staged_zip = _zip_staged_package(preview.package_path)
         if preview.package_type == "map":
-            registry = map_packages.maps_root(agentsociety_root)
-            map_id = requested_id or (
-                package_archives.next_available_id(registry, preview.resource_id)
-                if preview.conflict and not overwrite
-                else preview.resource_id
-            )
             package = map_packages.import_map_pack_zip(
                 staged_zip,
                 root=agentsociety_root,
-                requested_map_id=map_id,
+                requested_map_id=target_id,
                 overwrite=overwrite,
             )
             return {"package_type": "map", "resource_id": package.map_id, "install_path": str(package.package_path)}
         if preview.package_type == "agent":
-            registry = agent_packs.agent_packs_root(agentsociety_root)
-            pack_id = requested_id or (
-                package_archives.next_available_id(registry, preview.resource_id)
-                if preview.conflict and not overwrite
-                else preview.resource_id
-            )
             package = agent_packs.import_agent_pack_zip(
                 staged_zip,
                 root=agentsociety_root,
-                requested_pack_id=pack_id,
+                requested_pack_id=target_id,
                 overwrite=overwrite,
             )
             return {"package_type": "agent", "resource_id": package.pack_id, "install_path": str(package.package_path)}
         if preview.package_type == "experiment":
-            target_id = requested_id or preview.resource_id
             package = experiment_packs.import_experiment_pack_zip(
                 staged_zip,
                 workspace_root=workspace_root,
@@ -141,10 +136,14 @@ def install_preview(
                 "install_path": str(package.package_path),
             }
         raise ValueError(f"Unsupported package type: {preview.package_type}")
+    except FileExistsError:
+        _PREVIEWS[preview_token] = preview
+        raise
     finally:
         if staged_zip is not None:
             staged_zip.unlink(missing_ok=True)
-        shutil.rmtree(preview.staging_root, ignore_errors=True)
+        if preview_token not in _PREVIEWS:
+            shutil.rmtree(preview.staging_root, ignore_errors=True)
 
 
 def cancel_preview(preview_token: str) -> None:

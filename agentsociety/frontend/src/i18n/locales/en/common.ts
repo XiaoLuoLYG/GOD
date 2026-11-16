@@ -54,6 +54,7 @@ export default {
         previewReady: '{{type}} package ready: {{id}}',
         conflict: 'ID conflict',
         saveAs: 'Save as new ID',
+        autoId: 'Pick an available ID automatically',
         overwrite: 'Overwrite',
         cancelImport: 'Cancel import',
         install: 'Install',

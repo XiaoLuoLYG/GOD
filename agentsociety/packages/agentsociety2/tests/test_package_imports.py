@@ -119,6 +119,33 @@ def test_map_import_preview_and_install(monkeypatch, tmp_path: Path) -> None:
     assert (tmp_path / "agentsociety" / "custom" / "maps" / "demo_map" / "map.yaml").exists()
 
 
+def test_map_install_chooses_unused_ids_and_can_retry_an_explicit_conflict(monkeypatch, tmp_path: Path) -> None:
+    client = _client(monkeypatch, tmp_path)
+    zip_path = _write_map_pack_zip(tmp_path)
+
+    def preview_token() -> str:
+        response = client.post(
+            "/api/v1/god/packages/import-preview",
+            files={"file": ("map.zip", zip_path.read_bytes(), "application/zip")},
+        )
+        assert response.status_code == 200
+        return response.json()["preview_token"]
+
+    install_url = "/api/v1/god/packages/install"
+    for expected_id in ("demo_map", "demo_map_2", "demo_map_3"):
+        response = client.post(install_url, json={"preview_token": preview_token()})
+        assert response.status_code == 200
+        assert response.json()["resource_id"] == expected_id
+
+    token = preview_token()
+    conflict = client.post(install_url, json={"preview_token": token, "requested_id": "demo_map_2"})
+    assert conflict.status_code == 400
+    assert "already exists" in conflict.json()["detail"]
+    retried = client.post(install_url, json={"preview_token": token, "requested_id": "another_map"})
+    assert retried.status_code == 200
+    assert retried.json()["resource_id"] == "another_map"
+
+
 def test_install_preview_cleans_staging_when_rezip_fails(monkeypatch, tmp_path: Path) -> None:
     zip_path = _write_map_pack_zip(tmp_path)
     preview = package_import_service.create_preview(
@@ -230,6 +257,17 @@ def test_experiment_import_warns_and_installs_setup_without_run(monkeypatch, tmp
     assert target.joinpath("run.sh").exists()
     assert not target.joinpath("run").exists()
     assert not target.joinpath("run_2").exists()
+
+    copy_preview = client.post(
+        "/api/v1/god/packages/import-preview",
+        files={"file": (zip_path.name, zip_path.read_bytes(), "application/zip")},
+    ).json()
+    assert copy_preview["conflict"]
+    copied = client.post(
+        "/api/v1/god/packages/install", json={"preview_token": copy_preview["preview_token"]},
+    )
+    assert copied.status_code == 200
+    assert copied.json()["resource_id"] == f'{install.json()["resource_id"]}_2'
 
 
 def test_experiment_import_can_set_current_and_start(monkeypatch, tmp_path: Path) -> None:

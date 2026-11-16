@@ -54,6 +54,7 @@ export default {
         previewReady: '{{type}} 包已就绪：{{id}}',
         conflict: 'ID 冲突',
         saveAs: '另存为新 ID',
+        autoId: '留空时自动选择可用 ID',
         overwrite: '覆盖',
         cancelImport: '取消导入',
         install: '安装',

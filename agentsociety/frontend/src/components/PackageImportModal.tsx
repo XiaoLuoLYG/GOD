@@ -74,7 +74,8 @@ const PackageImportModal: React.FC<PackageImportModalProps> = ({
         return false;
       }
       setPreview(payload);
-      setRequestedId(payload.conflict ? `${payload.resource_id}_2` : payload.resource_id);
+      setStrategy('save_as');
+      setRequestedId('');
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -90,7 +91,7 @@ const PackageImportModal: React.FC<PackageImportModalProps> = ({
       const result = await installPackage(
         preview.preview_token,
         strategy,
-        strategy === 'save_as' ? requestedId : undefined,
+        strategy === 'save_as' ? requestedId.trim() : undefined,
         { startImmediately: startExperimentOnInstall && preview.package_type === 'experiment' },
       );
       message.success(t('packageImport.installed', { id: result.resource_id || preview.resource_id }));
@@ -176,7 +177,12 @@ const PackageImportModal: React.FC<PackageImportModalProps> = ({
                   <Radio.Button value="cancel">{t('packageImport.cancelImport')}</Radio.Button>
                 </Radio.Group>
                 {strategy === 'save_as' && (
-                  <Input value={requestedId} onChange={(event) => setRequestedId(event.target.value)} />
+                  <Input
+                    aria-label={t('packageImport.saveAs')}
+                    placeholder={t('packageImport.autoId')}
+                    value={requestedId}
+                    onChange={(event) => setRequestedId(event.target.value)}
+                  />
                 )}
               </Space>
             )}
