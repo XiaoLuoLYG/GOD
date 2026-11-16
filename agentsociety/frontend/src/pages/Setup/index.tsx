@@ -182,6 +182,7 @@ type LaunchResult = {
 };
 
 type CodexStatus = 'ready' | 'logged_out' | 'missing' | 'unavailable';
+type ConnectionResult = { model: string; codex: string | null };
 
 type ModelForm = {
     GOD_LLM_API_KEY?: string;
@@ -417,9 +418,12 @@ export default function SetupPage() {
     const [savingModel, setSavingModel] = useState(false);
     const [codexStatus, setCodexStatus] = useState<CodexStatus | null>(null);
     const [checkingCodex, setCheckingCodex] = useState(false);
+    const [testingConnection, setTestingConnection] = useState(false);
+    const [connectionResult, setConnectionResult] = useState<ConnectionResult | null>(null);
     const [generating, setGenerating] = useState(false);
     const [publishing, setPublishing] = useState(false);
     const [builtinModalOpen, setBuiltinModalOpen] = useState(false);
+    const [startingBuiltin, setStartingBuiltin] = useState<string | null>(null);
     const [builtinAgentCounts, setBuiltinAgentCounts] = useState<Record<string, number>>({});
     const [latestDraftAvailable, setLatestDraftAvailable] = useState(false);
     const [launchPending, setLaunchPending] = useState<LaunchResult | null>(restoredPendingLaunch);
@@ -524,6 +528,7 @@ export default function SetupPage() {
             const payload = await fetchJson<SetupStatus>('/api/v1/god/setup/status');
             setStatus(payload);
             setCodexStatus(payload.codex_status || null);
+            setConnectionResult(null);
             const storedBasics = basicsRef.current;
             const defaultMapId = localizedDefaultBasics.map_id || 'the_ville';
             const selectedMapId = payload.selected_map_id || defaultMapId;
@@ -598,8 +603,30 @@ export default function SetupPage() {
         }
     };
 
+    const testConnection = async () => {
+        setConnectionResult(null);
+        setTestingConnection(true);
+        try {
+            const result = await fetchJson<ConnectionResult>('/api/v1/god/setup/test-connection', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(cleanModelValues(modelForm.getFieldsValue())),
+            });
+            setConnectionResult(result);
+        } catch {
+            messageApi.error(copy('model.connectionRequestFailed'));
+        } finally {
+            setTestingConnection(false);
+        }
+    };
+
     const saveModelConfig = async (resumeCurrent = false) => {
-        const values = await modelForm.validateFields();
+        const values = await modelForm.validateFields().catch(() => null);
+        if (!values) return;
+        if (!values.GOD_LLM_API_KEY?.trim() && !status?.model_config.GOD_LLM_API_KEY?.configured) {
+            messageApi.warning(copy('messages.apiKeyRequired'));
+            return;
+        }
         setSavingModel(true);
         try {
             const payload = await persistModelConfig(values);
@@ -807,6 +834,29 @@ export default function SetupPage() {
             return fallback;
         }
         return Math.min(50, Math.max(1, Math.round(value)));
+    };
+
+    const startBuiltinExperiment = async (key: string) => {
+        if (!status?.model_config.GOD_LLM_API_KEY?.configured || !status.model_config.GOD_LLM_MODEL?.configured) {
+            setBuiltinModalOpen(false);
+            setCurrentStep(0);
+            messageApi.warning(copy('messages.saveModelBeforeLaunch'));
+            return;
+        }
+        setStartingBuiltin(key);
+        try {
+            const result = await fetchJson<LaunchResult>('/api/v1/god/setup/start-default', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ experiment_key: key }),
+            });
+            setBuiltinModalOpen(false);
+            completeLaunch(result, true, 0);
+        } catch (error) {
+            messageApi.error(copy('messages.defaultStartFailed', { error: errorText(error) }));
+        } finally {
+            setStartingBuiltin(null);
+        }
     };
 
     const openBuiltinFromScratch = (
@@ -1212,8 +1262,14 @@ export default function SetupPage() {
                 style={{ marginBottom: 18 }}
             />
             {renderLaunchPendingAlert()}
-            <Form form={modelForm} layout="vertical">
-                <Form.Item name="GOD_AGENT_BACKEND" label={copy('model.residentRuntime')} initialValue="jiuwenclaw">
+            <Form form={modelForm} layout="vertical" disabled={testingConnection} onValuesChange={() => setConnectionResult(null)}>
+                <Form.Item
+                    name="GOD_AGENT_BACKEND"
+                    label={copy('model.residentRuntime')}
+                    initialValue="jiuwenclaw"
+                    extra={selectedRuntime === 'openai_compat' ? copy('model.apiRuntimeHelp')
+                        : !selectedRuntime || selectedRuntime === 'jiuwenclaw' ? copy('model.jiuwenRuntimeHelp') : undefined}
+                >
                     <Select
                         onChange={(runtime) => { if (runtime === 'codex' && !codexStatus) void checkCodex(); }}
                         options={[
@@ -1231,7 +1287,19 @@ export default function SetupPage() {
                         showIcon
                         type={codexStatus === 'ready' ? 'success' : codexStatus ? 'warning' : 'info'}
                         message={copy(checkingCodex ? 'model.codexChecking' : `model.codexStatus.${codexStatus || 'unchecked'}`)}
-                        description={copy('model.codexSessionDescription')}
+                        description={(
+                            <Space direction="vertical" size={4}>
+                                <Text>{copy('model.codexSessionDescription')}</Text>
+                                {codexStatus && codexStatus !== 'ready' && (
+                                    <>
+                                        <Text>{copy('model.codexFallback')}</Text>
+                                        <Typography.Link href="https://learn.chatgpt.com/docs/codex/cli" target="_blank" rel="noreferrer">
+                                            {copy('model.installCodex')}
+                                        </Typography.Link>
+                                    </>
+                                )}
+                            </Space>
+                        )}
                         action={<Button onClick={() => void checkCodex()} loading={checkingCodex}>{copy('model.checkCodex')}</Button>}
                         style={{ marginBottom: 18 }}
                     />
@@ -1311,13 +1379,26 @@ export default function SetupPage() {
                     </Row>
                 </details>
             </Form>
+            {connectionResult && (
+                <Alert
+                    showIcon
+                    type={connectionResult.model === 'connected' && (!connectionResult.codex || connectionResult.codex === 'connected')
+                        ? 'success' : 'warning'}
+                    message={copy(`model.connectionModel.${connectionResult.model}`)}
+                    description={connectionResult.codex && copy(`model.connectionCodex.${connectionResult.codex}`)}
+                    style={{ marginBottom: 16 }}
+                />
+            )}
             <Space wrap>
+                <Button icon={<ApiOutlined />} loading={testingConnection} disabled={savingModel || !status} onClick={() => void testConnection()}>
+                    {copy('model.testConnection')}
+                </Button>
                 {status?.setup_mode && status.can_resume_current && (
-                    <Button type="primary" loading={savingModel} disabled={!!launchPending} onClick={() => void saveModelConfig(true)}>
+                    <Button type="primary" loading={savingModel} disabled={!!launchPending || testingConnection || !status} onClick={() => void saveModelConfig(true)}>
                         {copy('model.resumeCurrent')}
                     </Button>
                 )}
-                <Button icon={<SaveOutlined />} loading={savingModel} disabled={!!launchPending} onClick={() => void saveModelConfig()}>
+                <Button icon={<SaveOutlined />} loading={savingModel} disabled={!!launchPending || testingConnection || !status} onClick={() => void saveModelConfig()}>
                     {copy('model.save')}
                 </Button>
                 {status && (
@@ -1336,10 +1417,13 @@ export default function SetupPage() {
         <Modal
             title={copy('choice.builtinModalTitle')}
             open={builtinModalOpen}
-            onCancel={() => setBuiltinModalOpen(false)}
+            onCancel={() => { if (!startingBuiltin) setBuiltinModalOpen(false); }}
             footer={null}
             width="min(860px, 92vw)"
         >
+            {!status?.setup_mode && (
+                <Alert type="info" showIcon message={copy('choice.quickStartTerminal')} style={{ marginBottom: 12 }} />
+            )}
             <div className="setup-built-in-list">
                 {(status?.default_experiments || []).map((item) => (
                     <div className="setup-built-in-item" key={item.key}>
@@ -1349,7 +1433,17 @@ export default function SetupPage() {
                                 <Tag>{mapDisplayName((status?.maps || []).find((map) => map.map_id === item.map_id), item.map_id)}</Tag>
                             </Space>
                             <Text type="secondary">{defaultExperimentDescription(item)}</Text>
-                            <Text code>{item.hypothesis_id} / experiment_{item.experiment_id}</Text>
+                            {status?.setup_mode && (
+                                <Button
+                                    type="primary"
+                                    icon={<PlayCircleOutlined />}
+                                    disabled={!item.config_exists || !!launchPending || (!!startingBuiltin && startingBuiltin !== item.key)}
+                                    loading={startingBuiltin === item.key}
+                                    onClick={() => void startBuiltinExperiment(item.key)}
+                                >
+                                    {copy('choice.quickStart')}
+                                </Button>
+                            )}
                             <Space wrap align="end">
                                 <div>
                                     <Text type="secondary">{copy('basics.agentCount')}</Text>
@@ -1372,9 +1466,8 @@ export default function SetupPage() {
                                     />
                                 </div>
                                 <Button
-                                    type="primary"
-                                    icon={<PlayCircleOutlined />}
-                                    disabled={!item.config_exists}
+                                    icon={<EditOutlined />}
+                                    disabled={!item.config_exists || !!launchPending || !!startingBuiltin}
                                     onClick={() => openBuiltinFromScratch(item)}
                                 >
                                     {copy('choice.openDefault')}
@@ -1405,6 +1498,7 @@ export default function SetupPage() {
                         <Button
                             type="primary"
                             icon={<ExperimentOutlined />}
+                            disabled={!!launchPending}
                             onClick={() => setBuiltinModalOpen(true)}
                         >
                             {copy('choice.chooseBuiltin')}
@@ -1946,7 +2040,7 @@ export default function SetupPage() {
                                 {copy('header.openCurrent')}
                             </Button>
                         )}
-                        <Button onClick={loadStatus} loading={loadingStatus}>{copy('header.refreshStatus')}</Button>
+                        <Button onClick={loadStatus} loading={loadingStatus} disabled={testingConnection}>{copy('header.refreshStatus')}</Button>
                     </Space>
                 </div>
                 <Card className="setup-step-card" variant="borderless">

@@ -8,6 +8,12 @@ from typing import Any
 import aiohttp
 
 
+class BackendHTTPError(RuntimeError):
+    def __init__(self, status: int) -> None:
+        super().__init__(f"agent backend HTTP {status}")
+        self.status = status
+
+
 async def post_json(url: str, api_key: str, payload: dict[str, Any], timeout_s: float) -> dict[str, Any]:
     timeout = aiohttp.ClientTimeout(total=timeout_s, ceil_threshold=float("inf"))
     headers = {"Authorization": f"Bearer {api_key}"}
@@ -15,7 +21,7 @@ async def post_json(url: str, api_key: str, payload: dict[str, Any], timeout_s: 
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(url, json=payload, headers=headers, allow_redirects=False) as response:
                 if not 200 <= response.status < 300:
-                    raise RuntimeError(f"agent backend HTTP {response.status}")
+                    raise BackendHTTPError(response.status)
                 data = await response.json(content_type=None)
     except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
         raise RuntimeError(f"agent backend response failed: {type(exc).__name__}") from None

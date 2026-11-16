@@ -60,13 +60,9 @@ On first run, GOD will:
 </p>
 
 
-In the wizard you can choose one of three paths:
+On the **Model** page, choose the resident runtime and enter the GOD model settings below. Click **Test Connection** to send a short test message. If you select Codex, the wizard also sends a test message through a temporary Codex conversation.
 
-- **Open GOD Town** launches the built-in The Ville baseline.
-- **Open PKU Trump Visit** launches the built-in PKU campus experiment.
-- **Create Custom Experiment** lets you describe a scenario, generate an editable experiment draft, adjust agents/steps, and then click **Save and Launch**.
-
-Three settings are required:
+Click **Save and Choose Experiment**, then **Browse Built-Ins** and **Start Now** for GOD Town or PKU Trump Visit. GOD opens the control room when the first live frame is ready. You can also start with an imported pack or use the draft editor to create your own experiment.
 
 | Variable | Example |
 | --- | --- |
@@ -74,7 +70,7 @@ Three settings are required:
 | `GOD_LLM_API_BASE` | `https://api.openai.com/v1` |
 | `GOD_LLM_MODEL` | `gpt-5.4` |
 
-Any OpenAI-compatible endpoint works. The API key is saved only in local `.env`; the browser only receives redacted status. Experiment selection is saved separately in `.god/current_experiment.json`, so `.env` does not control which map or experiment starts.
+The endpoint must support OpenAI-compatible chat completions for the selected model. The key is saved in your local `.env` and sent to the configured model provider. Experiment selection is saved in `.god/current_experiment.json`. To explore without a model account, open the [public GOD Town replay](https://xiaoluolyg.github.io/GOD/replays/god-town/).
 
 To switch between built-in experiments or create another experiment later, run:
 
@@ -98,11 +94,19 @@ If the browser did not open automatically, open that URL. You should see the pix
 ./scripts/god.sh status
 ```
 
-The backend and control room should be `up`. JiuwenClaw services are needed when a resident uses JiuwenClaw for skill selection or Ask.
+The backend and control room should be `up`. JiuwenSwarm services start when a resident uses the bundled runtime for skill selection or Ask.
 
 ### Choose an agent backend
 
-Run `./scripts/god.sh configure` (`.\scripts\god.cmd configure` on Windows). On the Setup Wizard's Model page, select Codex under **Default resident runtime**. The wizard checks your local sign-in. First-time users can install the CLI and run `codex login` in a terminal. Keep the GOD API settings for drafts and global summaries. Click **Save and Resume Current Experiment** or click **Save and Choose Experiment** to run a different one. [Install Codex CLI](https://learn.chatgpt.com/docs/codex/cli)
+Run `./scripts/god.sh configure` (`.\scripts\god.cmd configure` on Windows) to change the **Default resident runtime**.
+
+| Wizard choice | What you need |
+| --- | --- |
+| **JiuwenSwarm** | GOD ships with the runtime. The launcher installs its dependencies on first use. Enter your model service details. |
+| **OpenAI-compatible API** | A model endpoint, key, and model name. Use a hosted or already-running local service. |
+| **Codex** | A recent Codex CLI and a local Codex sign-in. Run `codex login` if the wizard asks. Keep the GOD model settings for drafts and global summaries. [Install Codex CLI](https://learn.chatgpt.com/docs/codex/cli) |
+
+When Codex is missing or signed out, the wizard shows installation or sign-in steps. You can pick either of the other runtime options and continue. Click **Save and Resume Current Experiment** to apply a new default to the current run.
 
 Each resident has a Codex conversation for its incoming messages, observations, interventions, and targeted Ask questions. Codex stores the conversation history. GOD stores world state, skill memory, and replay, and sends skill outcomes back on the next turn. The `restart` command resumes the current run's conversations. The `new-run` command starts fresh conversations. A resident with memory disabled in the experiment uses a temporary conversation for each turn.
 

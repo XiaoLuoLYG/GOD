@@ -60,13 +60,9 @@ Windows PowerShell：
 </p>
 
 
-向导里有三条路径：
+在向导的 **模型** 页选择居民运行时，填写下表的 GOD 模型配置，再点 **测试连接**。向导会发一条短消息验证模型能回复。选了 Codex 时，向导还会用一个临时 Codex 会话发测试消息。
 
-- **打开 GOD Town**：直接启动内置 The Ville 小镇实验。
-- **打开 PKU Trump Visit**：直接启动内置北大校园实验。
-- **新建自定义实验**：填写场景，生成可编辑实验草案，调整 agent/steps，最后点击 **保存并启动**。
-
-必需的三个配置：
+点 **保存并选择实验**，打开 **浏览内置实验**，在 GOD 小镇或北大访问实验旁点 **一键启动**。第一帧完成后会自动打开控制台。你也可以导入实验包，或进入草案编辑器创建自己的实验。
 
 | 变量 | 示例 |
 | :-- | :-- |
@@ -74,7 +70,7 @@ Windows PowerShell：
 | `GOD_LLM_API_BASE` | `https://api.openai.com/v1` |
 | `GOD_LLM_MODEL` | `gpt-5.4` |
 
-任意 OpenAI 兼容接口都可以。API key 只保存在本地 `.env`；浏览器只会拿到脱敏后的状态。实验选择单独保存在 `.god/current_experiment.json`，所以 `.env` 不再控制启动哪个实验或哪张地图。
+服务地址和所选模型需要支持 OpenAI 兼容的聊天补全接口。密钥保存在本地 `.env`，请求会发给你配置的模型服务。实验选择保存在 `.god/current_experiment.json`。还没有模型账户时，可以先体验 [GOD 小镇浏览器回放](https://xiaoluolyg.github.io/GOD/replays/god-town/)。
 
 之后如果想切换两个内置实验，或创建另一个实验，运行：
 
@@ -98,11 +94,19 @@ http://127.0.0.1:5174/pixel-replay/god_town/1
 ./scripts/god.sh status
 ```
 
-后端和控制台应显示 `up`。当有居民用九问选择技能或回答 Ask 时，才需要九问服务。
+后端和控制台应显示 `up`。当有居民使用内置运行时选技能或回答 Ask 时，启动器会启用 JiuwenSwarm 服务。
 
 ### 选择 Agent 后端
 
-运行 `./scripts/god.sh configure`（Windows 用 `.\scripts\god.cmd configure`）。在 Setup Wizard 的「模型」页把「默认居民运行时」设为 Codex。向导会检查本机登录状态。首次使用时，先安装 CLI，再在终端运行 `codex login`。保留 GOD 的 API 配置，用于实验草案和全局摘要。接着点「保存并继续当前实验」，或点「保存并选择实验」启动另一个实验。[安装 Codex CLI](https://learn.chatgpt.com/docs/codex/cli)
+运行 `./scripts/god.sh configure`（Windows 用 `.\scripts\god.cmd configure`）可以更改 **默认居民运行时**。
+
+| 向导选项 | 需要准备什么 |
+| --- | --- |
+| **JiuwenSwarm** | 运行时随 GOD 提供，启动器会在首次使用时安装依赖。填写模型服务配置即可。 |
+| **OpenAI 兼容 API** | 准备服务地址、密钥和模型名。可以连接在线服务，或已在本机运行的兼容服务。 |
+| **Codex** | 需要较新的 Codex CLI 和本机登录。按向导提示在终端运行 `codex login`。GOD 的实验草案和全局摘要仍使用 GOD 模型配置。[安装 Codex CLI](https://learn.chatgpt.com/docs/codex/cli) |
+
+本机缺少 Codex 或尚未登录时，向导会给出安装和登录指引。也可以选另外两种运行时继续。若想在当前实验应用新配置，点 **保存并继续当前实验**。
 
 仿真推进时，居民收到的消息、环境变化和待处理的干预会发到该居民的 Codex 会话。点名 Ask 也会发到同一个会话。Codex 保存对话历史，GOD 继续保存世界状态、技能记忆和回放，并把上一轮技能执行结果带回会话。`restart` 会续接当前 run 的会话，`new-run` 会开始新的会话。对于实验中关闭记忆的居民，Codex 每次使用临时会话。
 
