@@ -1337,46 +1337,51 @@ export default function SetupPage() {
                                 <Input placeholder={copy('model.modelPlaceholder')} />
                             </Form.Item>
                         </Col>
-                        <Col xs={24} lg={8}>
-                            <Form.Item
-                                name="GOD_EMBEDDING_API_KEY"
-                                label={formLabel(copy('model.embeddingKey'), copy('model.embeddingKeyTooltip'))}
-                            >
-                                <Input.Password placeholder={status?.model_config.GOD_EMBEDDING_API_KEY?.configured ? copy('model.embeddingConfiguredPlaceholder') : copy('model.embeddingPlaceholder')} />
-                            </Form.Item>
-                        </Col>
-                        <Col xs={24} lg={8}>
-                            <Form.Item
-                                name="GOD_EMBEDDING_API_BASE"
-                                label={formLabel(copy('model.embeddingBase'), copy('model.embeddingBaseTooltip'))}
-                            >
-                                <Input />
-                            </Form.Item>
-                        </Col>
-                        <Col xs={24} lg={8}>
-                            <Form.Item
-                                name="GOD_EMBEDDING_MODEL"
-                                label={formLabel(copy('model.embeddingModel'), copy('model.embeddingModelTooltip'))}
-                            >
-                                <Input />
-                            </Form.Item>
-                        </Col>
-                        <Col xs={24} lg={8}>
-                            <Form.Item name="GOD_BACKEND_HOST" label={formLabel(copy('model.backendHost'), copy('model.backendHostTooltip'))}>
-                                <Input />
-                            </Form.Item>
-                        </Col>
-                        <Col xs={12} lg={8}>
-                            <Form.Item name="GOD_BACKEND_PORT" label={formLabel(copy('model.backendPort'), copy('model.backendPortTooltip'))}>
-                                <Input />
-                            </Form.Item>
-                        </Col>
-                        <Col xs={12} lg={8}>
-                            <Form.Item name="GOD_FRONTEND_PORT" label={formLabel(copy('model.frontendPort'), copy('model.frontendPortTooltip'))}>
-                                <Input />
-                            </Form.Item>
-                        </Col>
                     </Row>
+                    <details>
+                        <summary style={{ cursor: 'pointer' }}>{copy('model.advancedSettings')}</summary>
+                        <Row gutter={16} style={{ marginTop: 12 }}>
+                            <Col xs={24} lg={8}>
+                                <Form.Item
+                                    name="GOD_EMBEDDING_API_KEY"
+                                    label={formLabel(copy('model.embeddingKey'), copy('model.embeddingKeyTooltip'))}
+                                >
+                                    <Input.Password placeholder={status?.model_config.GOD_EMBEDDING_API_KEY?.configured ? copy('model.embeddingConfiguredPlaceholder') : copy('model.embeddingPlaceholder')} />
+                                </Form.Item>
+                            </Col>
+                            <Col xs={24} lg={8}>
+                                <Form.Item
+                                    name="GOD_EMBEDDING_API_BASE"
+                                    label={formLabel(copy('model.embeddingBase'), copy('model.embeddingBaseTooltip'))}
+                                >
+                                    <Input />
+                                </Form.Item>
+                            </Col>
+                            <Col xs={24} lg={8}>
+                                <Form.Item
+                                    name="GOD_EMBEDDING_MODEL"
+                                    label={formLabel(copy('model.embeddingModel'), copy('model.embeddingModelTooltip'))}
+                                >
+                                    <Input />
+                                </Form.Item>
+                            </Col>
+                            <Col xs={24} lg={8}>
+                                <Form.Item name="GOD_BACKEND_HOST" label={formLabel(copy('model.backendHost'), copy('model.backendHostTooltip'))}>
+                                    <Input />
+                                </Form.Item>
+                            </Col>
+                            <Col xs={12} lg={8}>
+                                <Form.Item name="GOD_BACKEND_PORT" label={formLabel(copy('model.backendPort'), copy('model.backendPortTooltip'))}>
+                                    <Input />
+                                </Form.Item>
+                            </Col>
+                            <Col xs={12} lg={8}>
+                                <Form.Item name="GOD_FRONTEND_PORT" label={formLabel(copy('model.frontendPort'), copy('model.frontendPortTooltip'))}>
+                                    <Input />
+                                </Form.Item>
+                            </Col>
+                        </Row>
+                    </details>
                 </details>
             </Form>
             {connectionResult && (

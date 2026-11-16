@@ -79,6 +79,7 @@ export default {
         },
         codexSessionDescription: 'Each resident has a separate Codex conversation. Experiments with memory enabled resume those conversations after a restart.',
         godServiceSettings: 'GOD model and ports',
+        advancedSettings: 'Embeddings and ports',
         apiKey: 'API key',
         apiKeyTooltip: 'OpenAI-compatible service key. Leave blank to keep the value already saved in local .env.',
         apiKeyConfiguredPlaceholder: 'Configured, leave blank to keep it',
@@ -108,8 +109,8 @@ export default {
         save: 'Save and Choose Experiment',
         resumeCurrent: 'Save and Resume Current Experiment',
         runDefault: 'Open Default Experiment',
-        apiKeyConfigured: 'API key configured',
-        apiKeyMissing: 'API key missing',
+        apiKeyConfigured: 'API key saved locally',
+        apiKeyMissing: 'No API key saved yet',
     },
     choice: {
         title: 'Choose Experiment',

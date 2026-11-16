@@ -79,6 +79,7 @@ export default {
         },
         codexSessionDescription: '每位居民有独立的 Codex 会话。开启记忆的实验重启后会续接这些会话。',
         godServiceSettings: 'GOD 模型与端口',
+        advancedSettings: '向量模型和端口',
         apiKey: 'API 密钥',
         apiKeyTooltip: 'OpenAI 兼容服务的密钥；留空表示沿用本地 .env 已保存的值。',
         apiKeyConfiguredPlaceholder: '已配置，留空不修改',
@@ -108,8 +109,8 @@ export default {
         save: '保存并选择实验',
         resumeCurrent: '保存并继续当前实验',
         runDefault: '打开默认实验',
-        apiKeyConfigured: 'API 密钥已配置',
-        apiKeyMissing: '缺少 API 密钥',
+        apiKeyConfigured: 'API 密钥已保存到本机',
+        apiKeyMissing: 'API 密钥尚未保存',
     },
     choice: {
         title: '选择要运行的实验',
