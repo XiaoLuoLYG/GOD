@@ -42,7 +42,7 @@ Windows PowerShell：
 .\scripts\god.cmd start
 ```
 
-`start` 是日常使用的一键入口；它可以重复执行，已经运行的服务会被复用。
+`start` 会复用当前仓库目录启动的服务。如果端口已被其他应用占用，终端会提示端口和要在 `.env` 中修改的配置项。修改后再运行 `start`。
 
 如果正在使用内置 JiuwenClaw 的旧版 GOD，请在更新代码前先运行 `stop`。升级到 JiuwenSwarm 后，首次启动会沿用原有的运行时实例工作区，并将其中的智能体数据复制到新目录。
 

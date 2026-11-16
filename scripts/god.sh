@@ -42,7 +42,6 @@ RUNTIME_AGENT_PORT="${RUNTIME_AGENT_PORT:-19092}"
 RUNTIME_WEB_PORT="${RUNTIME_WEB_PORT:-20000}"
 RUNTIME_GATEWAY_PORT="${RUNTIME_GATEWAY_PORT:-20001}"
 RUNTIME_UI_PORT="${RUNTIME_UI_PORT:-6173}"
-GOD_EXTRA_STOP_PORTS="${GOD_EXTRA_STOP_PORTS:-20092 21000 21001 7173}"
 
 # Default user-facing config (mirrors .env.example).
 GOD_EXPERIMENT="${GOD_EXPERIMENT:-god_town}"
@@ -88,10 +87,6 @@ command_exists() {
 
 shell_quote() {
   printf '%q' "$1"
-}
-
-screen_list() {
-  screen -ls 2>/dev/null || true
 }
 
 require_base_tools() {
@@ -381,10 +376,10 @@ PY
 wait_for_port() {
   local port="$1"
   local label="$2"
-  local timeout="${3:-90}"
+  local timeout="$3" pid_file="$4" setting="$5"
   local deadline=$((SECONDS + timeout))
   while (( SECONDS < deadline )); do
-    if is_port_open "$port"; then
+    if service_port_up "$port" "$pid_file" "$setting"; then
       log "$label ready on port $port"
       return 0
     fi
@@ -548,96 +543,73 @@ require_current_experiment_config() {
   die "No current experiment is configured. Run ./scripts/god.sh start and choose an experiment in setup."
 }
 
+service_processes() {
+  local file="$1" pid members log_writers name="${1##*/}"
+  [[ -f "$file" ]] && IFS= read -r pid < "$file" && [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  members="$(ps -ax -o pid=,ppid=,stat= | awk -v root="$pid" '
+    $3 !~ /^Z/ { parent[$1] = $2 }
+    END {
+      if (!(root in parent)) exit 1
+      for (pid in parent) {
+        ancestor = pid
+        while (ancestor > 1 && ancestor != root && ancestor in parent) ancestor = parent[ancestor]
+        if (ancestor == root && pid != root) print pid
+      }
+      print root
+    }
+  ')" || return 1
+  # A stale PID may have been reused. A process from this checkout holds its service log open.
+  log_writers="$(lsof -t -a -d 1,2 -p "$(paste -sd, - <<< "$members")" -- "$LOG_DIR/${name%.pid}.log" 2>/dev/null || true)"
+  [[ -n "$log_writers" ]] || return 1
+  printf '%s\n' "$members"
+}
+
+owns_port() {
+  local port="$1" file="$2" members listeners listener
+  members="$(service_processes "$file")" || return 1
+  listeners="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null)" || return 1
+  [[ -n "$listeners" ]] || return 1
+  while IFS= read -r listener; do
+    [[ $'\n'"$members"$'\n' == *$'\n'"$listener"$'\n'* ]] || return 1
+  done <<< "$listeners"
+}
+
+service_port_up() {
+  local port="$1" file="$2" setting="$3"
+  is_port_open "$port" || return 1
+  owns_port "$port" "$file" || die "Port $port is occupied. Set $setting to an unused port in $ENV_FILE and retry."
+}
+
 stop_control_services() {
   kill_pid_file "$FRONTEND_PID_FILE" "control room"
   kill_pid_file "$BACKEND_PID_FILE" "backend"
-  kill_listeners_on_port "$GOD_FRONTEND_PORT"
-  kill_listeners_on_port "$GOD_BACKEND_PORT"
 }
 
 kill_pid_file() {
-  local file="$1"
-  local label="$2"
-  [[ -f "$file" ]] || return 0
-  local pid
-  pid="$(cat "$file" 2>/dev/null || true)"
-  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-    log "Stopping $label pid=$pid"
-    kill "$pid" 2>/dev/null || true
+  local file="$1" label="$2" members pid
+  if members="$(service_processes "$file")"; then
+    log "Stopping $label"
+    local -a pids=()
+    while IFS= read -r pid; do
+      pids+=("$pid")
+    done <<< "$members"
+    kill "${pids[@]}" 2>/dev/null || true
     local deadline=$((SECONDS + 8))
-    while (( SECONDS < deadline )); do
-      kill -0 "$pid" 2>/dev/null || break
-      sleep 0.3
+    while (( SECONDS < deadline )) && ps -o stat= -p "$(paste -sd, - <<< "$members")" 2>/dev/null | awk '$1 !~ /^Z/ {live=1} END {exit !live}'; do
+      sleep 0.2
     done
-    kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
   fi
   rm -f "$file"
 }
 
-kill_listeners_on_port() {
-  local port="$1"
-  local pids
-  pids="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | tr '\n' ' ' || true)"
-  [[ -n "${pids// }" ]] || return 0
-  log "Clearing port $port"
-  # shellcheck disable=SC2086
-  kill $pids 2>/dev/null || true
-  sleep 0.6
-  pids="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | tr '\n' ' ' || true)"
-  if [[ -n "${pids// }" ]]; then
-    # shellcheck disable=SC2086
-    kill -9 $pids 2>/dev/null || true
-  fi
-}
-
-clear_live_ports() {
-  for port in \
-    "$GOD_BACKEND_PORT" \
-    "$GOD_FRONTEND_PORT" \
-    "$RUNTIME_AGENT_PORT" \
-    "$RUNTIME_WEB_PORT" \
-    "$RUNTIME_GATEWAY_PORT" \
-    "$RUNTIME_UI_PORT" \
-    $GOD_EXTRA_STOP_PORTS
-  do
-    kill_listeners_on_port "$port"
-  done
-}
-
-stop_known_screens() {
-  command_exists screen || return 0
-  for name in "$RUNTIME_INSTANCE" $RUNTIME_LEGACY_INSTANCES god-town god-backend god-frontend agentsociety-backend agentsociety-frontend; do
-    if screen_list | grep -q "[.]$name[[:space:]]"; then
-      log "Stopping leftover session: $name"
-      screen -S "$name" -X quit >/dev/null 2>&1 || true
-    fi
-  done
-}
-
 start_detached_service() {
-  local session_name="$1"
-  local pid_file="$2"
-  local command="$3"
-
+  local session_name="$1" pid_file="$2" command="$3"
   if command_exists screen; then
-    if screen_list | grep -q "[.]$session_name[[:space:]]"; then
-      log "Replacing old session: $session_name"
-      screen -S "$session_name" -X quit >/dev/null 2>&1 || true
-      sleep 0.5
-    fi
-    screen -dmS "$session_name" bash -lc "$command"
-    sleep 0.5
-    local screen_pid
-    screen_pid="$(
-      screen_list \
-        | awk -v name="$session_name" '$1 ~ "[.]" name "$" { split($1, a, "."); print a[1]; exit }'
-    )"
-    [[ -n "$screen_pid" ]] || die "Failed to create session: $session_name"
-    printf '%s\n' "$screen_pid" > "$pid_file"
+    screen -DmS "$session_name" bash -lc "$command" </dev/null >/dev/null 2>&1 &
   else
-    nohup bash -lc "$command" >/dev/null 2>&1 &
-    printf '%s\n' "$!" > "$pid_file"
+    nohup bash -lc "$command" </dev/null >/dev/null 2>&1 &
   fi
+  printf '%s\n' "$!" > "$pid_file"
 }
 
 stop_runtime_instance() {
@@ -653,18 +625,14 @@ stop_runtime_instance() {
 
 stop_all() {
   log "Stopping GOD services"
-  if is_port_open "$GOD_BACKEND_PORT"; then
+  if owns_port "$GOD_BACKEND_PORT" "$BACKEND_PID_FILE"; then
     curl -fsS --max-time 10 -X POST "$(stop_live_url)" >/dev/null 2>&1 || true
   fi
-  kill_pid_file "$FRONTEND_PID_FILE" "control room"
-  kill_pid_file "$BACKEND_PID_FILE" "backend"
+  stop_control_services
+  if service_processes "$RUNTIME_PID_FILE" >/dev/null; then
+    stop_runtime_instance "$RUNTIME_INSTANCE"
+  fi
   kill_pid_file "$RUNTIME_PID_FILE" "agent runtime"
-  stop_known_screens
-  stop_runtime_instance "$RUNTIME_INSTANCE"
-  for name in $RUNTIME_LEGACY_INSTANCES; do
-    stop_runtime_instance "$name"
-  done
-  clear_live_ports
 }
 
 remove_runtime_registry_entries() {
@@ -735,7 +703,7 @@ setup_deps() {
 
   if [[ ! -d "$BACKEND_ROOT/frontend/node_modules" || "${GOD_FORCE_SETUP:-0}" == "1" ]]; then
     log "Installing control-room dependencies"
-    npm install --no-audit --no-fund --loglevel=error --prefix "$BACKEND_ROOT/frontend"
+    npm ci --no-audit --no-fund --loglevel=error --prefix "$BACKEND_ROOT/frontend"
   fi
 
   [[ "$runtime_required" == "1" ]] || return 0
@@ -851,11 +819,17 @@ PY
 }
 
 start_runtime() {
+  local ready=1
+  service_port_up "$RUNTIME_AGENT_PORT" "$RUNTIME_PID_FILE" RUNTIME_AGENT_PORT || ready=0
+  service_port_up "$RUNTIME_WEB_PORT" "$RUNTIME_PID_FILE" RUNTIME_WEB_PORT || ready=0
+  service_port_up "$RUNTIME_GATEWAY_PORT" "$RUNTIME_PID_FILE" RUNTIME_GATEWAY_PORT || ready=0
+  service_port_up "$RUNTIME_UI_PORT" "$RUNTIME_PID_FILE" RUNTIME_UI_PORT || ready=0
+  if [[ "$ready" == "0" ]] && service_processes "$RUNTIME_PID_FILE" >/dev/null; then
+    stop_runtime_instance "$RUNTIME_INSTANCE"
+    kill_pid_file "$RUNTIME_PID_FILE" "agent runtime"
+  fi
   ensure_runtime_instance
-  if is_port_open "$RUNTIME_AGENT_PORT" \
-    && is_port_open "$RUNTIME_WEB_PORT" \
-    && is_port_open "$RUNTIME_GATEWAY_PORT" \
-    && is_port_open "$RUNTIME_UI_PORT"; then
+  if [[ "$ready" == "1" ]]; then
     log "Agent runtime already up"
     return 0
   fi
@@ -867,15 +841,16 @@ start_runtime() {
   runtime_cmd+=" && exec uv run --locked jiuwenswarm-start $(shell_quote "$RUNTIME_MODE") --name $(shell_quote "$RUNTIME_INSTANCE") >> $(shell_quote "$LOG_DIR/runtime.log") 2>&1"
   start_detached_service "$RUNTIME_INSTANCE" "$RUNTIME_PID_FILE" "$runtime_cmd"
 
-  wait_for_port "$RUNTIME_AGENT_PORT" "Agent runtime" 180
-  wait_for_port "$RUNTIME_WEB_PORT" "Agent runtime web" 120
-  wait_for_port "$RUNTIME_GATEWAY_PORT" "Agent runtime gateway" 120
-  wait_for_port "$RUNTIME_UI_PORT" "Agent runtime UI" 120
+  wait_for_port "$RUNTIME_AGENT_PORT" "Agent runtime" 180 "$RUNTIME_PID_FILE" RUNTIME_AGENT_PORT
+  wait_for_port "$RUNTIME_WEB_PORT" "Agent runtime web" 120 "$RUNTIME_PID_FILE" RUNTIME_WEB_PORT
+  wait_for_port "$RUNTIME_GATEWAY_PORT" "Agent runtime gateway" 120 "$RUNTIME_PID_FILE" RUNTIME_GATEWAY_PORT
+  wait_for_port "$RUNTIME_UI_PORT" "Agent runtime UI" 120 "$RUNTIME_PID_FILE" RUNTIME_UI_PORT
 }
 
 start_backend() {
   ensure_env_file
-  if is_port_open "$GOD_BACKEND_PORT" && curl -fsS "$backend_url/health" >/dev/null 2>&1; then
+  if service_port_up "$GOD_BACKEND_PORT" "$BACKEND_PID_FILE" GOD_BACKEND_PORT; then
+    curl -fsS --max-time 5 "$backend_url/health" >/dev/null 2>&1 || die "Backend is not responding. See $LOG_DIR/backend.log"
     log "Backend already up"
     return 0
   fi
@@ -903,7 +878,7 @@ start_backend() {
   backend_cmd+=" && exec uv run python -m agentsociety2.backend.run --log-level $(shell_quote "$backend_log_level") >> $(shell_quote "$LOG_DIR/backend.log") 2>&1"
   start_detached_service "god-backend" "$BACKEND_PID_FILE" "$backend_cmd"
 
-  wait_for_port "$GOD_BACKEND_PORT" "Backend" 120
+  wait_for_port "$GOD_BACKEND_PORT" "Backend" 120 "$BACKEND_PID_FILE" GOD_BACKEND_PORT
   local deadline=$((SECONDS + 30))
   while (( SECONDS < deadline )); do
     curl -fsS "$backend_url/health" >/dev/null 2>&1 && return 0
@@ -913,7 +888,7 @@ start_backend() {
 }
 
 start_frontend() {
-  if is_port_open "$GOD_FRONTEND_PORT"; then
+  if service_port_up "$GOD_FRONTEND_PORT" "$FRONTEND_PID_FILE" GOD_FRONTEND_PORT; then
     log "Control room already up"
     return 0
   fi
@@ -983,7 +958,7 @@ PY
   frontend_cmd+=" && exec npm run dev -- --host $(shell_quote "$vite_host") --port $(shell_quote "$GOD_FRONTEND_PORT") --base $(shell_quote "$vite_base") >> $(shell_quote "$LOG_DIR/frontend.log") 2>&1"
   start_detached_service "god-frontend" "$FRONTEND_PID_FILE" "$frontend_cmd"
 
-  wait_for_port "$GOD_FRONTEND_PORT" "Control room" 120
+  wait_for_port "$GOD_FRONTEND_PORT" "Control room" 120 "$FRONTEND_PID_FILE" GOD_FRONTEND_PORT
 }
 
 start_setup_services() {
@@ -992,6 +967,7 @@ start_setup_services() {
   ensure_env_file
   rm -f "$START_REQUEST_FILE"
   stop_all
+  service_port_up "$GOD_FRONTEND_PORT" "$FRONTEND_PID_FILE" GOD_FRONTEND_PORT || true
   start_backend
   start_frontend
   open_setup_page
@@ -1079,7 +1055,7 @@ configure_experiment() {
 }
 
 create_session() {
-  if ! is_port_open "$GOD_BACKEND_PORT" || ! curl -fsS "$backend_url/health" >/dev/null 2>&1; then
+  if ! owns_port "$GOD_BACKEND_PORT" "$BACKEND_PID_FILE" || ! curl -fsS --max-time 5 "$backend_url/health" >/dev/null 2>&1; then
     start_backend
   fi
   log "Creating live session"
@@ -1102,6 +1078,8 @@ start_all() {
   load_env
   require_current_experiment_config
   ensure_env_file
+  service_port_up "$GOD_FRONTEND_PORT" "$FRONTEND_PID_FILE" GOD_FRONTEND_PORT || true
+  service_port_up "$GOD_BACKEND_PORT" "$BACKEND_PID_FILE" GOD_BACKEND_PORT || true
   local runtime_required
   runtime_required="$(experiment_requires_runtime)"
   setup_deps "$runtime_required"
@@ -1135,25 +1113,24 @@ new_run() {
 }
 
 print_port_status() {
-  local label="$1"
-  local port="$2"
+  local label="$1" port="$2" file="$3" status="down"
   if is_port_open "$port"; then
-    printf '%-24s %s up\n' "$label" "$port"
-  else
-    printf '%-24s %s down\n' "$label" "$port"
+    status="occupied"
+    owns_port "$port" "$file" && status="up"
   fi
+  printf '%-24s %s %s\n' "$label" "$port" "$status"
 }
 
 print_status() {
   load_env
   printf '\nGOD status\n'
   printf '%s\n' '----------'
-  print_port_status "Backend" "$GOD_BACKEND_PORT"
-  print_port_status "Control room" "$GOD_FRONTEND_PORT"
-  print_port_status "Agent runtime" "$RUNTIME_AGENT_PORT"
-  print_port_status "Agent runtime web" "$RUNTIME_WEB_PORT"
-  print_port_status "Agent runtime gateway" "$RUNTIME_GATEWAY_PORT"
-  print_port_status "Agent runtime UI" "$RUNTIME_UI_PORT"
+  print_port_status "Backend" "$GOD_BACKEND_PORT" "$BACKEND_PID_FILE"
+  print_port_status "Control room" "$GOD_FRONTEND_PORT" "$FRONTEND_PID_FILE"
+  print_port_status "Agent runtime" "$RUNTIME_AGENT_PORT" "$RUNTIME_PID_FILE"
+  print_port_status "Agent runtime web" "$RUNTIME_WEB_PORT" "$RUNTIME_PID_FILE"
+  print_port_status "Agent runtime gateway" "$RUNTIME_GATEWAY_PORT" "$RUNTIME_PID_FILE"
+  print_port_status "Agent runtime UI" "$RUNTIME_UI_PORT" "$RUNTIME_PID_FILE"
   printf '\nURLs\n'
   print_frontend_links
   printf 'Backend:          %s/health\n' "$backend_url"
