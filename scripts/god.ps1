@@ -141,7 +141,6 @@ function Refresh-ConfigFromEnv {
   $script:RuntimeWebPort = [int](Get-EnvValue "RUNTIME_WEB_PORT" "20000")
   $script:RuntimeGatewayPort = [int](Get-EnvValue "RUNTIME_GATEWAY_PORT" "20001")
   $script:RuntimeUiPort = [int](Get-EnvValue "RUNTIME_UI_PORT" "6173")
-  $script:GodExtraStopPorts = (Get-EnvValue "GOD_EXTRA_STOP_PORTS" "20092 21000 21001 7173").Split(" ", [System.StringSplitOptions]::RemoveEmptyEntries) | ForEach-Object { [int]$_ }
 
   $script:GodExperiment = Get-EnvValue "GOD_EXPERIMENT" (Get-EnvValue "GOD_HYPOTHESIS_ID" "god_town")
   $script:GodExperimentRun = Get-EnvValue "GOD_EXPERIMENT_RUN" (Get-EnvValue "GOD_EXPERIMENT_ID" "1")
@@ -549,11 +548,13 @@ function Wait-ForPort {
   param(
     [int]$Port,
     [string]$Label,
-    [int]$TimeoutSeconds = 90
+    [int]$TimeoutSeconds,
+    [string]$PidFile,
+    [string]$Setting
   )
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   while ((Get-Date) -lt $deadline) {
-    if (Test-PortOpen $Port) {
+    if (Test-ServicePort $Port $PidFile $Setting) {
       Write-GodLog "$Label ready on port $Port"
       return
     }
@@ -730,25 +731,33 @@ function Stop-ProcessTree {
   }
 }
 
-function Stop-PidFile {
-  param(
-    [string]$Path,
-    [string]$Label
-  )
-  if (-not (Test-Path $Path)) {
-    return
+function Get-ServiceProcessId {
+  param([string]$Path)
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    return 0
   }
-  $processIdText = (Get-Content $Path -ErrorAction SilentlyContinue | Select-Object -First 1)
+  $text = Get-Content -LiteralPath $Path -ErrorAction SilentlyContinue | Select-Object -First 1
   $processId = 0
-  [int]::TryParse($processIdText, [ref]$processId) | Out-Null
-  if ($processId -gt 0 -and (Get-Process -Id $processId -ErrorAction SilentlyContinue)) {
-    Write-GodLog "Stopping $Label pid=$processId"
-    Stop-ProcessTree -ProcessId $processId
+  [int]::TryParse($text, [ref]$processId) | Out-Null
+  if ($processId -le 0) {
+    return 0
   }
-  Remove-Item $Path -Force -ErrorAction SilentlyContinue
+  $process = Get-CimInstance Win32_Process -Filter "ProcessId = $processId" -ErrorAction SilentlyContinue
+  # The launcher embeds this checkout's log path in its encoded command.
+  if ($process -and $process.CommandLine -match '(?:^|\s)-EncodedCommand\s+([A-Za-z0-9+/=]+)') {
+    try {
+      $command = [System.Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($Matches[1]))
+      $log = Join-Path $script:LogDir ([IO.Path]::GetFileNameWithoutExtension($Path) + ".log")
+      if ($command.Contains((Quote-PSLiteral $log))) {
+        return $processId
+      }
+    } catch {
+    }
+  }
+  return 0
 }
 
-function Stop-ListenersOnPort {
+function Get-PortListeners {
   param([int]$Port)
   $processIds = @()
   try {
@@ -770,35 +779,56 @@ function Stop-ListenersOnPort {
     }
   }
 
-  $processIds = @($processIds | Where-Object { $_ -and ([int]$_) -gt 0 } | Select-Object -Unique)
-  if ($processIds.Count -eq 0) {
-    return
+  return $processIds | Where-Object { $_ -and ([int]$_) -gt 0 } | Select-Object -Unique
+}
+
+function Test-OwnedPort {
+  param([int]$Port, [string]$PidFile)
+  $rootId = Get-ServiceProcessId $PidFile
+  if (-not $rootId) {
+    return $false
   }
-  Write-GodLog "Clearing port $Port"
-  foreach ($processId in $processIds) {
-    Stop-ProcessTree -ProcessId ([int]$processId)
+  $listeners = @(Get-PortListeners $Port)
+  foreach ($listener in $listeners) {
+    $ancestor = [int]$listener
+    while ($ancestor -gt 0 -and $ancestor -ne $rootId) {
+      $process = Get-CimInstance Win32_Process -Filter "ProcessId = $ancestor" -ErrorAction SilentlyContinue
+      if (-not $process -or $process.ParentProcessId -eq $ancestor) {
+        return $false
+      }
+      $ancestor = [int]$process.ParentProcessId
+    }
+    if ($ancestor -ne $rootId) {
+      return $false
+    }
   }
+  return ($listeners.Count -gt 0)
+}
+
+function Test-ServicePort {
+  param([int]$Port, [string]$PidFile, [string]$Setting)
+  if (-not (Test-PortOpen $Port)) {
+    return $false
+  }
+  if (-not (Test-OwnedPort $Port $PidFile)) {
+    Stop-God "Port $Port is occupied. Set $Setting to an unused port in $script:EnvFile and retry."
+  }
+  return $true
+}
+
+function Stop-PidFile {
+  param([string]$Path, [string]$Label)
+  $processId = Get-ServiceProcessId $Path
+  if ($processId -gt 0) {
+    Write-GodLog "Stopping $Label pid=$processId"
+    Stop-ProcessTree -ProcessId $processId
+  }
+  Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
 }
 
 function Stop-ControlServices {
   Stop-PidFile $script:FrontendPidFile "control room"
   Stop-PidFile $script:BackendPidFile "backend"
-  Stop-ListenersOnPort $script:GodFrontendPort
-  Stop-ListenersOnPort $script:GodBackendPort
-}
-
-function Stop-LivePorts {
-  $ports = @(
-    $script:GodBackendPort,
-    $script:GodFrontendPort,
-    $script:RuntimeAgentPort,
-    $script:RuntimeWebPort,
-    $script:RuntimeGatewayPort,
-    $script:RuntimeUiPort
-  ) + $script:GodExtraStopPorts
-  foreach ($port in $ports) {
-    Stop-ListenersOnPort ([int]$port)
-  }
 }
 
 function Start-DetachedService {
@@ -860,20 +890,17 @@ function Stop-RuntimeInstance {
 
 function Stop-All {
   Write-GodLog "Stopping GOD services"
-  if (Test-PortOpen $script:GodBackendPort) {
+  if (Test-OwnedPort $script:GodBackendPort $script:BackendPidFile) {
     try {
-      Invoke-RestMethod -Method Post -Uri (Get-StopLiveUrl) | Out-Null
+      Invoke-RestMethod -Method Post -Uri (Get-StopLiveUrl) -TimeoutSec 10 | Out-Null
     } catch {
     }
   }
-  Stop-PidFile $script:FrontendPidFile "control room"
-  Stop-PidFile $script:BackendPidFile "backend"
-  Stop-PidFile $script:RuntimePidFile "agent runtime"
-  Stop-RuntimeInstance $script:RuntimeInstance
-  foreach ($name in $script:RuntimeLegacyInstances) {
-    Stop-RuntimeInstance $name
+  Stop-ControlServices
+  if (Get-ServiceProcessId $script:RuntimePidFile) {
+    Stop-RuntimeInstance $script:RuntimeInstance
   }
-  Stop-LivePorts
+  Stop-PidFile $script:RuntimePidFile "agent runtime"
 }
 
 function Remove-PathSafe {
@@ -1053,7 +1080,7 @@ function Setup-Dependencies {
   $backendFrontend = Join-Path $script:BackendRoot "frontend"
   if ((-not (Test-Path (Join-Path $backendFrontend "node_modules"))) -or (Get-EnvValue "GOD_FORCE_SETUP" "0") -eq "1") {
     Write-GodLog "Installing control-room dependencies"
-    Invoke-CheckedCommand -FilePath $npm -Arguments @("install", "--no-audit", "--no-fund", "--loglevel=error") -WorkingDirectory $backendFrontend
+    Invoke-CheckedCommand -FilePath $npm -Arguments @("ci", "--no-audit", "--no-fund", "--loglevel=error") -WorkingDirectory $backendFrontend
   }
 
   if (-not $RuntimeRequired) {
@@ -1183,8 +1210,17 @@ function Prepare-Experiment {
 }
 
 function Start-Runtime {
+  $agentReady = Test-ServicePort $script:RuntimeAgentPort $script:RuntimePidFile RUNTIME_AGENT_PORT
+  $webReady = Test-ServicePort $script:RuntimeWebPort $script:RuntimePidFile RUNTIME_WEB_PORT
+  $gatewayReady = Test-ServicePort $script:RuntimeGatewayPort $script:RuntimePidFile RUNTIME_GATEWAY_PORT
+  $uiReady = Test-ServicePort $script:RuntimeUiPort $script:RuntimePidFile RUNTIME_UI_PORT
+  $ready = $agentReady -and $webReady -and $gatewayReady -and $uiReady
+  if ((-not $ready) -and (Get-ServiceProcessId $script:RuntimePidFile)) {
+    Stop-RuntimeInstance $script:RuntimeInstance
+    Stop-PidFile $script:RuntimePidFile "agent runtime"
+  }
   Ensure-RuntimeInstance
-  if ((Test-PortOpen $script:RuntimeAgentPort) -and (Test-PortOpen $script:RuntimeWebPort) -and (Test-PortOpen $script:RuntimeGatewayPort) -and (Test-PortOpen $script:RuntimeUiPort)) {
+  if ($ready) {
     Write-GodLog "Agent runtime already up"
     return
   }
@@ -1199,14 +1235,14 @@ function Start-Runtime {
   ) -join "; "
   Start-DetachedService -SessionName $script:RuntimeInstance -PidFile $script:RuntimePidFile -Command $runtimeCmd -LogPath $script:RuntimeLog
 
-  Wait-ForPort $script:RuntimeAgentPort "Agent runtime" 180
-  Wait-ForPort $script:RuntimeWebPort "Agent runtime web" 120
-  Wait-ForPort $script:RuntimeGatewayPort "Agent runtime gateway" 120
-  Wait-ForPort $script:RuntimeUiPort "Agent runtime UI" 120
+  Wait-ForPort $script:RuntimeAgentPort "Agent runtime" 180 $script:RuntimePidFile RUNTIME_AGENT_PORT
+  Wait-ForPort $script:RuntimeWebPort "Agent runtime web" 120 $script:RuntimePidFile RUNTIME_WEB_PORT
+  Wait-ForPort $script:RuntimeGatewayPort "Agent runtime gateway" 120 $script:RuntimePidFile RUNTIME_GATEWAY_PORT
+  Wait-ForPort $script:RuntimeUiPort "Agent runtime UI" 120 $script:RuntimePidFile RUNTIME_UI_PORT
 }
 
 function Test-BackendHealthy {
-  if (-not (Test-PortOpen $script:GodBackendPort)) {
+  if (-not (Test-OwnedPort $script:GodBackendPort $script:BackendPidFile)) {
     return $false
   }
   try {
@@ -1219,7 +1255,10 @@ function Test-BackendHealthy {
 
 function Start-Backend {
   Ensure-EnvFile
-  if (Test-BackendHealthy) {
+  if (Test-ServicePort $script:GodBackendPort $script:BackendPidFile GOD_BACKEND_PORT) {
+    if (-not (Test-BackendHealthy)) {
+      Stop-God "Backend is not responding. See $script:BackendLog"
+    }
     Write-GodLog "Backend already up"
     return
   }
@@ -1251,7 +1290,7 @@ function Start-Backend {
   Start-DetachedService -SessionName "god-backend" -PidFile $script:BackendPidFile -Command $backendCmd -LogPath $script:BackendLog
 
   $backendStartTimeout = [int](Get-EnvValue "GOD_BACKEND_START_TIMEOUT" "180")
-  Wait-ForPort $script:GodBackendPort "Backend" $backendStartTimeout
+  Wait-ForPort $script:GodBackendPort "Backend" $backendStartTimeout $script:BackendPidFile GOD_BACKEND_PORT
   $deadline = (Get-Date).AddSeconds(30)
   while ((Get-Date) -lt $deadline) {
     if (Test-BackendHealthy) {
@@ -1263,7 +1302,7 @@ function Start-Backend {
 }
 
 function Start-Frontend {
-  if (Test-PortOpen $script:GodFrontendPort) {
+  if (Test-ServicePort $script:GodFrontendPort $script:FrontendPidFile GOD_FRONTEND_PORT) {
     Write-GodLog "Control room already up"
     return
   }
@@ -1281,7 +1320,7 @@ function Start-Frontend {
     (Get-DetachedNativeExecLine -FilePath $npm -ArgumentExpression "run dev -- --host 127.0.0.1 --port $(Quote-PSLiteral ([string]$script:GodFrontendPort))" -LogPath $script:FrontendLog)
   ) -join "; "
   Start-DetachedService -SessionName "god-frontend" -PidFile $script:FrontendPidFile -Command $frontendCmd -LogPath $script:FrontendLog
-  Wait-ForPort $script:GodFrontendPort "Control room" 120
+  Wait-ForPort $script:GodFrontendPort "Control room" 120 $script:FrontendPidFile GOD_FRONTEND_PORT
 }
 
 function Start-SetupServices {
@@ -1290,6 +1329,7 @@ function Start-SetupServices {
   Ensure-EnvFile
   Remove-Item $script:StartRequestFile -Force -ErrorAction SilentlyContinue
   Stop-All
+  Test-ServicePort $script:GodFrontendPort $script:FrontendPidFile GOD_FRONTEND_PORT | Out-Null
   Start-Backend
   Start-Frontend
   Open-SetupPage
@@ -1395,6 +1435,8 @@ function Start-All {
   Load-Env
   Require-CurrentExperimentConfig
   Ensure-EnvFile
+  Test-ServicePort $script:GodFrontendPort $script:FrontendPidFile GOD_FRONTEND_PORT | Out-Null
+  Test-ServicePort $script:GodBackendPort $script:BackendPidFile GOD_BACKEND_PORT | Out-Null
   $runtimeRequired = Test-ExperimentRequiresRuntime
   Setup-Dependencies -RuntimeRequired $runtimeRequired
   Prepare-Experiment -RuntimeRequired $runtimeRequired
@@ -1427,15 +1469,12 @@ function Start-NewRun {
 }
 
 function Show-PortStatus {
-  param(
-    [string]$Label,
-    [int]$Port
-  )
+  param([string]$Label, [int]$Port, [string]$PidFile)
+  $status = "down"
   if (Test-PortOpen $Port) {
-    "{0,-24} {1} up" -f $Label, $Port | Write-Host
-  } else {
-    "{0,-24} {1} down" -f $Label, $Port | Write-Host
+    $status = if (Test-OwnedPort $Port $PidFile) { "up" } else { "occupied" }
   }
+  "{0,-24} {1} {2}" -f $Label, $Port, $status | Write-Host
 }
 
 function Show-Status {
@@ -1443,12 +1482,12 @@ function Show-Status {
   Write-Host ""
   Write-Host "GOD status"
   Write-Host "----------"
-  Show-PortStatus "Backend" $script:GodBackendPort
-  Show-PortStatus "Control room" $script:GodFrontendPort
-  Show-PortStatus "Agent runtime" $script:RuntimeAgentPort
-  Show-PortStatus "Agent runtime web" $script:RuntimeWebPort
-  Show-PortStatus "Agent runtime gateway" $script:RuntimeGatewayPort
-  Show-PortStatus "Agent runtime UI" $script:RuntimeUiPort
+  Show-PortStatus "Backend" $script:GodBackendPort $script:BackendPidFile
+  Show-PortStatus "Control room" $script:GodFrontendPort $script:FrontendPidFile
+  Show-PortStatus "Agent runtime" $script:RuntimeAgentPort $script:RuntimePidFile
+  Show-PortStatus "Agent runtime web" $script:RuntimeWebPort $script:RuntimePidFile
+  Show-PortStatus "Agent runtime gateway" $script:RuntimeGatewayPort $script:RuntimePidFile
+  Show-PortStatus "Agent runtime UI" $script:RuntimeUiPort $script:RuntimePidFile
   Write-Host ""
   Write-Host "URLs"
   Show-FrontendLinks
