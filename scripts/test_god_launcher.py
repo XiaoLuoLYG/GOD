@@ -15,7 +15,7 @@ def main() -> None:
     root = Path(__file__).resolve().parent.parent
     windows = os.name == "nt"
     with tempfile.TemporaryDirectory(prefix="god launcher ") as directory:
-        fixture = Path(directory)
+        fixture = Path(directory).resolve()
         scripts = fixture / "scripts"
         scripts.mkdir()
         for name in ("god.sh", "god.ps1", "god.cmd"):
@@ -105,7 +105,7 @@ def main() -> None:
                 else:
                     raise AssertionError("the fixture's GOD service did not start")
                 status = run("status")
-                assert status.returncode == 0 and f"{runtime_port} up" in status.stdout, status.stdout
+                assert status.returncode == 0 and f"{runtime_port} up" in status.stdout, status.stdout + status.stderr
                 stopped = run("stop")
                 assert stopped.returncode == 0, stopped.stderr
                 owned.wait(timeout=10)

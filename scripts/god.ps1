@@ -748,7 +748,7 @@ function Get-ServiceProcessId {
     try {
       $command = [System.Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($Matches[1]))
       $log = Join-Path $script:LogDir ([IO.Path]::GetFileNameWithoutExtension($Path) + ".log")
-      if ($command.Contains((Quote-PSLiteral $log))) {
+      if ($command.IndexOf((Quote-PSLiteral $log), [StringComparison]::OrdinalIgnoreCase) -ge 0) {
         return $processId
       }
     } catch {
