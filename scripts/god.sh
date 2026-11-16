@@ -580,6 +580,18 @@ service_port_up() {
   owns_port "$port" "$file" || die "Port $port is occupied. Set $setting to an unused port in $ENV_FILE and retry."
 }
 
+preflight_control_ports() {
+  local frontend_up=0 backend_up=0
+  service_port_up "$GOD_FRONTEND_PORT" "$FRONTEND_PID_FILE" GOD_FRONTEND_PORT && frontend_up=1
+  service_port_up "$GOD_BACKEND_PORT" "$BACKEND_PID_FILE" GOD_BACKEND_PORT && backend_up=1
+  if [[ "${1:-}" == "reuse" ]] && {
+    { (( ! backend_up )) && { (( frontend_up )) || service_processes "$BACKEND_PID_FILE" >/dev/null; }; } ||
+    { (( ! frontend_up )) && service_processes "$FRONTEND_PID_FILE" >/dev/null; }
+  }; then
+    die "Running GOD services do not match the configured ports. Run ./scripts/god.sh restart."
+  fi
+}
+
 stop_control_services() {
   kill_pid_file "$FRONTEND_PID_FILE" "control room"
   kill_pid_file "$BACKEND_PID_FILE" "backend"
@@ -764,12 +776,16 @@ prepare_experiment() {
   [[ -f "$config_path" ]] || die "Experiment config not found: $config_path"
   runtime_required="${1:-$(experiment_requires_runtime)}"
 
-  local session_prefix="${GOD_SESSION_PREFIX:-${GOD_EXPERIMENT}_run_${GOD_EXPERIMENT_RUN}}"
+  local session_prefix="${GOD_SESSION_PREFIX:-}"
+  local prefix_file="${config_path%/init/init_config.json}/run/.god-session-prefix"
+  if [[ -z "$session_prefix" && -s "$prefix_file" ]]; then
+    session_prefix="$(cat "$prefix_file")"
+  fi
   log "Preparing experiment: $GOD_EXPERIMENT (run $GOD_EXPERIMENT_RUN)"
   BACKEND_ROOT="$BACKEND_ROOT" \
   RUNTIME_REQUIRED="$runtime_required" \
   RUNTIME_AGENT_PORT="$RUNTIME_AGENT_PORT" \
-  GOD_SESSION_PREFIX="$session_prefix" \
+  GOD_SESSION_PREFIX="${session_prefix:-${GOD_EXPERIMENT}_run_${GOD_EXPERIMENT_RUN}}" \
   GOD_MAP_ID_WAS_EXPLICIT="$GOD_MAP_ID_WAS_EXPLICIT" \
   GOD_MAP_ID="${GOD_MAP_ID:-}" \
   python3 - "$config_path" <<'PY'
@@ -962,12 +978,12 @@ PY
 }
 
 start_setup_services() {
-  setup_deps 0
   export GOD_SETUP_MODE=1
   ensure_env_file
+  preflight_control_ports
+  setup_deps 0
   rm -f "$START_REQUEST_FILE"
   stop_all
-  service_port_up "$GOD_FRONTEND_PORT" "$FRONTEND_PID_FILE" GOD_FRONTEND_PORT || true
   start_backend
   start_frontend
   open_setup_page
@@ -1009,15 +1025,20 @@ PY
 
 wait_for_start_request() {
   log "Waiting for setup wizard to save and request startup"
-  local next_notice=$((SECONDS + 30))
-  while [[ ! -f "$START_REQUEST_FILE" ]]; do
+  local next_notice=$((SECONDS + 30)) setup_pids
+  setup_pids="$(cat "$FRONTEND_PID_FILE" "$BACKEND_PID_FILE" 2>/dev/null)" || setup_pids=""
+  while [[ -n "$setup_pids" && "$setup_pids" == "$(cat "$FRONTEND_PID_FILE" "$BACKEND_PID_FILE" 2>/dev/null)" ]]; do
+    if [[ -f "$START_REQUEST_FILE" ]]; then
+      consume_start_request
+      return 0
+    fi
     sleep 2
     if (( SECONDS >= next_notice )); then
       log "Still waiting on $(setup_url)"
       next_notice=$((SECONDS + 30))
     fi
   done
-  consume_start_request
+  die "Setup services stopped or restarted. Run ./scripts/god.sh start to open setup again."
 }
 
 start_with_setup_if_needed() {
@@ -1056,6 +1077,7 @@ configure_experiment() {
 
 create_session() {
   if ! owns_port "$GOD_BACKEND_PORT" "$BACKEND_PID_FILE" || ! curl -fsS --max-time 5 "$backend_url/health" >/dev/null 2>&1; then
+    preflight_control_ports reuse
     start_backend
   fi
   log "Creating live session"
@@ -1078,8 +1100,7 @@ start_all() {
   load_env
   require_current_experiment_config
   ensure_env_file
-  service_port_up "$GOD_FRONTEND_PORT" "$FRONTEND_PID_FILE" GOD_FRONTEND_PORT || true
-  service_port_up "$GOD_BACKEND_PORT" "$BACKEND_PID_FILE" GOD_BACKEND_PORT || true
+  preflight_control_ports reuse
   local runtime_required
   runtime_required="$(experiment_requires_runtime)"
   setup_deps "$runtime_required"
@@ -1103,12 +1124,15 @@ new_run() {
   require_base_tools
   load_env
   require_current_experiment_config
-  export GOD_SESSION_PREFIX="${GOD_EXPERIMENT}_fresh_$(date +%Y%m%d_%H%M%S)"
+  local fresh_prefix="${GOD_EXPERIMENT}_fresh_$(date +%Y%m%d_%H%M%S)"
   stop_all
   local run_dir="$LIVE_WORKSPACE_PATH/hypothesis_${GOD_EXPERIMENT}/experiment_${GOD_EXPERIMENT_RUN}/run"
   log "New run will clear: $run_dir"
   rm -rf "$run_dir"
   log "Cleared previous run"
+  mkdir -p "$run_dir"
+  printf '%s\n' "$fresh_prefix" >"$run_dir/.god-session-prefix"
+  export GOD_SESSION_PREFIX="$fresh_prefix"
   start_all
 }
 

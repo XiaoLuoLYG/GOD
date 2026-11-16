@@ -354,6 +354,10 @@ def _validate_env_values(values: dict[str, str]) -> None:
                 status_code=400,
                 detail=f"{key} must not contain whitespace or shell metacharacters",
             )
+        if key in ("GOD_BACKEND_PORT", "GOD_FRONTEND_PORT"):
+            port = value.lstrip("0")
+            if not re.fullmatch(r"[0-9]{1,5}", port) or int(port) > 65535:
+                raise HTTPException(status_code=400, detail=f"{key} must be a port number from 1 to 65535")
 
 
 def _write_env_values(values: dict[str, str]) -> None:
@@ -2112,6 +2116,18 @@ def _model_origin(api_base: str) -> tuple[str, str, int] | None:
         return None
 
 
+def _validate_model_origin(api_base: str | None, api_key: str | None, env: dict[str, str]) -> None:
+    api_base = (api_base or "").strip()
+    if not api_base:
+        return
+    origin = _model_origin(api_base)
+    if origin is None:
+        raise HTTPException(status_code=400, detail="GOD_LLM_API_BASE must be a valid HTTP or HTTPS URL")
+    saved_base = env.get("GOD_LLM_API_BASE") or ENV_DEFAULTS["GOD_LLM_API_BASE"]
+    if env.get("GOD_LLM_API_KEY") and not (api_key or "").strip() and origin != _model_origin(saved_base):
+        raise HTTPException(status_code=400, detail="Enter an API key for the new model service address")
+
+
 _CONNECTION_PROMPT = "Reply with OK."
 
 
@@ -2180,9 +2196,11 @@ async def save_model_config(payload: ModelConfigPayload) -> dict[str, Any]:
         if value is not None and str(value).strip() != ""
     }
     await _validate_agent_runtime(values)
+    env = _merged_env()
+    _validate_model_origin(values.get("GOD_LLM_API_BASE"), values.get("GOD_LLM_API_KEY"), env)
     for key, default in ENV_DEFAULTS.items():
         if key in MODEL_KEYS and key not in values:
-            fallback = _merged_env().get(key, default)
+            fallback = env.get(key, default)
             if fallback:
                 values[key] = fallback
     if values:
@@ -2194,8 +2212,9 @@ async def save_model_config(payload: ModelConfigPayload) -> dict[str, Any]:
 async def generate_draft(request: GenerateDraftRequest) -> dict[str, Any]:
     env = _merged_env()
     model_config = request.llm_config or ModelConfigPayload()
-    api_key = model_config.GOD_LLM_API_KEY or env.get("GOD_LLM_API_KEY") or ""
-    api_base = model_config.GOD_LLM_API_BASE or env.get("GOD_LLM_API_BASE") or ENV_DEFAULTS["GOD_LLM_API_BASE"]
+    _validate_model_origin(model_config.GOD_LLM_API_BASE, model_config.GOD_LLM_API_KEY, env)
+    api_key = (model_config.GOD_LLM_API_KEY or "").strip() or env.get("GOD_LLM_API_KEY") or ""
+    api_base = (model_config.GOD_LLM_API_BASE or "").strip() or env.get("GOD_LLM_API_BASE") or ENV_DEFAULTS["GOD_LLM_API_BASE"]
     model = model_config.GOD_LLM_MODEL or env.get("GOD_LLM_MODEL") or ENV_DEFAULTS["GOD_LLM_MODEL"]
     if not api_key.strip():
         raise HTTPException(status_code=400, detail="GOD_LLM_API_KEY is required to generate an experiment draft")
@@ -2387,6 +2406,7 @@ async def publish_experiment(request: PublishRequest) -> dict[str, Any]:
     }
     _validate_env_values(env_values)
     await _validate_agent_runtime(env_values)
+    _validate_model_origin(env_values.get("GOD_LLM_API_BASE"), env_values.get("GOD_LLM_API_KEY"), _merged_env())
     draft_context = request.draft.get("experiment_context", {}) if isinstance(request.draft.get("experiment_context"), dict) else {}
     draft_env_modules = request.draft.get("init_config", {}).get("env_modules", []) if isinstance(request.draft.get("init_config"), dict) else []
     draft_env_kwargs: dict[str, Any] = {}

@@ -816,6 +816,18 @@ function Test-ServicePort {
   return $true
 }
 
+function Confirm-ControlPorts {
+  param([switch]$ReuseServices)
+  $frontendUp = Test-ServicePort $script:GodFrontendPort $script:FrontendPidFile GOD_FRONTEND_PORT
+  $backendUp = Test-ServicePort $script:GodBackendPort $script:BackendPidFile GOD_BACKEND_PORT
+  if ($ReuseServices -and (
+    (-not $backendUp -and ($frontendUp -or (Get-ServiceProcessId $script:BackendPidFile))) -or
+    (-not $frontendUp -and (Get-ServiceProcessId $script:FrontendPidFile))
+  )) {
+    Stop-God "Running GOD services do not match the configured ports. Run .\scripts\god.cmd restart."
+  }
+}
+
 function Stop-PidFile {
   param([string]$Path, [string]$Label)
   $processId = Get-ServiceProcessId $Path
@@ -1151,7 +1163,14 @@ function Prepare-Experiment {
     $RuntimeRequired = Test-ExperimentRequiresRuntime
   }
 
-  $sessionPrefix = Get-EnvValue "GOD_SESSION_PREFIX" "$($script:GodExperiment)_run_$($script:GodExperimentRun)"
+  $prefixFile = Join-PathMany (Split-Path -Parent (Split-Path -Parent $configPath)) "run" ".god-session-prefix"
+  $savedPrefix = if (Test-Path -LiteralPath $prefixFile -PathType Leaf) {
+    [System.IO.File]::ReadAllText($prefixFile).Trim()
+  } else { "" }
+  if (-not $savedPrefix) {
+    $savedPrefix = "$($script:GodExperiment)_run_$($script:GodExperimentRun)"
+  }
+  $sessionPrefix = Get-EnvValue "GOD_SESSION_PREFIX" $savedPrefix
   Write-GodLog "Preparing experiment: $($script:GodExperiment) (run $($script:GodExperimentRun))"
   $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
   $agentRoot = (Resolve-Path $script:BackendRoot).Path
@@ -1274,11 +1293,9 @@ function Start-Backend {
     "`$env:GOD_ROOT = $(Quote-PSLiteral $script:RootDir)",
     "`$env:GOD_ENV_FILE = $(Quote-PSLiteral $script:EnvFile)",
     "`$env:LIVE_WORKSPACE_PATH = $(Quote-PSLiteral $script:LiveWorkspacePath)",
-    "`$env:AGENTSOCIETY_LLM_API_KEY = $(Quote-PSLiteral (Get-EnvValue 'AGENTSOCIETY_LLM_API_KEY' ''))",
     "`$env:AGENTSOCIETY_LLM_API_BASE = $(Quote-PSLiteral (Get-EnvValue 'AGENTSOCIETY_LLM_API_BASE' 'https://api.openai.com/v1'))",
     "`$env:AGENTSOCIETY_LLM_MODEL = $(Quote-PSLiteral (Get-EnvValue 'AGENTSOCIETY_LLM_MODEL' 'gpt-5.4'))",
     "`$env:AGENTSOCIETY_NANO_LLM_MODEL = $(Quote-PSLiteral (Get-EnvValue 'AGENTSOCIETY_NANO_LLM_MODEL' 'gpt-5.4-nano'))",
-    "`$env:AGENTSOCIETY_EMBEDDING_API_KEY = $(Quote-PSLiteral (Get-EnvValue 'AGENTSOCIETY_EMBEDDING_API_KEY' (Get-EnvValue 'AGENTSOCIETY_LLM_API_KEY' '')))",
     "`$env:AGENTSOCIETY_EMBEDDING_API_BASE = $(Quote-PSLiteral (Get-EnvValue 'AGENTSOCIETY_EMBEDDING_API_BASE' (Get-EnvValue 'AGENTSOCIETY_LLM_API_BASE' 'https://api.openai.com/v1')))",
     "`$env:AGENTSOCIETY_EMBEDDING_MODEL = $(Quote-PSLiteral (Get-EnvValue 'AGENTSOCIETY_EMBEDDING_MODEL' 'text-embedding-3-large'))",
     "`$env:BACKEND_HOST = $(Quote-PSLiteral $script:GodBackendHost)",
@@ -1324,12 +1341,12 @@ function Start-Frontend {
 }
 
 function Start-SetupServices {
-  Setup-Dependencies -RuntimeRequired $false
   Set-ProcessEnv "GOD_SETUP_MODE" "1"
   Ensure-EnvFile
+  Confirm-ControlPorts
+  Setup-Dependencies -RuntimeRequired $false
   Remove-Item $script:StartRequestFile -Force -ErrorAction SilentlyContinue
   Stop-All
-  Test-ServicePort $script:GodFrontendPort $script:FrontendPidFile GOD_FRONTEND_PORT | Out-Null
   Start-Backend
   Start-Frontend
   Open-SetupPage
@@ -1366,18 +1383,27 @@ function Receive-StartRequest {
 function Wait-ForStartRequest {
   Write-GodLog "Waiting for setup wizard to save and request startup"
   $nextNotice = (Get-Date).AddSeconds(30)
-  while (-not (Test-Path $script:StartRequestFile)) {
+  $pidFiles = @($script:FrontendPidFile, $script:BackendPidFile)
+  $setupPids = @(Get-Content -LiteralPath $pidFiles -ErrorAction SilentlyContinue)
+  while ($setupPids.Count -eq 2) {
+    $recordedPids = @(Get-Content -LiteralPath $pidFiles -ErrorAction SilentlyContinue)
+    if (($setupPids -join ",") -ne ($recordedPids -join ",")) {
+      break
+    }
+    if (Test-Path $script:StartRequestFile) {
+      Receive-StartRequest
+      return
+    }
     Start-Sleep -Seconds 2
     if ((Get-Date) -ge $nextNotice) {
       Write-GodLog "Still waiting on $(Get-SetupUrl)"
       $nextNotice = (Get-Date).AddSeconds(30)
     }
   }
-  Receive-StartRequest
+  Stop-God "Setup services stopped or restarted. Run .\scripts\god.cmd start to open setup again."
 }
 
 function Start-WithSetupIfNeeded {
-  Ensure-Prerequisites
   Load-Env
   if (Test-PendingStartRequest) {
     Write-GodLog "Applying pending setup startup request"
@@ -1401,7 +1427,6 @@ function Start-WithSetupIfNeeded {
 }
 
 function Configure-Experiment {
-  Ensure-Prerequisites
   Write-GodLog "Starting new experiment setup wizard"
   Start-SetupServices
   Wait-ForStartRequest
@@ -1412,6 +1437,7 @@ function Configure-Experiment {
 
 function New-LiveSession {
   if (-not (Test-BackendHealthy)) {
+    Confirm-ControlPorts -ReuseServices
     Start-Backend
   }
   Write-GodLog "Creating live session"
@@ -1435,8 +1461,8 @@ function Start-All {
   Load-Env
   Require-CurrentExperimentConfig
   Ensure-EnvFile
-  Test-ServicePort $script:GodFrontendPort $script:FrontendPidFile GOD_FRONTEND_PORT | Out-Null
-  Test-ServicePort $script:GodBackendPort $script:BackendPidFile GOD_BACKEND_PORT | Out-Null
+  Confirm-ControlPorts -ReuseServices
+  Ensure-Prerequisites
   $runtimeRequired = Test-ExperimentRequiresRuntime
   Setup-Dependencies -RuntimeRequired $runtimeRequired
   Prepare-Experiment -RuntimeRequired $runtimeRequired
@@ -1459,12 +1485,16 @@ function Start-NewRun {
   Ensure-Prerequisites
   Load-Env
   Require-CurrentExperimentConfig
-  Set-ProcessEnv "GOD_SESSION_PREFIX" "$($script:GodExperiment)_fresh_$((Get-Date).ToString('yyyyMMdd_HHmmss'))"
+  $freshPrefix = "$($script:GodExperiment)_fresh_$((Get-Date).ToString('yyyyMMdd_HHmmss'))"
   Stop-All
   $runDir = Join-PathMany $script:LiveWorkspacePath "hypothesis_$($script:GodExperiment)" "experiment_$($script:GodExperimentRun)" "run"
   Write-GodLog "New run will clear: $runDir"
-  Remove-Item -LiteralPath $runDir -Recurse -Force -ErrorAction SilentlyContinue
+  if (Test-Path -LiteralPath $runDir) {
+    Remove-Item -LiteralPath $runDir -Recurse -Force
+  }
   Write-GodLog "Cleared previous run"
+  Write-TextUtf8NoBom (Join-Path $runDir ".god-session-prefix") "$freshPrefix`n"
+  Set-ProcessEnv "GOD_SESSION_PREFIX" $freshPrefix
   Start-All
 }
 

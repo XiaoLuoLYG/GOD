@@ -10,7 +10,7 @@ The shortest path from a clean machine to the setup wizard and then a live GOD c
 
 You will need:
 
-- macOS/Linux: Python 3.11+, Node.js & `npm`, [`uv`](https://docs.astral.sh/uv/), and `screen`
+- macOS/Linux: Python 3.11+, Node.js & `npm`, [`uv`](https://docs.astral.sh/uv/), `screen`, `lsof`, and `curl`
 - Windows: PowerShell 5.1+ and `winget`; the startup script installs missing Git, Node.js LTS/npm, and `uv`
 
 macOS:
@@ -62,7 +62,7 @@ On first run, GOD will:
 
 On the **Model** page, choose the resident runtime and enter the GOD model settings below. Click **Test Connection** to send a short test message. If you select Codex, the wizard also sends a test message through a temporary Codex conversation.
 
-Click **Save and Choose Experiment**, then **Browse Built-Ins** and **Start Now** for GOD Town or PKU Trump Visit. GOD opens the control room when the first live frame is ready. You can also start with an imported pack or use the draft editor to create your own experiment.
+Click **Save and Choose Experiment**, then **Browse Built-Ins** and **Start Now** for GOD Town or PKU Trump Visit. GOD opens the control room when the first live frame is ready. For a downloaded ExperimentPack, choose **Import Experiment Zip** on the same page. Use the draft editor to create your own experiment.
 
 | Variable | Example |
 | --- | --- |

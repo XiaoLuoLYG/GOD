@@ -815,6 +815,61 @@ def test_connection_requires_a_new_key_for_a_different_origin(monkeypatch, tmp_p
     assert response.json() == {"model": "missing_key", "codex": None}
 
 
+@pytest.mark.parametrize("endpoint", ["model-config", "generate-draft", "publish"])
+def test_setup_rejects_reuse_of_a_saved_key_for_a_different_origin(monkeypatch, tmp_path, endpoint):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    env_file = tmp_path / ".env"
+    original = "GOD_LLM_API_BASE=https://saved.invalid/v1\nGOD_LLM_API_KEY=fixture-key\nGOD_LLM_MODEL=fixture-model\n"
+    env_file.write_text(original, encoding="utf-8")
+
+    async def mock_completion(**_):
+        return _raw_draft()
+
+    monkeypatch.setattr(god_setup, "_call_openai_compatible", mock_completion)
+    config = {"GOD_LLM_API_BASE": "https://replacement.invalid/v1"}
+    payload = config if endpoint == "model-config" else {"model_config": config, "basics": {}, "draft": _raw_draft()}
+    app = FastAPI()
+    app.include_router(god_setup.router)
+    response = TestClient(app).post(f"/api/v1/god/setup/{endpoint}", json=payload)
+
+    assert response.status_code == 400
+    assert env_file.read_text(encoding="utf-8") == original
+    assert not (tmp_path / ".god").exists()
+    assert not (tmp_path / "quick_experiments").exists()
+
+
+def test_save_model_config_keeps_same_origin_key_and_accepts_a_replacement(monkeypatch, tmp_path):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    (tmp_path / ".env").write_text(
+        "GOD_LLM_API_BASE=https://saved.invalid/v1\nGOD_LLM_API_KEY=fixture-key\n",
+        encoding="utf-8",
+    )
+    anyio.run(god_setup.save_model_config, ModelConfigPayload(
+        GOD_LLM_API_BASE="https://saved.invalid:443/another-path", GOD_BACKEND_PORT="8007", GOD_FRONTEND_PORT="5178",
+    ))
+    assert god_setup._read_env()["GOD_LLM_API_KEY"] == "fixture-key"
+    assert god_setup._read_env()["GOD_BACKEND_PORT"] == "8007"
+    assert god_setup._read_env()["GOD_FRONTEND_PORT"] == "5178"
+
+    anyio.run(god_setup.save_model_config, ModelConfigPayload(
+        GOD_LLM_API_BASE="https://replacement.invalid/v1", GOD_LLM_API_KEY="replacement-key",
+    ))
+    env = god_setup._read_env()
+    assert env["GOD_LLM_API_BASE"] == "https://replacement.invalid/v1"
+    assert env["GOD_LLM_API_KEY"] == "replacement-key"
+
+
+@pytest.mark.parametrize(("key", "value"), [
+    ("GOD_BACKEND_PORT", "99999"), ("GOD_BACKEND_PORT", "0"), ("GOD_FRONTEND_PORT", "not-a-port"),
+])
+def test_save_model_config_rejects_invalid_ports_without_saving(monkeypatch, tmp_path, key, value):
+    _configure_tmp_god(monkeypatch, tmp_path)
+    with pytest.raises(HTTPException) as exc:
+        anyio.run(god_setup.save_model_config, ModelConfigPayload(**{key: value}))
+    assert exc.value.status_code == 400
+    assert not (tmp_path / ".env").exists()
+
+
 def test_codex_connection_runs_a_temporary_turn(monkeypatch, tmp_path):
     _configure_tmp_god(monkeypatch, tmp_path)
 
@@ -892,13 +947,17 @@ def test_model_config_keeps_valid_values_and_filters_unknown_keys(monkeypatch, t
     assert "PATH" not in values
 
 
-def test_publish_rejects_bad_config_before_creating_experiment(monkeypatch, tmp_path):
+@pytest.mark.parametrize("model_config", [
+    ModelConfigPayload(GOD_LLM_MODEL="model\nINJECTED=1"),
+    ModelConfigPayload(GOD_FRONTEND_PORT="-1"),
+])
+def test_publish_rejects_bad_config_before_creating_experiment(monkeypatch, tmp_path, model_config):
     _configure_tmp_god(monkeypatch, tmp_path)
     _write_test_map_package(tmp_path, "the_ville")
     with pytest.raises(HTTPException) as exc:
         anyio.run(god_setup.publish_experiment, PublishRequest(
             draft=_raw_draft(),
-            model_config=ModelConfigPayload(GOD_LLM_MODEL="model\nINJECTED=1"),
+            model_config=model_config,
         ))
     assert exc.value.status_code == 400
     assert not (tmp_path / "quick_experiments").exists()
