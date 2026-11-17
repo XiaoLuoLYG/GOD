@@ -4,13 +4,12 @@
 </h1>
 
 <p align="center">
+  <img src="docs/assets/screenshots/00-hero.png" alt="GOD — Govern · Observe · Direct" width="100%" />
+</p>
+<p align="center">
   <a href="https://aclanthology.org/2026.emnlp-demos.71.pdf"><b>📄 Paper (PDF)</b></a> ·
   <a href="https://arxiv.org/abs/2608.27992">arXiv</a> ·
   <a href="https://aclanthology.org/2026.emnlp-demos.71/">EMNLP 2026</a>
-</p>
-
-<p align="center">
-  <img src="docs/assets/screenshots/00-hero.png" alt="GOD — Govern · Observe · Direct" width="100%" />
 </p>
 <p align="center">
   <b>🌩️ Be like a god to a town of agents.</b><br/>
