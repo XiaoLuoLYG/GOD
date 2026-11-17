@@ -4,6 +4,12 @@
 </h1>
 
 <p align="center">
+  <a href="https://aclanthology.org/2026.emnlp-demos.71.pdf"><b>📄 论文（PDF）</b></a> ·
+  <a href="https://arxiv.org/abs/2608.27992">arXiv</a> ·
+  <a href="https://aclanthology.org/2026.emnlp-demos.71/">EMNLP 2026</a>
+</p>
+
+<p align="center">
   <img src="docs/assets/screenshots/00-hero.png" alt="GOD — Govern · Observe · Direct" width="100%" />
 </p>
 <p align="center">
@@ -364,6 +370,28 @@ GOD 构建在开源研究和开源代码之上。仓库内集成了两份精简�
 同时受 [Generative Agents](https://arxiv.org/abs/2304.03442) 与 [OASIS](https://github.com/camel-ai/oasis) 启发。
 
 ## 📚 引用
+
+如果你的研究使用了 GOD，请引用：
+
+```bibtex
+@inproceedings{luo-guan-2026-god,
+  title     = "{GOD}: Govern, Observe, and Direct {---} A Real-Time Control Room for Agent Societies",
+  author    = "Luo, Yige and Guan, Ran",
+  editor    = "Agrawal, Sweta and Abad, Alberto",
+  booktitle = "Proceedings of the 2026 Conference on Empirical Methods in
+               Natural Language Processing: System Demonstrations",
+  month     = oct,
+  year      = "2026",
+  address   = "Budapest, Hungary",
+  publisher = "Association for Computational Linguistics",
+  url       = "https://aclanthology.org/2026.emnlp-demos.71/",
+  doi       = "10.18653/2026.emnlp-demos.71",
+  pages     = "750--758",
+  ISBN      = "979-8-89176-461-3"
+}
+```
+
+相关工作：
 
 ```bibtex
 @article{piao2025agentsociety,
