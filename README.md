@@ -7,6 +7,11 @@
   <img src="docs/assets/screenshots/00-hero.png" alt="GOD — Govern · Observe · Direct" width="100%" />
 </p>
 <p align="center">
+  <a href="https://aclanthology.org/2026.emnlp-demos.71.pdf"><b>📄 Paper (PDF)</b></a> ·
+  <a href="https://arxiv.org/abs/2608.27992">arXiv</a> ·
+  <a href="https://aclanthology.org/2026.emnlp-demos.71/">EMNLP 2026</a>
+</p>
+<p align="center">
   <b>🌩️ Be like a god to a town of agents.</b><br/>
   Pause time. Whisper to a soul. Bend the next step. Reset the world — all from a single click.
 </p>
@@ -367,6 +372,28 @@ GOD builds on open research and open-source work. It bundles two trimmed upstrea
 And takes inspiration from [Generative Agents](https://arxiv.org/abs/2304.03442) and [OASIS](https://github.com/camel-ai/oasis).
 
 ## 📚 Citation
+
+If you use GOD in your research, please cite:
+
+```bibtex
+@inproceedings{luo-guan-2026-god,
+  title     = "{GOD}: Govern, Observe, and Direct {---} A Real-Time Control Room for Agent Societies",
+  author    = "Luo, Yige and Guan, Ran",
+  editor    = "Agrawal, Sweta and Abad, Alberto",
+  booktitle = "Proceedings of the 2026 Conference on Empirical Methods in
+               Natural Language Processing: System Demonstrations",
+  month     = oct,
+  year      = "2026",
+  address   = "Budapest, Hungary",
+  publisher = "Association for Computational Linguistics",
+  url       = "https://aclanthology.org/2026.emnlp-demos.71/",
+  doi       = "10.18653/2026.emnlp-demos.71",
+  pages     = "750--758",
+  ISBN      = "979-8-89176-461-3"
+}
+```
+
+Related works:
 
 ```bibtex
 @article{piao2025agentsociety,
