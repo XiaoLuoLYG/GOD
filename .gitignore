@@ -42,6 +42,7 @@ agentsociety_data/
 agentsociety/agentsociety_data/
 agentsociety/logs/
 jiuwenclaw/logs/
+jiuwenclaw/jiuwenswarm/resources/.env.media-capability.lock
 agentsociety/quick_experiments/**/run/
 agentsociety/quick_experiments/**/run_*/
 agentsociety/quick_experiments/**/run_failed*/

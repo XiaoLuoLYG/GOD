@@ -771,67 +771,15 @@ sync_runtime_model_env() {
 }
 
 prepare_experiment() {
-  local config_path runtime_required
+  local config_path runtime_port=0
   config_path="$(experiment_config_path)"
   [[ -f "$config_path" ]] || die "Experiment config not found: $config_path"
-  runtime_required="${1:-$(experiment_requires_runtime)}"
-
-  local session_prefix="${GOD_SESSION_PREFIX:-}"
-  local prefix_file="${config_path%/init/init_config.json}/run/.god-session-prefix"
-  if [[ -z "$session_prefix" && -s "$prefix_file" ]]; then
-    session_prefix="$(cat "$prefix_file")"
+  if [[ "${1:-$(experiment_requires_runtime)}" == "1" ]]; then
+    runtime_port="$RUNTIME_AGENT_PORT"
   fi
   log "Preparing experiment: $GOD_EXPERIMENT (run $GOD_EXPERIMENT_RUN)"
-  BACKEND_ROOT="$BACKEND_ROOT" \
-  RUNTIME_REQUIRED="$runtime_required" \
-  RUNTIME_AGENT_PORT="$RUNTIME_AGENT_PORT" \
-  GOD_SESSION_PREFIX="${session_prefix:-${GOD_EXPERIMENT}_run_${GOD_EXPERIMENT_RUN}}" \
-  GOD_MAP_ID_WAS_EXPLICIT="$GOD_MAP_ID_WAS_EXPLICIT" \
-  GOD_MAP_ID="${GOD_MAP_ID:-}" \
-  python3 - "$config_path" <<'PY'
-import json
-import os
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-config = json.loads(path.read_text(encoding="utf-8"))
-runtime_required = os.environ["RUNTIME_REQUIRED"] == "1"
-agent_root = str(Path(os.environ["BACKEND_ROOT"]).resolve())
-ws_url = f"ws://127.0.0.1:{os.environ['RUNTIME_AGENT_PORT']}"
-session_prefix = os.environ["GOD_SESSION_PREFIX"]
-requested_map_id = (
-    os.environ.get("GOD_MAP_ID", "").strip()
-    if os.environ.get("GOD_MAP_ID_WAS_EXPLICIT")
-    else ""
-)
-
-for module in config.get("env_modules", []):
-    if module.get("module_type") == "PixelTownSocialEnv":
-        kwargs = module.setdefault("kwargs", {})
-        if requested_map_id:
-            kwargs["map_id"] = requested_map_id
-            kwargs["map_manifest_path"] = f"custom/maps/{requested_map_id}/map.yaml"
-        else:
-            map_id = str(kwargs.get("map_id") or "").strip()
-            manifest_path = str(kwargs.get("map_manifest_path") or "").strip()
-            if not manifest_path:
-                if not map_id:
-                    map_id = "the_ville"
-                    kwargs["map_id"] = map_id
-                kwargs["map_manifest_path"] = f"custom/maps/{map_id}/map.yaml"
-
-for agent in config.get("agents", []):
-    if not runtime_required or agent.get("agent_type") != "JiuwenClawAgent":
-        continue
-    kwargs = agent.setdefault("kwargs", {})
-    agent_id = int(agent.get("agent_id") or kwargs.get("id") or 0)
-    kwargs["jiuwenclaw_ws_url"] = ws_url
-    kwargs["session_id"] = f"{session_prefix}_agent_{agent_id}"
-    kwargs["trusted_dirs"] = [agent_root]
-
-path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-PY
+  python3 "$BACKEND_ROOT/packages/agentsociety2/agentsociety2/society/launch_config.py" \
+    "$config_path" "$BACKEND_ROOT" "$runtime_port"
 }
 
 start_runtime() {

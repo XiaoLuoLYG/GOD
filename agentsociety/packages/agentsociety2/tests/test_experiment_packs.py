@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
 
+from agentsociety2.backend.routers import experiment_configs, god_setup, replay
 from agentsociety2.backend.services import experiment_packs
+from agentsociety2.society.launch_config import prepare_launch
 
 
 def _write_experiment(root: Path) -> Path:
@@ -174,6 +177,34 @@ def test_export_experiment_pack_can_embed_map_and_agent_dependencies(tmp_path: P
         names = set(archive.namelist())
     assert "dependencies/maps/demo_map/map.yaml" in names
     assert any(name.startswith("dependencies/agent_packs/") and name.endswith("/agent_pack.yaml") for name in names)
+
+
+def test_launched_map_is_used_by_studio_replay_and_pack_export(tmp_path, monkeypatch):
+    root = tmp_path / "agentsociety"
+    experiment = _write_experiment(root)
+    config = experiment / "init/init_config.json"
+    source = config.read_bytes()
+    workspace = root / "quick_experiments"
+    monkeypatch.setenv("LIVE_WORKSPACE_PATH", str(workspace))
+    monkeypatch.setenv("GOD_MAP_ID", "event_map")
+    _write_map_dependency(root, "event_map")
+    prepare_launch(config, root, 19876)
+
+    selected = {"workspace_path": str(workspace), "hypothesis_id": "demo", "experiment_id": "1", "map_id": "demo_map"}
+    assert god_setup._current_map_id(selected) == "event_map"
+    editor = asyncio.run(experiment_configs.get_init_config("demo", "1", str(workspace)))
+    assert editor.map_id == "event_map" and editor.config == json.loads(source)
+    assert replay._resolve_experiment_map_package(str(workspace), "demo", "1").map_id == "event_map"
+
+    archive_path = tmp_path / "played-experiment.zip"
+    experiment_packs.export_experiment_pack(experiment, archive_path, agentsociety_root=root)
+    with ZipFile(archive_path) as archive:
+        assert "dependencies/maps/event_map/map.yaml" in archive.namelist()
+        assert not any(path.startswith("run/") for path in archive.namelist())
+        packed = json.loads(archive.read("init/init_config.json"))
+        assert packed["env_modules"][0]["kwargs"]["map_manifest_path"] == "custom/maps/event_map/map.yaml"
+        assert "trusted_dirs" not in packed["agents"][0]["kwargs"]
+    assert config.read_bytes() == source
 
 
 def test_imported_experiment_pack_can_be_exported_again(tmp_path: Path) -> None:

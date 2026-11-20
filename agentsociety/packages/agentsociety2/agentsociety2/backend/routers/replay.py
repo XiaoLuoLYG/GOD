@@ -42,6 +42,7 @@ from ...backend.services.map_packages import (
     localized_metadata,
     tileset_image_path,
 )
+from ...society.launch_config import apply_map_override, launch_map_id
 from ...storage.replay_metadata import AGENT_PROFILE_DATASET_CAPABILITY
 
 router = APIRouter(prefix="/replay", tags=["replay"])
@@ -441,6 +442,7 @@ def _resolve_experiment_map_package(
 ) -> Any:
     config_path = get_init_config_path(workspace_path, hypothesis_id, experiment_id)
     config = _load_structured_file(config_path)
+    apply_map_override(config, launch_map_id(config_path.parent.parent))
     env_modules = config.get("env_modules") or []
     manifest_path: Optional[Path] = None
     map_id: Optional[str] = None

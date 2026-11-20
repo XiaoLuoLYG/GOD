@@ -128,6 +128,7 @@ jobs:
             packages/agentsociety2/tests/test_experiment_configs_router.py \
             packages/agentsociety2/tests/test_agent_brains.py \
             packages/agentsociety2/tests/test_jiuwenclaw_agent_runtime.py \
+            packages/agentsociety2/tests/test_launch_config.py \
             packages/agentsociety2/tests/test_bundled_assets.py \
             packages/agentsociety2/tests/test_map_packages.py \
             packages/agentsociety2/tests/test_live_experiments.py \

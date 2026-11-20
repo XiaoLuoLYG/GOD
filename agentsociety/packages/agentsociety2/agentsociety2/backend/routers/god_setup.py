@@ -42,6 +42,7 @@ from agentsociety2.backend.services.map_packages import (
     relative_manifest_path,
     safe_resolve,
 )
+from agentsociety2.society.launch_config import launch_map_id
 from agentsociety2.society.models import InitConfig, StepsConfig
 
 router = APIRouter(prefix="/api/v1/god/setup", tags=["god-setup"])
@@ -1950,15 +1951,17 @@ def _read_current_experiment() -> dict[str, Any] | None:
 def _current_map_id(current: dict[str, Any] | None) -> str:
     if not current:
         return DEFAULT_MAP_ID
-    if current.get("map_id"):
-        return str(current["map_id"])
     hypothesis_id = str(current.get("hypothesis_id") or "")
     experiment_id = str(current.get("experiment_id") or "1")
+    workspace = Path(current.get("workspace_path") or _workspace_path()).expanduser().resolve()
+    experiment = _experiment_path(workspace, hypothesis_id, experiment_id)
+    selected_map = launch_map_id(experiment) or current.get("map_id")
+    if selected_map:
+        return str(selected_map)
     for item in experiment_registry.load_registry_entries(_workspace_path()):
         if item["hypothesis_id"] == hypothesis_id and item["experiment_id"] == experiment_id:
             return str(item["map_id"])
-    workspace = Path(current.get("workspace_path") or _workspace_path()).expanduser().resolve()
-    config_path = _experiment_path(workspace, hypothesis_id, experiment_id) / "init" / "init_config.json"
+    config_path = experiment / "init" / "init_config.json"
     try:
         config = json.loads(config_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):

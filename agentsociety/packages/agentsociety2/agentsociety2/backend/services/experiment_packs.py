@@ -12,6 +12,7 @@ from typing import Any
 import yaml
 
 from agentsociety2.backend.services import agent_packs, map_packages, package_archives
+from agentsociety2.society.launch_config import apply_map_override, launch_map_id
 from agentsociety2.society.models import InitConfig, StepsConfig
 
 _PRIVATE_INIT_CONFIG_KEYS = {"session_id", "trusted_dirs"}
@@ -93,9 +94,9 @@ def export_experiment_pack(
         shutil.copytree(experiment_path, staging, ignore=ignore)
         if not include_legacy_run_artifacts:
             _remove_runtime_state(staging)
+        _sanitize_experiment_pack_files(staging, map_override=launch_map_id(experiment_path))
         if agentsociety_root is not None:
             _stage_dependencies(staging, agentsociety_root=agentsociety_root)
-        _sanitize_experiment_pack_files(staging)
         return package_archives.zip_directory(staging, zip_path)
 
 
@@ -238,7 +239,7 @@ def sanitize_experiment_pack_config(
     return {}
 
 
-def _sanitize_experiment_pack_files(package_path: Path, *, map_id: str | None = None) -> None:
+def _sanitize_experiment_pack_files(package_path: Path, *, map_override: str | None = None) -> None:
     init_path = package_path / "init" / "init_config.json"
     if not init_path.exists():
         return
@@ -248,7 +249,8 @@ def _sanitize_experiment_pack_files(package_path: Path, *, map_id: str | None = 
         return
     if not isinstance(raw_config, dict):
         return
-    sanitized = sanitize_experiment_pack_config(raw_config, map_id=map_id)
+    sanitized = sanitize_experiment_pack_config(raw_config)
+    apply_map_override(sanitized, map_override)
     if sanitized != raw_config:
         init_path.write_text(
             json.dumps(sanitized, ensure_ascii=False, indent=2) + "\n",

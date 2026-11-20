@@ -324,19 +324,6 @@ function Set-EnvValuesInFile {
   Write-TextUtf8NoBom $Path (($out -join "`n").TrimEnd() + "`n")
 }
 
-function Set-ObjectProperty {
-  param(
-    [object]$Object,
-    [string]$Name,
-    [object]$Value
-  )
-  if ($Object.PSObject.Properties[$Name]) {
-    $Object.$Name = $Value
-  } else {
-    $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value
-  }
-}
-
 function Get-ObjectPropertyValue {
   param(
     [AllowNull()][object]$Object,
@@ -1163,69 +1150,10 @@ function Prepare-Experiment {
     $RuntimeRequired = Test-ExperimentRequiresRuntime
   }
 
-  $prefixFile = Join-PathMany (Split-Path -Parent (Split-Path -Parent $configPath)) "run" ".god-session-prefix"
-  $savedPrefix = if (Test-Path -LiteralPath $prefixFile -PathType Leaf) {
-    [System.IO.File]::ReadAllText($prefixFile).Trim()
-  } else { "" }
-  if (-not $savedPrefix) {
-    $savedPrefix = "$($script:GodExperiment)_run_$($script:GodExperimentRun)"
-  }
-  $sessionPrefix = Get-EnvValue "GOD_SESSION_PREFIX" $savedPrefix
+  $port = if ($RuntimeRequired) { $script:RuntimeAgentPort } else { 0 }
+  $helper = Join-PathMany "packages" "agentsociety2" "agentsociety2" "society" "launch_config.py"
   Write-GodLog "Preparing experiment: $($script:GodExperiment) (run $($script:GodExperimentRun))"
-  $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
-  $agentRoot = (Resolve-Path $script:BackendRoot).Path
-  $wsUrl = "ws://127.0.0.1:$($script:RuntimeAgentPort)"
-  $requestedMapId = if ($script:InitialEnv.GOD_MAP_ID -ne $null) { Get-EnvValue "GOD_MAP_ID" "" } else { "" }
-
-  foreach ($module in @(Get-ObjectPropertyValue -Object $config -Name "env_modules" -Default @())) {
-    if ($null -eq $module) {
-      continue
-    }
-    if ((Get-ObjectPropertyValue $module "module_type" "") -ne "PixelTownSocialEnv") {
-      continue
-    }
-    if (-not $module.PSObject.Properties["kwargs"] -or $null -eq $module.kwargs) {
-      Set-ObjectProperty $module "kwargs" ([pscustomobject]@{})
-    }
-    $kwargs = $module.kwargs
-    if (-not [string]::IsNullOrWhiteSpace($requestedMapId)) {
-      Set-ObjectProperty $kwargs "map_id" $requestedMapId
-      Set-ObjectProperty $kwargs "map_manifest_path" "custom/maps/$requestedMapId/map.yaml"
-    } else {
-      $mapId = if ($kwargs.PSObject.Properties["map_id"]) { [string]$kwargs.map_id } else { "" }
-      $manifestPath = if ($kwargs.PSObject.Properties["map_manifest_path"]) { [string]$kwargs.map_manifest_path } else { "" }
-      if ([string]::IsNullOrWhiteSpace($manifestPath)) {
-        if ([string]::IsNullOrWhiteSpace($mapId)) {
-          $mapId = "the_ville"
-          Set-ObjectProperty $kwargs "map_id" $mapId
-        }
-        Set-ObjectProperty $kwargs "map_manifest_path" "custom/maps/$mapId/map.yaml"
-      }
-    }
-  }
-
-  foreach ($agent in @(Get-ObjectPropertyValue -Object $config -Name "agents" -Default @())) {
-    if (-not $RuntimeRequired -or (Get-ObjectPropertyValue $agent "agent_type" "") -cne "JiuwenClawAgent") {
-      continue
-    }
-    if (-not $agent.PSObject.Properties["kwargs"] -or $null -eq $agent.kwargs) {
-      Set-ObjectProperty $agent "kwargs" ([pscustomobject]@{})
-    }
-    $kwargs = $agent.kwargs
-    $agentId = 0
-    $rawAgentId = Get-ObjectPropertyValue $agent "agent_id" $null
-    $rawKwargsId = Get-ObjectPropertyValue $kwargs "id" $null
-    if ($rawAgentId) {
-      $agentId = [int]$rawAgentId
-    } elseif ($rawKwargsId) {
-      $agentId = [int]$rawKwargsId
-    }
-    Set-ObjectProperty $kwargs "jiuwenclaw_ws_url" $wsUrl
-    Set-ObjectProperty $kwargs "session_id" "$sessionPrefix`_agent_$agentId"
-    Set-ObjectProperty $kwargs "trusted_dirs" @($agentRoot)
-  }
-
-  Write-TextUtf8NoBom $configPath (($config | ConvertTo-Json -Depth 100) + "`n")
+  Invoke-CheckedCommand -FilePath (Get-ToolPath @("uv")) -Arguments @("run", "--no-project", "--managed-python", "python", $helper, (Resolve-Path -LiteralPath $configPath).Path, (Resolve-Path -LiteralPath $script:BackendRoot).Path, [string]$port) -WorkingDirectory $script:BackendRoot
 }
 
 function Start-Runtime {

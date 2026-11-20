@@ -151,6 +151,22 @@ def main() -> None:
                 assert stopped.returncode == 0, stopped.stderr
                 owned.wait(timeout=10)
                 assert listener.poll() is None
+
+            # Session preparation runs before the backend connection. Keep that connection local and occupied.
+            ports["GOD_BACKEND_PORT"] = str(frontend_port)
+            env_file.write_text("".join(f"{name}={port}\n" for name, port in ports.items()), encoding="utf-8")
+            env.update(
+                BACKEND_ROOT=str(root / "agentsociety"), GOD_AGENT_BACKEND="jiuwenclaw",
+                GOD_SESSION_PREFIX="fixture-live", GOD_MAP_ID="pku",
+            )
+            stock = root / "agentsociety/quick_experiments/hypothesis_god_town/experiment_1/init/init_config.json"
+            config.write_bytes(stock.read_bytes())
+            prepared = run("session")
+            assert f"Port {frontend_port} is occupied" in prepared.stdout + prepared.stderr, prepared
+            assert config.read_bytes() == stock.read_bytes(), "the launcher rewrote the experiment template"
+            settings = json.loads((config.parents[1] / "run/.god-launch.json").read_text(encoding="utf-8"))
+            assert settings["runtime_port"] == int(ports["RUNTIME_AGENT_PORT"])
+            assert settings["session_prefix"] == "fixture-live" and settings["map_id"] == "pku"
             print("port conflicts are checked before setup; moved ports preserve ownership; stop leaves unrelated listeners")
         finally:
             if listener.poll() is None:

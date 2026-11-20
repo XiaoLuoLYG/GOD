@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from zipfile import ZipFile
 
+import pytest
+
 from agentsociety2.backend.services import map_packages, package_imports
 from agentsociety2.backend.services.public_replay_export import (
     export_curated_experiment_packs,
@@ -47,7 +49,8 @@ def test_load_operator_commands_backfills_markdown_artifacts(tmp_path: Path) -> 
     ]
 
 
-def test_export_public_replay_writes_static_bundle(tmp_path: Path) -> None:
+@pytest.mark.parametrize("map_override", [False, True])
+def test_export_public_replay_writes_static_bundle(tmp_path: Path, map_override: bool) -> None:
     workspace = tmp_path / "quick_experiments"
     experiment_root = workspace / "hypothesis_demo_world" / "experiment_1"
     run_dir = experiment_root / "run"
@@ -55,6 +58,9 @@ def test_export_public_replay_writes_static_bundle(tmp_path: Path) -> None:
     run_dir.mkdir(parents=True)
     init_dir.mkdir(parents=True)
     map_manifest = _write_map_package(tmp_path / "custom" / "maps" / "demo")
+    if map_override:
+        (run_dir / ".god-launch.json").write_text(json.dumps({"map_id": "demo"}), encoding="utf-8")
+        map_manifest = tmp_path / "custom/maps/original/map.yaml"
     init_dir.joinpath("init_config.json").write_text(
         json.dumps(
                 {
@@ -184,7 +190,11 @@ def test_export_public_replay_writes_static_bundle(tmp_path: Path) -> None:
         assert str(tmp_path) not in exported_text
         assert "/Users/" not in exported_text
         assert exported_config["env_modules"][0]["kwargs"]["map_id"] == "demo"
-        assert "map_manifest_path" not in exported_config["env_modules"][0]["kwargs"]
+        map_kwargs = exported_config["env_modules"][0]["kwargs"]
+        if map_override:
+            assert map_kwargs["map_manifest_path"] == "custom/maps/demo/map.yaml"
+        else:
+            assert "map_manifest_path" not in map_kwargs
         assert not any(name.startswith("run/") or name.startswith("run_") for name in names)
         assert not any(".runtime/" in name for name in names)
         assert not any(name.endswith(("sqlite.db", ".sqlite", ".sqlite3", ".log")) for name in names)

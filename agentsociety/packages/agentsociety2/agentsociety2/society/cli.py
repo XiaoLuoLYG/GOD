@@ -56,6 +56,7 @@ from agentsociety2.registry import (
     scan_and_register_custom_modules,
 )
 from agentsociety2.storage import ReplayWriter
+from agentsociety2.society.launch_config import apply_launch_settings, read_launch_settings
 from agentsociety2.society.models import (
     InitConfig,
     RunStep,
@@ -215,6 +216,9 @@ class ExperimentRunner:
 
         # 使用pydantic验证配置
         try:
+            experiment_config = self.run_dir.parent / "init" / "init_config.json"
+            if self.run_dir.name == "run" and config_path.resolve() == experiment_config.resolve():
+                apply_launch_settings(data, read_launch_settings(self.run_dir))
             return InitConfig.model_validate(data)
         except Exception as e:
             raise ValueError(f"Invalid config file format: {e}") from e
