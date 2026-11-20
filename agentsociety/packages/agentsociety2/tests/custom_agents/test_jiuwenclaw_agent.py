@@ -443,7 +443,7 @@ async def _forced_runtime_ignores_legacy_action_proposal(tmp_path: Path):
             / ".runtime"
             / "logs"
             / "agent_state_snapshot.json"
-        ).read_text()
+        ).read_text(encoding="utf-8")
     )
     assert snapshot["last_skill_decision"]["selected_skill_id"]
 
@@ -512,25 +512,28 @@ async def _step_runs_agentsociety_skill_runtime_and_applies_proposal(tmp_path: P
     assert "The agent accepts the grounded routine." in result
     assert env.moves == [(1, "school")]
     work_dir = tmp_path / "agents" / "agent_0001"
-    assert json.loads((work_dir / "state" / "mounted_skills.json").read_text())[:5] == [
+    mounted_skills = json.loads((work_dir / "state" / "mounted_skills.json").read_text(encoding="utf-8"))
+    assert mounted_skills[:5] == [
         "routine.daily",
         "social.reply",
         "memory.record",
         "map.navigate",
         "safety.respond",
     ]
-    skill_result = json.loads((work_dir / "state" / "skill_results" / "routine_daily.json").read_text())
+    skill_result = json.loads(
+        (work_dir / "state" / "skill_results" / "routine_daily.json").read_text(encoding="utf-8")
+    )
     assert skill_result["skill_id"] == "routine.daily"
     assert skill_result["world_effect"]["type"] == "move"
     assert skill_result["world_effect"]["location_id"] == "school"
     assert (work_dir / "memory" / "skill_memory.jsonl").is_file()
     session_state = json.loads(
-        (work_dir / ".runtime" / "logs" / "session_state.json").read_text()
+        (work_dir / ".runtime" / "logs" / "session_state.json").read_text(encoding="utf-8")
     )
     assert "routine.daily" in session_state["mounted_skill_ids"]
     assert session_state["activated_skills"] == ["routine.daily"]
     snapshot = json.loads(
-        (work_dir / ".runtime" / "logs" / "agent_state_snapshot.json").read_text()
+        (work_dir / ".runtime" / "logs" / "agent_state_snapshot.json").read_text(encoding="utf-8")
     )
     assert snapshot["last_skill_decision"]["selected_skill_id"] == "routine.daily"
     assert snapshot["last_skill_result"]["skill_id"] == "routine.daily"
@@ -564,7 +567,7 @@ async def _unmounted_skill_decision_falls_back_to_mounted_skill(tmp_path: Path):
     assert env.moves == [(1, "school")]
     work_dir = tmp_path / "agents" / "agent_0001"
     snapshot = json.loads(
-        (work_dir / ".runtime" / "logs" / "agent_state_snapshot.json").read_text()
+        (work_dir / ".runtime" / "logs" / "agent_state_snapshot.json").read_text(encoding="utf-8")
     )
     assert snapshot["last_skill_decision"]["selected_skill_id"] == "routine.daily"
     assert snapshot["last_skill_decision"]["fallback"] is True
