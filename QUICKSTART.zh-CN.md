@@ -132,6 +132,12 @@ http://127.0.0.1:5174/pixel-replay/god_town/1
 
 把服务地址、密钥和命令参数留在本机 `.env`。例如 `{"type":"command","profile":"local-agent"}` 会从本机的 `GOD_AGENT_COMMANDS` 选择命令。受信任的包装脚本从 stdin 读提示词，从 stdout 输出含 `selected_skill_id` 和 `args` 的 JSON，或输出 Ask 的纯文本答案。只需选择和问答时，在包装脚本中禁用工具。
 
+本机已安装并登录 Claude Code 或 Cursor CLI 时，可将下面一行加入本地 `.env`。在实验的 `agent_backend` 中填 `{"type":"command","profile":"claude"}`，使用 Cursor 时改成 `"profile":"cursor"`。每次选技能或 Ask 都启动一个新进程。Cursor 的 `--trust` 针对 GOD 为这次调用创建的空临时目录。
+
+```dotenv
+GOD_AGENT_COMMANDS='{"claude":["claude","-p","--tools=","--disable-slash-commands","--no-session-persistence","--output-format","text"],"cursor":["cursor-agent","-p","--trust","--mode","ask","--sandbox","enabled","--output-format","text"]}'
+```
+
 更改后端设置后，运行 `./scripts/god.sh restart`。
 
 ## 6. 重启或重新开跑

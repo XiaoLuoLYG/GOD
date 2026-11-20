@@ -132,6 +132,12 @@ The choice-only backends receive mounted skills that have no required arguments.
 
 Keep provider URLs, keys and command arguments in the local `.env`. A `command` backend such as `{"type":"command","profile":"local-agent"}` selects a profile from that machine's `GOD_AGENT_COMMANDS`. The trusted wrapper reads the prompt from stdin and writes a skill decision object with `selected_skill_id` and `args`, or a plain-text Ask answer, to stdout. Configure wrappers with tools disabled when they only need to select or answer.
 
+For an installed, signed-in Claude Code or Cursor CLI, add the following line to the local `.env`. Set the experiment’s `agent_backend` to `{"type":"command","profile":"claude"}` or use `"profile":"cursor"`. Each choice and Ask starts a fresh process. Cursor’s trust flag applies to the empty temporary directory GOD creates for that call.
+
+```dotenv
+GOD_AGENT_COMMANDS='{"claude":["claude","-p","--tools=","--disable-slash-commands","--no-session-persistence","--output-format","text"],"cursor":["cursor-agent","-p","--trust","--mode","ask","--sandbox","enabled","--output-format","text"]}'
+```
+
 Run `./scripts/god.sh restart` after changing the backend settings.
 
 ## 6. Restart or run fresh
