@@ -6,7 +6,6 @@ import json
 import os
 from pathlib import Path
 import shutil
-import signal
 import socket
 import subprocess
 import sys
@@ -131,7 +130,7 @@ def main() -> None:
 
             # JiuwenSwarm workers have their own session and outlive a graceful Front stop.
             worker_code = """
-import os, signal, socket, sys, time
+import signal, socket, sys, time
 from pathlib import Path
 marker = Path(sys.argv[1])
 if sys.argv[2] == "stubborn":
@@ -144,8 +143,10 @@ else:
 sock = socket.socket()
 sock.bind(("127.0.0.1", int(sys.argv[3])))
 sock.listen(32)
-marker.with_suffix(".ready").write_text(str(os.getpid()))
-time.sleep(90)
+marker.with_suffix(".ready").touch()
+deadline = time.monotonic() + 90
+while marker.with_suffix(".alive").exists() and time.monotonic() < deadline:
+    time.sleep(0.05)
 """
             front_code = """
 import json, os, subprocess, sys, time
@@ -187,6 +188,8 @@ function Stop-RuntimeInstance {
                 native_stop.chmod(0o755)
             for mode in ("graceful", "stubborn"):
                 marker = fixture / f"{mode}.signal"
+                alive = marker.with_suffix(".alive")
+                alive.touch()
                 log = fixture / ".god" / "logs" / "runtime.log"
                 front_cmd = [sys.executable, "-u", str(front_script), str(worker_script), str(metadata),
                              str(marker), mode, str(runtime_port)]
@@ -198,7 +201,6 @@ function Stop-RuntimeInstance {
                 else:
                     with log.open("w", encoding="utf-8") as stream:
                         front = subprocess.Popen(front_cmd, stdout=stream, stderr=stream, start_new_session=True)
-                worker_id = None
                 try:
                     (fixture / ".god" / "pids" / "runtime.pid").write_text(f"{front.pid}\n", encoding="ascii")
                     ready = marker.with_suffix(".ready")
@@ -208,7 +210,6 @@ function Stop-RuntimeInstance {
                         time.sleep(0.05)
                     else:
                         raise AssertionError(f"the {mode} worker did not start")
-                    worker_id = int(ready.read_text())
                     status = run("status")
                     assert status.returncode == 0 and f"{runtime_port} up" in status.stdout, status.stdout + status.stderr
                     stopped = run("stop")
@@ -223,11 +224,7 @@ function Stop-RuntimeInstance {
                         assert marker.exists(), "the worker did not receive graceful SIGTERM"
                     assert listener.poll() is None, "worker cleanup killed an unrelated process"
                 finally:
-                    if worker_id:
-                        try:
-                            os.kill(worker_id, signal.SIGTERM if windows else signal.SIGKILL)
-                        except ProcessLookupError:
-                            pass
+                    alive.unlink(missing_ok=True)
                     if front.poll() is None:
                         front.terminate()
                     front.wait(timeout=10)
