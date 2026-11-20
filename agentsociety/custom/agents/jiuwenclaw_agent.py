@@ -413,7 +413,6 @@ Initialization example:
         return (
             "\n实验上下文：\n"
             f"{json.dumps(_json_safe(self._experiment_context), ensure_ascii=False)}\n"
-            f"{CHINESE_OUTPUT_POLICY}\n"
         )
 
     async def ask(
@@ -467,7 +466,6 @@ Initialization example:
             "这是给 AgentSociety 模拟智能体的外部提问。\n"
             f"当前模拟时间：{t.isoformat()}\n"
             f"输出要求：{requirement}\n"
-            f"{CHINESE_OUTPUT_POLICY}\n"
             "请以该智能体第一人称回答，使用可用的模拟状态、近期提问、角色档案和会话上下文。"
             "只读提问不得改变 AgentSociety 环境。\n\n"
             f"问题：\n{prompt}"
@@ -1718,8 +1716,9 @@ Initialization example:
             f"智能体姓名：{self.name}\n"
             f"角色档案：{json.dumps(_json_safe(self.get_profile()), ensure_ascii=False)}\n"
             f"{self._experiment_context_text()}"
-            f"{CHINESE_OUTPUT_POLICY}\n"
-            f"约束：{readonly_text}\n\n"
+            f"约束：{readonly_text}\n"
+            "实验设定和此前模拟步骤中的语言约定仅用于模拟内的行动、对话和记录。"
+            "本次问答使用当前问题指定的回答语言，未指定时使用简体中文。\n\n"
             f"用户或环境问题：\n{message}"
         )
 

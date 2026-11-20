@@ -605,6 +605,7 @@ def test_codex_routes_steps_and_ask_to_the_same_resident_session(tmp_path, monke
     from types import SimpleNamespace
 
     from agentsociety2.agent.brains import codex
+    from agentsociety2.backend.routers.live_experiments import AskRequest, LiveExperimentSession
 
     # Reproduce a legacy Windows pipe encoding on every host, keeping the real skill subprocess.
     spawn = asyncio.create_subprocess_exec
@@ -621,10 +622,12 @@ def test_codex_routes_steps_and_ask_to_the_same_resident_session(tmp_path, monke
     async def run_codex(command, prompt, **_):
         calls.append((command, prompt))
         session_id = command[-2] if "resume" in command else session_ids.pop(0)
-        content = (
-            json.dumps({"selected_skill_id": "memory.record", "args": {"content": "记录了蓝灯暗号"}})
-            if "选择本步骤唯一要执行的技能" in prompt else "记得蓝灯暗号"
-        )
+        if "选择本步骤唯一要执行的技能" in prompt:
+            content = json.dumps({"selected_skill_id": "memory.record", "args": {"content": "记录了蓝灯暗号"}})
+        elif "Answer in English only." in prompt:
+            content = "I remember the blue light."
+        else:
+            content = "记得蓝灯暗号"
         events = [
             {"type": "thread.started", "thread_id": session_id},
             {"type": "item.completed", "item": {"type": "agent_message", "text": content}},
@@ -655,30 +658,50 @@ def test_codex_routes_steps_and_ask_to_the_same_resident_session(tmp_path, monke
         assert "蓝灯暗号" in (ada._agent_work_dir / "memory/skill_memory.jsonl").read_text(encoding="utf-8")
         assert "居民7的私信0" in calls[0][1] and "居民7的私信6" in calls[0][1]
         assert "请记住蓝灯暗号" in calls[0][1]
+        assert "都不能出现英文句子或英文词组" in calls[0][1]
         await ada.close()
 
-        restarted = _agent(brain="codex", common_skill_ids=["memory.record"])
+        restarted = _agent(brain="codex", common_skill_ids=["memory.record"], experiment_context={
+            "title": "蓝灯小镇", "language": "仅使用简体中文", "shared_norms": ["只使用简体中文"]
+        })
         await restarted.init(env)
         assert "蓝灯暗号" in await restarted.answer_external_question("暗号是什么？", t=t)
         assert calls[1][0][-3:] == ["--json", "01a1d000-0000-7000-8000-000000000001", "-"]
         assert "resume" in calls[1][0]
         assert "记录了蓝灯暗号" in calls[1][1] and "上一步技能" in calls[1][1]
         assert "居民7的私信0" in calls[1][1]
+
+        live = LiveExperimentSession(workspace_path=tmp_path, hypothesis_id="town", experiment_id="1", default_tick=60)
+        live.society = SimpleNamespace(_agents=[restarted], current_time=t, step_count=1)
+        live.status = "waiting"
+        group = await live.ask(AskRequest(
+            question="暗号是什么？", target={"type": "agents", "agent_ids": [7]}, response_language="en"
+        ))
+        individual = await live.ask(AskRequest(question="What is the code?", target={"type": "agent", "agent_id": 7}))
+        assert "I remember the blue light." in group.result
+        assert "记得蓝灯暗号" in individual.result
+        assert "Answer in English only." in calls[2][1]
+        for command, prompt in calls[2:4]:
+            assert "resume" in command and command[-2] == calls[1][0][-2]
+            assert "蓝灯小镇" in prompt and "记录了蓝灯暗号" in prompt
+            assert "都不能出现英文句子或英文词组" not in prompt
+        assert "未指定时使用简体中文" in calls[1][1]
+        assert "请使用简体中文回答" in calls[3][1]
         await restarted.close()
 
         other = _agent(id=8, brain="codex", common_skill_ids=["memory.record"])
         await other.init(env)
         await other.answer_external_question("你收到什么私信？", t=t)
-        assert "resume" not in calls[2][0]
-        assert "居民8的私信0" in calls[2][1] and "居民7的私信" not in calls[2][1]
-        assert "记录了蓝灯暗号" not in calls[2][1]
+        assert "resume" not in calls[-1][0]
+        assert "居民8的私信0" in calls[-1][1] and "居民7的私信" not in calls[-1][1]
+        assert "记录了蓝灯暗号" not in calls[-1][1]
         await other.close()
 
         forgetful = _agent(brain="codex", enable_memory=False, common_skill_ids=["memory.record"])
         await forgetful.init(env)
         await forgetful.answer_external_question("你好", t=t)
         await forgetful.answer_external_question("你好", t=t)
-        for command, prompt in calls[3:]:
+        for command, prompt in calls[-2:]:
             assert "--ephemeral" in command and "resume" not in command
             assert "近期技能记忆" not in prompt
         await forgetful.close()

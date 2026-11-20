@@ -676,13 +676,13 @@ class LiveExperimentSession:
         target: AskTarget,
         response_language: Literal["zh", "en"] = "zh",
     ) -> str:
-        answer_prompt = question
-        if response_language == "en":
-            answer_prompt = (
-                f"{question}\n\n"
-                "Answer in English only. Preserve the simulation facts and keep "
-                "proper names unchanged unless an established English name is available."
-            )
+        language_instruction = (
+            "Answer in English only. Preserve the simulation facts and keep "
+            "proper names unchanged unless an established English name is available."
+            if response_language == "en"
+            else "请使用简体中文回答，保留仿真事实和专有名称。"
+        )
+        answer_prompt = f"{question}\n\n{language_instruction}"
         if target.type == "society":
             return await society.ask(answer_prompt)
 
