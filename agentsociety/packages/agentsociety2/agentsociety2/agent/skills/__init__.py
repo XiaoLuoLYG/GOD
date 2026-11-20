@@ -590,6 +590,7 @@ class SkillRegistry:
 
         # 使用环境变量白名单，避免泄露敏感信息
         env = {k: v for k, v in os.environ.items() if k in ALLOWED_ENV_VARS}
+        env["PYTHONIOENCODING"] = "utf-8"
         env["SKILL_NAME"] = skill_name
         env["SKILL_DIR"] = str(skill_root)
         env["AGENT_WORK_DIR"] = str(work_dir)

@@ -601,10 +601,18 @@ def test_command_backend_reads_request_and_returns_a_typed_decision(monkeypatch)
 
 
 def test_codex_routes_steps_and_ask_to_the_same_resident_session(tmp_path, monkeypatch):
+    import asyncio
     from types import SimpleNamespace
 
     from agentsociety2.agent.brains import codex
 
+    # Reproduce a legacy Windows pipe encoding on every host, keeping the real skill subprocess.
+    spawn = asyncio.create_subprocess_exec
+
+    async def spawn_skill(*args, env, **kwargs):
+        return await spawn(*args, env={"PYTHONIOENCODING": "cp1252", **env}, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn_skill)
     calls = []
     session_ids = [f"01a1d000-0000-7000-8000-{index:012d}" for index in range(1, 5)]
     monkeypatch.setattr(codex, "find_codex", lambda: "/fake/codex")
@@ -642,7 +650,9 @@ def test_codex_routes_steps_and_ask_to_the_same_resident_session(tmp_path, monke
         await ada.step(60, t)
         assert ada._last_skill_decision["decision_backend"] == "codex"
         assert not ada._last_skill_decision.get("fallback")
-        assert "蓝灯暗号" in (ada._agent_work_dir / "memory/skill_memory.jsonl").read_text()
+        result = ada._last_skill_results[0]["result"]
+        assert result["ok"], result["stderr"]
+        assert "蓝灯暗号" in (ada._agent_work_dir / "memory/skill_memory.jsonl").read_text(encoding="utf-8")
         assert "居民7的私信0" in calls[0][1] and "居民7的私信6" in calls[0][1]
         assert "请记住蓝灯暗号" in calls[0][1]
         await ada.close()
