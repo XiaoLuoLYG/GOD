@@ -1,16 +1,18 @@
+import { lazy, Suspense } from 'react'
 import ReactDOM from 'react-dom/client'
 import './index.css'
 import './i18n'
 import { Navigate, RouterProvider, createBrowserRouter } from 'react-router-dom'
-import { ConfigProvider, ThemeConfig } from 'antd'
+import { ConfigProvider, Spin, ThemeConfig } from 'antd'
 import enUS from 'antd/locale/en_US'
 import zhCN from 'antd/locale/zh_CN'
 import { useTranslation } from 'react-i18next'
-import PixelReplay from './pages/PixelReplay'
-import AgentBuilder from './pages/AgentBuilder'
 import SetupPage from './pages/Setup'
-import SkillsPage from './pages/Skills'
-import MapStudioPage from './pages/MapStudio'
+
+const PixelReplay = lazy(() => import('./pages/PixelReplay'))
+const AgentBuilder = lazy(() => import('./pages/AgentBuilder'))
+const SkillsPage = lazy(() => import('./pages/Skills'))
+const MapStudioPage = lazy(() => import('./pages/MapStudio'))
 
 // Under code-server path proxy (e.g. /proxy/5174/), keep router + asset base aligned.
 const routerBasename = (() => {
@@ -97,7 +99,9 @@ const App = () => {
 
     return (
         <ConfigProvider theme={theme} locale={antdLocale}>
-            <RouterProvider router={router} />
+            <Suspense fallback={<Spin fullscreen />}>
+                <RouterProvider router={router} />
+            </Suspense>
         </ConfigProvider>
     );
 }
