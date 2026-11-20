@@ -13,6 +13,17 @@ from typing import Any
 _SETTINGS_FILE = ".god-launch.json"
 
 
+def write_run_json(path: Path, data: dict[str, Any], *, indent: int | None = None) -> None:
+    handle = NamedTemporaryFile("w", dir=path.parent, encoding="utf-8", delete=False)
+    temp = Path(handle.name)
+    try:
+        with handle:
+            json.dump(data, handle, ensure_ascii=False, indent=indent)
+        temp.replace(path)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
 def read_launch_settings(run_dir: Path) -> dict[str, Any]:
     path = run_dir / _SETTINGS_FILE
     try:
@@ -95,13 +106,7 @@ def prepare_launch(config_path: Path, backend_root: Path, runtime_port: int) -> 
     if settings == previous:
         return
     run_dir.mkdir(parents=True, exist_ok=True)
-    with NamedTemporaryFile("w", dir=run_dir, encoding="utf-8", delete=False) as handle:
-        temp = Path(handle.name)
-        json.dump(settings, handle, ensure_ascii=False)
-    try:
-        temp.replace(run_dir / _SETTINGS_FILE)
-    finally:
-        temp.unlink(missing_ok=True)
+    write_run_json(run_dir / _SETTINGS_FILE, settings)
 
 
 if __name__ == "__main__":

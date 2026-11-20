@@ -351,6 +351,43 @@ def test_openai_compat_corrects_a_map_interaction_once(monkeypatch):
     assert decision["usage"] == {"input_tokens": 15, "output_tokens": 5}
 
 
+def test_http_retries_connection_setup_without_resending_a_delivered_request(monkeypatch):
+    import aiohttp
+    from aiohttp import web
+    from agentsociety2.agent.brains.http import post_json
+
+    connect = aiohttp.TCPConnector.connect
+    attempts = 0
+    received = []
+
+    async def flaky_connect(connector, req, *args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise aiohttp.ClientConnectorError(req.connection_key, ConnectionResetError("connection reset"))
+        return await connect(connector, req, *args, **kwargs)
+
+    async def receive(request):
+        received.append(await request.json())
+        return web.json_response({"ok": True})
+
+    async def run_case():
+        app = web.Application()
+        app.router.add_post("/", receive)
+        server = web.AppRunner(app)
+        await server.setup()
+        try:
+            await web.TCPSite(server, "127.0.0.1", 0).start()
+            url = f"http://127.0.0.1:{server.addresses[0][1]}/"
+            return await post_json(url, "local-test", {"question": "ready"}, timeout_s=2)
+        finally:
+            await server.cleanup()
+
+    monkeypatch.setattr(aiohttp.TCPConnector, "connect", flaky_connect)
+    assert anyio.run(run_case) == {"ok": True}
+    assert attempts == 2 and received == [{"question": "ready"}]
+
+
 def test_openai_compat_http_error_falls_back_without_response_body(monkeypatch):
     monkeypatch.delenv("GOD_AGENT_BACKEND", raising=False)
     monkeypatch.setenv("GOD_LLM_API_KEY", "sk-test")

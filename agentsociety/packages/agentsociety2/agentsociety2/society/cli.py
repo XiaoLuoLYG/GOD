@@ -56,7 +56,7 @@ from agentsociety2.registry import (
     scan_and_register_custom_modules,
 )
 from agentsociety2.storage import ReplayWriter
-from agentsociety2.society.launch_config import apply_launch_settings, read_launch_settings
+from agentsociety2.society.launch_config import apply_launch_settings, read_launch_settings, write_run_json
 from agentsociety2.society.models import (
     InitConfig,
     RunStep,
@@ -337,17 +337,13 @@ class ExperimentRunner:
         if status == "completed" or status == "failed":
             pid_data["end_time"] = datetime.now(timezone.utc).isoformat()
 
-        with open(self.pid_file, "w", encoding="utf-8") as f:
-            json.dump(pid_data, f, indent=2, ensure_ascii=False)
+        write_run_json(self.pid_file, pid_data, indent=2)
 
-    def _update_progress(self):
+    def _update_progress(self, status: str = "running", **details):
         """更新模拟进度到 pid.json"""
         if self.society:
-            progress_data = {
-                "simulation_time": self.society.current_time.isoformat(),
-                "step_count": self.society.step_count,
-            }
-            self._update_pid_file("running", **progress_data)
+            details.update(simulation_time=self.society.current_time.isoformat(), step_count=self.society.step_count)
+        self._update_pid_file(status, **details)
 
     async def run(
         self,
@@ -449,6 +445,7 @@ class ExperimentRunner:
             # 执行步骤
             logger.info(f"Executing {len(steps)} steps...")
 
+            failed_steps = []
             for step_idx, step in enumerate(steps):
                 if self._should_terminate:
                     logger.info("Termination requested, stopping execution")
@@ -578,22 +575,23 @@ class ExperimentRunner:
                     self._update_progress()
 
                 except Exception as e:
-                    logger.error(
-                        f"Error executing step {step_idx} ({step_type}): {e}",
-                        exc_info=True,
-                    )
-
-                    # 更新进度到 pid.json（步骤失败）
-                    self._update_progress()
+                    message = f"Error executing step {step_idx} ({step_type}): {e}"
+                    logger.error(message, exc_info=True)
+                    failed_steps.append(message)
 
             # 关闭society
             await self.society.close()
+            if failed_steps:
+                raise RuntimeError("\n".join(failed_steps))
+            self._update_progress("completed")
             logger.info("Experiment completed successfully")
-            self._update_pid_file("completed")
 
         except Exception as e:
             logger.error(f"Experiment failed: {e}", exc_info=True)
-            self._update_pid_file("failed", error=str(e))
+            try:
+                self._update_progress("failed", error=str(e))
+            except OSError as status_error:
+                logger.error("Could not save experiment status: %s", status_error)
             raise
 
 
