@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -16,6 +17,10 @@ import time
 def main() -> None:
     root = Path(__file__).resolve().parent.parent
     windows = os.name == "nt"
+
+    def quote(value: str) -> str:
+        return "'" + value.replace("'", "''") + "'"
+
     with tempfile.TemporaryDirectory(prefix="god launcher ") as directory:
         fixture = Path(directory).resolve()
         scripts = fixture / "scripts"
@@ -88,9 +93,6 @@ def main() -> None:
                 logfile = fixture / ".god" / "logs" / f"{service}.log"
                 serve_cmd = [sys.executable, "-u", "-c", serve, str(port)]
                 if windows:
-                    def quote(value: str) -> str:
-                        return "'" + value.replace("'", "''") + "'"
-
                     encoded = base64.b64encode(
                         ("& " + " ".join(map(quote, serve_cmd)) + " >> " + quote(str(logfile))).encode("utf-16le")
                     ).decode("ascii")
@@ -126,6 +128,125 @@ def main() -> None:
                 assert stopped.returncode == 0, stopped.stderr
                 owned.wait(timeout=10)
                 assert listener.poll() is None
+
+            # JiuwenSwarm workers have their own session and outlive a graceful Front stop.
+            worker_code = """
+import os, signal, socket, sys, time
+from pathlib import Path
+marker = Path(sys.argv[1])
+if sys.argv[2] == "stubborn":
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+else:
+    def stop(*_):
+        marker.write_text("SIGTERM")
+        raise SystemExit(0)
+    signal.signal(signal.SIGTERM, stop)
+sock = socket.socket()
+sock.bind(("127.0.0.1", int(sys.argv[3])))
+sock.listen(32)
+marker.with_suffix(".ready").write_text(str(os.getpid()))
+time.sleep(90)
+"""
+            front_code = """
+import json, os, subprocess, sys, time
+from pathlib import Path
+worker = subprocess.Popen([sys.executable, "-u", "-c", sys.argv[1], *sys.argv[3:]], start_new_session=True)
+Path(sys.argv[2]).write_text(json.dumps({"front": os.getpid(), "worker": worker.pid}))
+time.sleep(90)
+"""
+            runtime_root = fixture / "runtime"
+            metadata = fixture / "worker.json"
+            env["RUNTIME_ROOT"] = str(runtime_root)
+            if windows:
+                launcher = scripts / "god.ps1"
+                native_stop = """
+function Stop-RuntimeInstance {
+  param([string]$Name)
+  $record = Get-Content -LiteralPath (Join-Path $script:RootDir "worker.json") -Raw | ConvertFrom-Json
+  Stop-Process -Id $record.front -Force -ErrorAction SilentlyContinue
+  $rootId = [int](Get-Content -LiteralPath $script:RuntimePidFile)
+  Wait-Process -Id $rootId -Timeout 5 -ErrorAction SilentlyContinue
+}
+"""
+                launcher.write_text(launcher.read_text(encoding="utf-8").replace(
+                    "\nLoad-Env\n\nswitch ($Action)", "\n" + native_stop + "\nLoad-Env\n\nswitch ($Action)",
+                ), encoding="utf-8")
+            else:
+                native_stop = runtime_root / ".venv" / "bin" / "jiuwenswarm-start"
+                native_stop.parent.mkdir(parents=True)
+                native_stop.write_text(
+                    f"#!{sys.executable}\nimport json, os, signal, time\n"
+                    f"from pathlib import Path\nrecord = json.loads(Path({str(metadata)!r}).read_text())\n"
+                    "os.kill(record['front'], signal.SIGTERM)\ntime.sleep(0.3)\n",
+                    encoding="utf-8",
+                )
+                native_stop.chmod(0o755)
+            for mode in ("graceful", "stubborn"):
+                marker = fixture / f"{mode}.signal"
+                log = fixture / ".god" / "logs" / "runtime.log"
+                front_cmd = [sys.executable, "-u", "-c", front_code, worker_code, str(metadata),
+                             str(marker), mode, str(runtime_port)]
+                if windows:
+                    encoded = base64.b64encode(
+                        ("& " + " ".join(map(quote, front_cmd)) + " >> " + quote(str(log))).encode("utf-16le")
+                    ).decode("ascii")
+                    front = subprocess.Popen(["powershell.exe", "-NoProfile", "-EncodedCommand", encoded])
+                else:
+                    with log.open("w", encoding="utf-8") as stream:
+                        front = subprocess.Popen(front_cmd, stdout=stream, stderr=stream, start_new_session=True)
+                worker_id = None
+                try:
+                    (fixture / ".god" / "pids" / "runtime.pid").write_text(f"{front.pid}\n", encoding="ascii")
+                    ready = marker.with_suffix(".ready")
+                    for _ in range(100):
+                        if ready.exists():
+                            break
+                        time.sleep(0.05)
+                    else:
+                        raise AssertionError(f"the {mode} worker did not start")
+                    worker_id = int(ready.read_text())
+                    stopped = run("stop")
+                    assert stopped.returncode == 0, stopped.stdout + stopped.stderr
+                    front.wait(timeout=10)
+                    try:
+                        with socket.create_connection(("127.0.0.1", runtime_port), timeout=0.3):
+                            raise AssertionError(f"stop left the {mode} worker alive after its Front exited")
+                    except OSError:
+                        pass
+                    if not windows and mode == "graceful":
+                        assert marker.exists(), "the worker did not receive graceful SIGTERM"
+                    assert listener.poll() is None, "worker cleanup killed an unrelated process"
+                finally:
+                    if worker_id:
+                        try:
+                            os.kill(worker_id, signal.SIGTERM if windows else signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    if front.poll() is None:
+                        front.terminate()
+                    front.wait(timeout=10)
+            env["RUNTIME_ROOT"] = str(fixture / "absent-runtime")
+
+            if not windows:
+                stopping = (scripts / "god.sh").read_text(encoding="utf-8").split(
+                    "kill_pid_file() {", 1,
+                )[1].split("\nstart_detached_service()", 1)[0]
+                race_pid = fixture / ".god" / "pids" / "race.pid"
+                for ps_status, ps_error in ((1, ""), (1, "ps inspection failed"), (2, "")):
+                    race_pid.write_text("fixture\n", encoding="ascii")
+                    result = subprocess.run([
+                        "bash", "-c", "set -euo pipefail\n"
+                        "service_processes() { echo 9999999; }\n"
+                        f"ps() {{ printf '%s' '{ps_error}' >&2; return {ps_status}; }}\n"
+                        "die() { echo \"$*\" >&2; exit 1; }\n"
+                        "kill_pid_file() {" + stopping + "\nkill_pid_file \"$1\" fixture",
+                        "fixture", str(race_pid),
+                    ], capture_output=True, text=True, timeout=5)
+                    already_exited = ps_status == 1 and not ps_error
+                    assert (result.returncode == 0) == already_exited, result.stderr
+                    assert race_pid.exists() != already_exited
+                    if not already_exited:
+                        assert "Could not snapshot" in result.stderr, result.stderr
 
             workspace = fixture / "experiments"
             config = workspace / "hypothesis_fixture" / "experiment_1" / "init" / "init_config.json"

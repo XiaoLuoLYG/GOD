@@ -697,25 +697,27 @@ function Require-CurrentExperimentConfig {
   }
 }
 
-function Stop-ProcessTree {
+function Get-ProcessTree {
   param([int]$ProcessId)
   if ($ProcessId -le 0) {
     return
   }
-  try {
-    $children = Get-CimInstance Win32_Process -Filter "ParentProcessId = $ProcessId" -ErrorAction SilentlyContinue
-    foreach ($child in $children) {
-      Stop-ProcessTree -ProcessId ([int]$child.ProcessId)
-    }
-  } catch {
+  $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+  $root = $processes | Where-Object { $_.ProcessId -eq $ProcessId } | Select-Object -First 1
+  if (-not $root -or -not $root.CreationDate) {
+    return
   }
-  try {
-    $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
-    if ($proc) {
-      Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+  $members = @{ $ProcessId = $root }
+  do {
+    $count = $members.Count
+    foreach ($process in $processes) {
+      $parent = $members[[int]$process.ParentProcessId]
+      if ($parent -and -not $members.ContainsKey([int]$process.ProcessId) -and $process.CreationDate -ge $parent.CreationDate) {
+        $members[[int]$process.ProcessId] = $process
+      }
     }
-  } catch {
-  }
+  } while ($members.Count -gt $count)
+  return $members.Values | Sort-Object CreationDate -Descending
 }
 
 function Get-ServiceProcessId {
@@ -819,8 +821,24 @@ function Stop-PidFile {
   param([string]$Path, [string]$Label)
   $processId = Get-ServiceProcessId $Path
   if ($processId -gt 0) {
+    $snapshot = @(Get-ProcessTree -ProcessId $processId)
     Write-GodLog "Stopping $Label pid=$processId"
-    Stop-ProcessTree -ProcessId $processId
+    # Native stop can remove the Front before its independently launched workers.
+    if ($Path -eq $script:RuntimePidFile) {
+      Stop-RuntimeInstance $script:RuntimeInstance
+    }
+    foreach ($process in $snapshot) {
+      $current = Get-CimInstance Win32_Process -Filter "ProcessId = $($process.ProcessId)" -ErrorAction SilentlyContinue
+      if ($current -and $current.CreationDate -eq $process.CreationDate) {
+        $target = Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue
+        if ($target) {
+          Stop-Process -InputObject $target -Force -ErrorAction SilentlyContinue
+          if (-not $target.WaitForExit(2000)) {
+            Stop-God "Service process $($process.ProcessId) did not stop"
+          }
+        }
+      }
+    }
   }
   Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
 }
@@ -896,9 +914,6 @@ function Stop-All {
     }
   }
   Stop-ControlServices
-  if (Get-ServiceProcessId $script:RuntimePidFile) {
-    Stop-RuntimeInstance $script:RuntimeInstance
-  }
   Stop-PidFile $script:RuntimePidFile "agent runtime"
 }
 
@@ -1163,7 +1178,6 @@ function Start-Runtime {
   $uiReady = Test-ServicePort $script:RuntimeUiPort $script:RuntimePidFile RUNTIME_UI_PORT
   $ready = $agentReady -and $webReady -and $gatewayReady -and $uiReady
   if ((-not $ready) -and (Get-ServiceProcessId $script:RuntimePidFile)) {
-    Stop-RuntimeInstance $script:RuntimeInstance
     Stop-PidFile $script:RuntimePidFile "agent runtime"
   }
   Ensure-RuntimeInstance

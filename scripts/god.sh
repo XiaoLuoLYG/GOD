@@ -598,18 +598,61 @@ stop_control_services() {
 }
 
 kill_pid_file() {
-  local file="$1" label="$2" members pid
+  local file="$1" label="$2" members snapshot snapshot_status=0
   if members="$(service_processes "$file")"; then
+    snapshot="$(LC_ALL=C ps -p "$(paste -sd, - <<< "$members")" -o pid=,lstart= 2>&1)" || snapshot_status=$?
+    if [[ "$snapshot_status" != "0" && ( "$snapshot_status" != "1" || -n "$snapshot" ) ]]; then
+      die "Could not snapshot $label processes (ps exited $snapshot_status): $snapshot"
+    fi
+    if [[ -z "$snapshot" ]]; then
+      rm -f "$file"
+      return 0
+    fi
     log "Stopping $label"
-    local -a pids=()
-    while IFS= read -r pid; do
-      pids+=("$pid")
-    done <<< "$members"
-    kill "${pids[@]}" 2>/dev/null || true
-    local deadline=$((SECONDS + 8))
-    while (( SECONDS < deadline )) && ps -o stat= -p "$(paste -sd, - <<< "$members")" 2>/dev/null | awk '$1 !~ /^Z/ {live=1} END {exit !live}'; do
-      sleep 0.2
-    done
+    # Native stop can orphan workers in their own sessions. Keep their birth times.
+    if [[ "$file" == "$RUNTIME_PID_FILE" ]]; then
+      stop_runtime_instance "$RUNTIME_INSTANCE"
+    fi
+    python3 - "$snapshot" <<'PY'
+import os
+import signal
+import subprocess
+import sys
+import time
+
+expected = dict(line.strip().split(None, 1) for line in sys.argv[1].splitlines())
+
+def live_processes():
+    result = subprocess.run(
+        ["ps", "-p", ",".join(expected), "-o", "pid=,lstart=,stat="],
+        capture_output=True, text=True, env=dict(os.environ, LC_ALL="C"),
+    )
+    if result.returncode not in (0, 1) or result.stderr.strip():
+        raise RuntimeError(result.stderr.strip() or "Could not inspect service processes")
+    live = []
+    for line in result.stdout.splitlines():
+        pid, details = line.strip().split(None, 1)
+        started, status = details.rsplit(None, 1)
+        if expected.get(pid) == started and not status.startswith("Z"):
+            live.append(int(pid))
+    return live
+
+for sig, timeout in ((signal.SIGTERM, 8), (signal.SIGKILL, 2)):
+    for pid in live_processes():
+        try:
+            os.kill(pid, sig)
+        except ProcessLookupError:
+            pass
+    deadline = time.monotonic() + timeout
+    live = live_processes()
+    while live and time.monotonic() < deadline:
+        time.sleep(0.1)
+        live = live_processes()
+    if not live:
+        break
+else:
+    raise SystemExit(f"[GOD] error: Service processes did not stop: {live}")
+PY
   fi
   rm -f "$file"
 }
@@ -641,9 +684,6 @@ stop_all() {
     curl -fsS --max-time 10 -X POST "$(stop_live_url)" >/dev/null 2>&1 || true
   fi
   stop_control_services
-  if service_processes "$RUNTIME_PID_FILE" >/dev/null; then
-    stop_runtime_instance "$RUNTIME_INSTANCE"
-  fi
   kill_pid_file "$RUNTIME_PID_FILE" "agent runtime"
 }
 
@@ -789,7 +829,6 @@ start_runtime() {
   service_port_up "$RUNTIME_GATEWAY_PORT" "$RUNTIME_PID_FILE" RUNTIME_GATEWAY_PORT || ready=0
   service_port_up "$RUNTIME_UI_PORT" "$RUNTIME_PID_FILE" RUNTIME_UI_PORT || ready=0
   if [[ "$ready" == "0" ]] && service_processes "$RUNTIME_PID_FILE" >/dev/null; then
-    stop_runtime_instance "$RUNTIME_INSTANCE"
     kill_pid_file "$RUNTIME_PID_FILE" "agent runtime"
   fi
   ensure_runtime_instance
