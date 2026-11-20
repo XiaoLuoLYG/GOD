@@ -3,8 +3,9 @@
   var root = document.body.dataset.siteRoot || "";
   var pageDefaultLocale = (document.documentElement.lang || "en").toLowerCase().indexOf("zh") === 0 ? "zh" : "en";
   var locale = resolveLocale();
-  if (locale === "en" && document.body.dataset.englishPage) {
-    window.location.replace(document.body.dataset.englishPage + window.location.search + window.location.hash);
+  var alternatePage = locale === "zh" ? document.body.dataset.chinesePage : document.body.dataset.englishPage;
+  if (alternatePage) {
+    window.location.replace(alternatePage + window.location.search + window.location.hash);
     return;
   }
   document.documentElement.lang = locale === "zh" ? "zh-CN" : "en";
