@@ -1,8 +1,6 @@
 (function () {
   var catalog = window.GOD_CATALOG || {};
   var root = document.body.dataset.siteRoot || "";
-  var assetPrefix = document.body.dataset.assetPrefix || root;
-  var detailBase = document.body.dataset.detailBase || "experiments/";
   var pageDefaultLocale = (document.documentElement.lang || "en").toLowerCase().indexOf("zh") === 0 ? "zh" : "en";
   var locale = resolveLocale();
   document.documentElement.lang = locale === "zh" ? "zh-CN" : "en";
@@ -17,7 +15,8 @@
       "experiments.metaTitle": "Experiments - GOD",
       "experiments.eyebrow": "Experiment library",
       "experiments.title": "Create your own world.",
-      "experiments.summary": "Experiments are playable setup seeds: map, cast, scenario, steps, and operator notes. Example replays stay separate as watchable results before you run your own version locally.",
+      "experiments.summary": "Download an ExperimentPack, start GOD, and choose Import Experiment Zip in the setup wizard to run it.",
+      "experiments.setupGuide": "Local setup guide",
       "experiments.footer": "GOD Experiments",
       "experiments.footerReplays": "Replays",
       "mapPacks.metaTitle": "Map Packs - GOD",
@@ -80,7 +79,8 @@
       "experiments.metaTitle": "实验 - GOD",
       "experiments.eyebrow": "实验库",
       "experiments.title": "创建你自己的世界。",
-      "experiments.summary": "实验是可运行的 setup seed：地图、角色、场景、步骤和操作说明。示例回放作为可观看结果单独发布，方便你本地运行自己的版本。",
+      "experiments.summary": "下载实验包并启动 GOD，在配置向导中点「导入实验 Zip」即可运行。",
+      "experiments.setupGuide": "本地安装指南",
       "experiments.footer": "GOD 实验",
       "experiments.footerReplays": "回放",
       "mapPacks.metaTitle": "地图包 - GOD",
@@ -183,16 +183,6 @@
     return pageDefaultLocale;
   }
 
-  function assetUrl(path) {
-    if (!path) {
-      return "";
-    }
-    if (/^https?:\/\//.test(path)) {
-      return path;
-    }
-    return assetPrefix + path;
-  }
-
   function escapeHtml(value) {
     return String(value == null ? "" : value)
       .replace(/&/g, "&amp;")
@@ -232,6 +222,10 @@
   }
 
   function applyStaticText() {
+    var setupGuide = document.querySelector("[data-setup-guide]");
+    if (setupGuide) {
+      setupGuide.href = "https://github.com/XiaoLuoLYG/GOD/blob/main/QUICKSTART" + (locale === "zh" ? ".zh-CN" : "") + ".md";
+    }
     document.querySelectorAll("[data-i18n]").forEach(function (node) {
       var value = text(node.getAttribute("data-i18n"));
       if (value) {
@@ -476,60 +470,6 @@
     };
   }
 
-  function localized(value) {
-    if (!value || typeof value !== "object") {
-      return value || "";
-    }
-    return value[locale] || value.en || value.zh || "";
-  }
-
-  function renderLegacyExperiments() {
-    var grid = document.querySelector("[data-experiment-grid]");
-    var experiments = window.GOD_EXPERIMENTS || [];
-    if (!grid || !experiments.length) {
-      return;
-    }
-    var labels = locale === "zh" ? {
-      open: "打开实验",
-      folder: "仓库目录",
-      repo: "仓库路径"
-    } : {
-      open: "Open experiment",
-      folder: "Repository folder",
-      repo: "Repository path"
-    };
-    grid.innerHTML = experiments.map(function (item) {
-      var title = localized(item.title);
-      var kicker = localized(item.kicker);
-      var summary = localized(item.summary);
-      var tryItems = localized(item.try) || [];
-      var detailHref = detailBase + item.slug + ".html";
-      var repoHref = "https://github.com/XiaoLuoLYG/GOD/tree/main/" + item.repoPath;
-      return [
-        '<article class="experiment-card">',
-        '  <a class="experiment-card__media" href="' + escapeHtml(detailHref) + '">',
-        '    <img src="' + escapeHtml(assetUrl(item.image)) + '" alt="' + escapeHtml(title) + ' map preview" loading="lazy">',
-        '  </a>',
-        '  <div class="experiment-card__body">',
-        '    <p class="eyebrow">' + escapeHtml(kicker) + '</p>',
-        '    <h3>' + escapeHtml(title) + '</h3>',
-        '    <p>' + escapeHtml(summary) + '</p>',
-        '    <ul class="experiment-card__list">',
-        tryItems.map(function (entry) {
-          return '<li>' + escapeHtml(entry) + '</li>';
-        }).join(""),
-        '    </ul>',
-        '    <code class="repo-path" aria-label="' + escapeHtml(labels.repo) + '">' + escapeHtml(item.repoPath) + '</code>',
-        '    <div class="button-row">',
-        '      <a class="button button--small" href="' + escapeHtml(detailHref) + '">' + labels.open + '</a>',
-        '      <a class="button button--small button--ghost" href="' + escapeHtml(repoHref) + '">' + labels.folder + '</a>',
-        '    </div>',
-        '  </div>',
-        '</article>'
-      ].join("");
-    }).join("");
-  }
-
   function hydrateReplayStats() {
     if (!catalog.replays || !window.fetch) {
       return;
@@ -571,7 +511,6 @@
   renderLibrary("[data-map-pack-grid]", catalog.mapPacks, "map");
   renderLibrary("[data-agent-pack-grid]", catalog.agentPacks, "agent");
   renderExperimentLibrary();
-  renderLegacyExperiments();
   applyStaticText();
   renderLanguageToggle();
   markActiveNav();

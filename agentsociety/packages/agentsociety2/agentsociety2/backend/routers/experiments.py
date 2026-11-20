@@ -3,9 +3,6 @@
 
 提供实验信息与产出文件查询接口。
 
-关联文件：
-- @frontend/src/pages/Console/index.tsx - 实验列表与产出下载
-
 API端点：
 - GET /api/v1/experiments/{hypothesis_id}/{experiment_id}/info - 实验信息
 - GET /api/v1/experiments/{hypothesis_id}/{experiment_id}/artifacts - 产出文件列表
