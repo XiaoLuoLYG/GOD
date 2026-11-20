@@ -2169,7 +2169,7 @@ async def _test_codex_connection() -> str:
     brain = CodexBrain()
     await brain.start(BrainContext(agent_id=0, work_dir=None, experiment_context=None, enable_memory=False))
     try:
-        await asyncio.wait_for(brain.ask(AskRequest(message=_CONNECTION_PROMPT, prompt=_CONNECTION_PROMPT)), timeout=30)
+        await brain.ask(AskRequest(message=_CONNECTION_PROMPT, prompt=_CONNECTION_PROMPT))
     except (OSError, RuntimeError, TimeoutError):
         return "failed"
     return "connected"

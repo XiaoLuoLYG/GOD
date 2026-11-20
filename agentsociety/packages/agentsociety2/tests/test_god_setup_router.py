@@ -870,7 +870,7 @@ def test_save_model_config_rejects_invalid_ports_without_saving(monkeypatch, tmp
     assert not (tmp_path / ".env").exists()
 
 
-def test_codex_connection_runs_a_temporary_turn(monkeypatch, tmp_path):
+def test_codex_connection_accepts_a_slow_temporary_turn(monkeypatch, tmp_path):
     _configure_tmp_god(monkeypatch, tmp_path)
 
     async def ready():
@@ -881,6 +881,13 @@ def test_codex_connection_runs_a_temporary_turn(monkeypatch, tmp_path):
 
     async def ask(_brain, request):
         assert request.prompt == "Reply with OK."
+        loop = asyncio.get_running_loop()
+        reply = asyncio.Event()
+        loop.call_later(45, reply.set)
+        now = loop.time
+        with monkeypatch.context() as clock:
+            clock.setattr(loop, "time", lambda: now() + 46)
+            await reply.wait()
         return "OK"
 
     monkeypatch.setattr(god_setup, "codex_login_status", ready)
