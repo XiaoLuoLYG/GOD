@@ -177,6 +177,12 @@ def build_skill_result(
     }
 
 
+def group_message(content: str | None) -> dict[str, Any] | None:
+    if not isinstance(content, str) or not content.strip():
+        return None
+    return {"type": "group_message", "group_id": 1, "content": content}
+
+
 def memory_effect(skill_id: str, content: str, **metadata: Any) -> dict[str, Any]:
     return {
         "kind": "skill_event",

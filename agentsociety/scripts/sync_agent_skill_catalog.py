@@ -169,6 +169,7 @@ from agent_skill_runtime import (  # noqa: E402
     choose_available_interaction,
     choose_available_location,
     emit_result,
+    group_message,
     load_local_skill_spec,
     memory_effect,
     observation_from,
@@ -201,11 +202,13 @@ def main() -> int:
     location_id = str(observation.get("location_id") or "unknown")
     template = str(spec.get("memory_template") or "Used {{skill_id}}: {{summary}} at {{location_id}}.")
     world_effect = choose_world_effect(observation, spec)
+    speech = spec.get("speech") if "group_message" in spec.get("effects", []) else None
     result = build_skill_result(
         skill_id=SKILL_ID,
         summary=summary,
         reason=f"{{SKILL_ID}} uses only its local skill.json plus this local script.",
         world_effect=world_effect,
+        speech_effect=group_message(speech) if world_effect["type"] != "move" else None,
         memory_effects=[
             memory_effect(
                 SKILL_ID,

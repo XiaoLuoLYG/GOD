@@ -186,13 +186,15 @@ def _contains(bounds: tuple[int, int, int, int], x: int, y: int) -> bool:
     return bounds[0] <= x <= bounds[2] and bounds[1] <= y <= bounds[3]
 
 
-def validate_manifest(manifest_path: Path, matrix_root: Path | None = None) -> list[str]:
+def validate_manifest(
+    manifest_path: Path, matrix_root: Path | None = None, *, require_the_ville: bool = False
+) -> list[str]:
     manifest_path = manifest_path.resolve()
     manifest = _load(manifest_path)
     errors: list[str] = []
     warnings: list[str] = []
     map_id = str(manifest.get("map_id") or manifest_path.parent.name)
-    is_the_ville = map_id == "the_ville"
+    is_the_ville = require_the_ville or map_id == "the_ville"
 
     tiled_map_path = _resolve(manifest_path.parent, str(manifest.get("tiled_map_path") or "map.json"))
     if not tiled_map_path.exists():
@@ -201,7 +203,7 @@ def validate_manifest(manifest_path: Path, matrix_root: Path | None = None) -> l
     width = int(tiled_map.get("width") or 0)
     height = int(tiled_map.get("height") or 0)
     if width <= 0 or height <= 0:
-        errors.append(f"map must have positive width and height, got {width}x{height}")
+        return [f"ERROR map must have positive width and height, got {width}x{height}"]
     if is_the_ville and (width, height) != (140, 100):
         errors.append(f"expected original The Ville map size 140x100, got {width}x{height}")
     if is_the_ville and tiled_map_path.name != "the_ville_jan7.json":
@@ -326,8 +328,8 @@ def validate_manifest(manifest_path: Path, matrix_root: Path | None = None) -> l
     return [f"ERROR {message}" for message in errors] + [f"WARN {message}" for message in warnings]
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(*, require_the_ville: bool = False) -> int:
+    parser = argparse.ArgumentParser(description="Validate the original The Ville map." if require_the_ville else __doc__)
     parser.add_argument(
         "manifest",
         nargs="?",
@@ -345,6 +347,7 @@ def main() -> int:
     args = parser.parse_args()
     messages = validate_manifest(
         Path(args.manifest),
+        require_the_ville=require_the_ville,
         matrix_root=(
             Path(args.generative_matrix_root).expanduser()
             if args.generative_matrix_root
