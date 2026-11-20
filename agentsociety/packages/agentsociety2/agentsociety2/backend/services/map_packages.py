@@ -605,7 +605,7 @@ def _rewrite_manifest_map_id(package_path: Path, map_id: str) -> None:
 def relative_manifest_path(package: MapPackage, root: Path | None = None) -> str:
     root = root or agentsociety_root()
     try:
-        return str(package.manifest_path.resolve().relative_to(root.resolve()))
+        return package.manifest_path.resolve().relative_to(root.resolve()).as_posix()
     except ValueError:
         return str(package.manifest_path)
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import shutil
 import tempfile
 from typing import Any
@@ -283,8 +283,13 @@ def _sanitize_env_module_paths(config: dict[str, Any], *, map_id: str | None = N
         if map_id and module.get("module_type") == "PixelTownSocialEnv":
             kwargs.setdefault("map_id", map_id)
         manifest_path = kwargs.get("map_manifest_path")
-        if manifest_path and Path(str(manifest_path)).expanduser().is_absolute():
-            kwargs.pop("map_manifest_path", None)
+        if isinstance(manifest_path, str) and manifest_path:
+            # Packs can come from either OS. Windows path syntax recognizes both separators.
+            reference = PureWindowsPath(manifest_path)
+            if reference.anchor or (reference.parts and reference.parts[0].startswith("~")):
+                del kwargs["map_manifest_path"]
+            else:
+                kwargs["map_manifest_path"] = manifest_path.replace("\\", "/")
 
 
 def _experiment_pack_ignore() -> Any:

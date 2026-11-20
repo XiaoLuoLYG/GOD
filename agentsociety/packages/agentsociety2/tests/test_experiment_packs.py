@@ -106,6 +106,21 @@ def test_validate_experiment_pack_discovers_map_dependency(tmp_path: Path) -> No
     assert preview.map_id == "demo_map"
 
 
+@pytest.mark.parametrize(("manifest", "expected"), [
+    ("/Users/author/map.yaml", None),
+    (r"C:\Users\author\map.yaml", None),
+    (r"\\server\share\map.yaml", None),
+    (r"~\maps\map.yaml", None),
+    ("custom/maps/demo/map.yaml", "custom/maps/demo/map.yaml"),
+    (r"custom\maps\demo\map.yaml", "custom/maps/demo/map.yaml"),
+])
+def test_pack_manifest_references_are_portable(manifest: str, expected: str | None) -> None:
+    config = {"env_modules": [{"module_type": "PixelTownSocialEnv", "kwargs": {"map_manifest_path": manifest}}]}
+    cleaned = experiment_packs.sanitize_experiment_pack_config(config)
+    kwargs = cleaned["env_modules"][0]["kwargs"]
+    assert kwargs == ({} if expected is None else {"map_manifest_path": expected})
+
+
 def test_export_experiment_pack_excludes_run_state(tmp_path: Path) -> None:
     root = tmp_path / "agentsociety"
     exp = _write_experiment(root)
