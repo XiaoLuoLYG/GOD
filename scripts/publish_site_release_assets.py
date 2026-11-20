@@ -10,13 +10,23 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+from copy import copy
 import json
 from pathlib import Path, PurePosixPath
 import re
+from runpy import run_path
 import shutil
 import subprocess
 import sys
+from tempfile import TemporaryDirectory
 from zipfile import BadZipFile, ZIP_DEFLATED, ZipFile
+
+
+# This publisher also runs before the AgentSociety dependencies are installed.
+_RUNNER_MODULE = "agentsociety/packages/agentsociety2/agentsociety2/society/experiment_runner.py"
+_runner = run_path(str(Path(__file__).resolve().parents[1] / _RUNNER_MODULE))
+portable_experiment_runner = _runner["portable_experiment_runner"]
+MAX_STOCK_RUNNER_BYTES = _runner["MAX_STOCK_RUNNER_BYTES"]
 
 
 DEFAULT_RELEASE_TAG = "public-site-packs"
@@ -215,7 +225,31 @@ def stage_zip_asset(*, source_zip: Path, asset_root: Path, target_dir: Path) -> 
             raise SystemExit(str(exc)) from exc
     else:
         shutil.copy2(source_zip, target)
+    if target.name.endswith("-experiment-pack.zip"):
+        relocate_staged_runner(target)
     return target
+
+
+def relocate_staged_runner(path: Path) -> None:
+    with TemporaryDirectory(dir=path.parent) as directory:
+        target = Path(directory) / path.name
+        with ZipFile(path) as source:
+            if "run.sh" not in source.namelist() or source.getinfo("run.sh").file_size > MAX_STOCK_RUNNER_BYTES:
+                return
+            original = source.read("run.sh")
+            portable = portable_experiment_runner(original)
+            if portable == original:
+                return
+            with ZipFile(target, "w") as out:
+                out.comment = source.comment
+                for member in source.infolist():
+                    with out.open(copy(member), "w") as dest:
+                        if member.filename == "run.sh":
+                            dest.write(portable)
+                        else:
+                            with source.open(member) as data:
+                                shutil.copyfileobj(data, dest)
+        target.replace(path)
 
 
 def rebuild_native_map_zip(*, source_zip: Path, asset_root: Path, target: Path) -> None:

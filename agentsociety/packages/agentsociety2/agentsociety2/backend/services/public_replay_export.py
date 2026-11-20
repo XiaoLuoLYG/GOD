@@ -10,11 +10,12 @@ import re
 import shutil
 import sqlite3
 from typing import Any
-from zipfile import ZIP_DEFLATED, ZipFile
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 import yaml
 
 from agentsociety2.society.launch_config import apply_map_override, launch_map_id
+from agentsociety2.society.experiment_runner import MAX_STOCK_RUNNER_BYTES, portable_experiment_runner
 from agentsociety2.backend.services.experiment_packs import sanitize_experiment_pack_config
 from agentsociety2.backend.services import experiment_registry
 from agentsociety2.backend.services.map_packages import (
@@ -1127,6 +1128,12 @@ def _zip_experiment_pack(
             if path.is_dir():
                 continue
             rel = path.relative_to(source_dir)
+            if rel.parts == ("run.sh",) and path.stat().st_size <= MAX_STOCK_RUNNER_BYTES:
+                archive.writestr(
+                    ZipInfo.from_file(path, rel), portable_experiment_runner(path.read_bytes()),
+                    compress_type=ZIP_DEFLATED,
+                )
+                continue
             if rel.parts == ("init", "init_config.json"):
                 config = _load_structured_file(path)
                 apply_map_override(config, map_override)

@@ -30,6 +30,8 @@
 ./agentsociety/quick_experiments/hypothesis_god_town/experiment_1/run.sh
 ```
 
+在导入的副本目录中运行 `bash ./run.sh`，如果工作区位于 GOD 仓库之外，请使用 `BACKEND_ROOT="/path/to/GOD/agentsociety" bash ./run.sh`。
+
 启动完成后打开：
 
 ```text

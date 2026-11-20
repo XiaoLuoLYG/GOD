@@ -12,6 +12,7 @@ from typing import Any
 import yaml
 
 from agentsociety2.backend.services import agent_packs, map_packages, package_archives
+from agentsociety2.society.experiment_runner import MAX_STOCK_RUNNER_BYTES, portable_experiment_runner
 from agentsociety2.society.launch_config import apply_map_override, launch_map_id
 from agentsociety2.society.models import InitConfig, StepsConfig
 
@@ -92,6 +93,7 @@ def export_experiment_pack(
         staging = Path(temp) / experiment_path.name
         ignore = None if include_legacy_run_artifacts else _experiment_pack_ignore()
         shutil.copytree(experiment_path, staging, ignore=ignore)
+        _migrate_experiment_runner(staging)
         if not include_legacy_run_artifacts:
             _remove_runtime_state(staging)
         _sanitize_experiment_pack_files(staging, map_override=launch_map_id(experiment_path))
@@ -117,6 +119,7 @@ def import_experiment_pack_zip(
         preview = preview_experiment_pack(package_path)
         if not preview.ok:
             raise ValueError(f"Imported ExperimentPack is invalid: {preview.validation.errors}")
+        _migrate_experiment_runner(package_path)
         hypothesis_id = package_archives.sanitize_id(requested_hypothesis_id or preview.hypothesis_id, "experiment")
         experiment_id = package_archives.sanitize_id(requested_experiment_id or preview.experiment_id, "1")
         target = workspace_root / f"hypothesis_{hypothesis_id}" / f"experiment_{experiment_id}"
@@ -223,6 +226,20 @@ def _copy_experiment_without_run(source: Path, target: Path) -> None:
     shutil.copytree(source, target, ignore=_experiment_pack_ignore())
     _remove_runtime_state(target)
     _sanitize_experiment_pack_files(target)
+
+
+def _migrate_experiment_runner(package_path: Path) -> None:
+    path = package_path / "run.sh"
+    if path.is_file() and path.stat().st_size <= MAX_STOCK_RUNNER_BYTES:
+        original = path.read_bytes()
+        portable = portable_experiment_runner(original)
+        if portable != original:
+            mode = path.stat().st_mode
+            path.chmod(mode | 0o200)
+            try:
+                path.write_bytes(portable)
+            finally:
+                path.chmod(mode)
 
 
 def sanitize_experiment_pack_config(

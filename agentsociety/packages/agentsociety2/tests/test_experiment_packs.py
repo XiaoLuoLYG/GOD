@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
+from runpy import run_path
+import subprocess
 from zipfile import ZipFile
 
 import pytest
 
 from agentsociety2.backend.routers import experiment_configs, god_setup, replay
-from agentsociety2.backend.services import experiment_packs
+from agentsociety2.backend.services import experiment_packs, package_archives, public_replay_export
+from agentsociety2.society.experiment_runner import portable_experiment_runner
 from agentsociety2.society.launch_config import prepare_launch
 
 
@@ -291,3 +295,76 @@ def test_import_experiment_pack_conflict_does_not_install_dependencies(tmp_path:
         )
 
     assert not (tmp_path / "target_agentsociety" / "custom" / "maps" / "demo_map").exists()
+
+
+def test_pack_runner_migration_preserves_custom_scripts_and_curated_environment(tmp_path: Path) -> None:
+    legacy = (Path(__file__).parent / "fixtures/legacy_god_town_runner.txt").read_bytes().replace(b"\r\n", b"\n")
+    backend = Path(__file__).resolve().parents[3]
+    expected = (backend / "quick_experiments/hypothesis_god_town/experiment_1/run.sh").read_bytes().replace(b"\r\n", b"\n")
+    stage_zip_asset = run_path(str(backend.parent / "scripts/publish_site_release_assets.py"))["stage_zip_asset"]
+    curated = legacy[:legacy.index(b"if [[ -f .env")] + legacy[legacy.index(b"PYTHON_PATH="):]
+    curated = curated.replace(b"god_town", b"gaokao-blackout")
+    curated_portable = expected[:expected.index(b"if [[ -f .env")] + expected[expected.index(b"PYTHON_PATH="):]
+    custom = legacy.replace(b"--log-level INFO", b"--log-level DEBUG").replace(b"\n", b"\r\n") + b"# \xff\r\n"
+    source = _write_experiment(tmp_path / "source")
+    script = source / "run.sh"
+    large_custom = custom * 10
+    for original, result in (
+        (legacy, expected), (curated, curated_portable), (custom, custom), (large_custom, large_custom),
+    ):
+        assert portable_experiment_runner(result) == result
+        script.write_bytes(original)
+        for exporter in (experiment_packs.export_experiment_pack, public_replay_export._zip_experiment_pack):
+            archive_path = tmp_path / "exported.zip"
+            exporter(source, archive_path)
+            with ZipFile(archive_path) as archive:
+                assert archive.read("run.sh") == result
+            assert script.read_bytes() == original
+        archive_path = package_archives.zip_directory(source, tmp_path / "original-experiment-pack.zip")
+        before_staging = archive_path.read_bytes()
+        staged = stage_zip_asset(source_zip=archive_path, asset_root=tmp_path, target_dir=tmp_path / "staged")
+        with ZipFile(staged) as archive:
+            assert archive.read("run.sh") == result
+            assert archive_path.read_bytes() == before_staging
+        installed = experiment_packs.import_experiment_pack_zip(archive_path, workspace_root=tmp_path / "copies", overwrite=True)
+        assert (installed.package_path / "run.sh").read_bytes() == result
+
+
+@pytest.mark.skipif(os.name == "nt", reason="The standalone quick experiment is a Bash script")
+def test_imported_runner_uses_its_own_experiment_and_replay(tmp_path: Path) -> None:
+    source = _write_experiment(tmp_path / "source")
+    (source / "run.sh").write_bytes((Path(__file__).parent / "fixtures/legacy_god_town_runner.txt").read_bytes())
+    archive_path = package_archives.zip_directory(source, tmp_path / "legacy.zip")
+    copies = []
+    for experiment_id in ("1", "2"):
+        installed = experiment_packs.import_experiment_pack_zip(
+            archive_path, workspace_root=tmp_path / "external workspace", requested_hypothesis_id="renamed",
+            requested_experiment_id=experiment_id,
+        ).package_path
+        copies.append(installed)
+        run = installed / "run"
+        run.mkdir()
+        for filename in ("sqlite.db", ".god-launch.json", ".god-session-prefix"):
+            (run / filename).write_text(experiment_id, encoding="utf-8")
+
+    backend = tmp_path / "GOD backend"
+    backend.mkdir()
+    (backend / ".env").write_text("AGENTSOCIETY_LLM_API_KEY=test-key\n", encoding="utf-8")
+    python = backend / "selected interpreter"
+    python.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$PWD" "$@"\n', encoding="utf-8")
+    python.chmod(0o755)
+    first, second = copies
+    result = subprocess.run(
+        ["bash", str(second / "run.sh")], cwd=tmp_path, check=True, capture_output=True, text=True,
+        env={"PATH": os.environ["PATH"], "BACKEND_ROOT": str(backend), "PYTHON_PATH": str(python)},
+    )
+    assert result.stdout.splitlines() == [
+        str(backend), "-m", "agentsociety2.society.cli", "--config", str(second / "init/init_config.json"),
+        "--steps", str(second / "init/steps.yaml"), "--run-dir", str(second / "run"),
+        "--experiment-id", "renamed_2", "--log-level", "INFO", "--log-file", str(second / "run/output.log"),
+    ]
+    assert (first / "run/sqlite.db").read_bytes() == b"1"
+    assert not (second / "run/sqlite.db").exists()
+    for index, copy in enumerate(copies, 1):
+        for marker in (".god-launch.json", ".god-session-prefix"):
+            assert (copy / "run" / marker).read_text(encoding="utf-8") == str(index)
