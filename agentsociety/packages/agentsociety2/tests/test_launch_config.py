@@ -1,5 +1,10 @@
 import json
+import os
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from agentsociety2.society.cli import ExperimentRunner
 from agentsociety2.society.launch_config import prepare_launch
@@ -68,3 +73,31 @@ def test_upgrade_keeps_legacy_jiuwen_session_and_replay(tmp_path, monkeypatch):
     assert all(a.kwargs["session_id"] == f"legacy_fresh_2026_agent_{a.agent_id}" for a in loaded.agents)
     assert database.read_bytes() == b"existing replay"
     assert config.read_bytes() == template.read_bytes()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="The standalone quick experiment is a Bash script")
+def test_standalone_run_keeps_configured_jiuwen_port_and_session(tmp_path, monkeypatch):
+    template = Path(__file__).resolve().parents[3] / "quick_experiments/hypothesis_god_town/experiment_1"
+    experiment = tmp_path / "quick_experiments/hypothesis_god_town/experiment_1"
+    shutil.copytree(template / "init", experiment / "init")
+    script = experiment / "run.sh"
+    shutil.copyfile(template / "run.sh", script)
+    config = experiment / "init/init_config.json"
+    run_dir = experiment / "run"
+    run_dir.mkdir()
+    marker = run_dir / ".god-session-prefix"
+    marker.write_text("existing_session\n", encoding="utf-8")
+    monkeypatch.delenv("GOD_SESSION_PREFIX", raising=False)
+    prepare_launch(config, tmp_path, 19877)
+    replay = run_dir / "sqlite.db"
+    replay.write_bytes(b"previous replay")
+
+    subprocess.run(["bash", str(script)], check=True, env={
+        "PATH": os.environ["PATH"], "PYTHON_PATH": shutil.which("true"), "AGENTSOCIETY_LLM_API_KEY": "fixture",
+    })
+
+    assert not replay.exists()
+    assert marker.read_text(encoding="utf-8").strip() == "existing_session"
+    resident = ExperimentRunner(run_dir)._load_config(config).agents[0].kwargs
+    assert resident["jiuwenclaw_ws_url"] == "ws://127.0.0.1:19877"
+    assert resident["session_id"] == "existing_session_agent_1"
