@@ -10,7 +10,7 @@
 
 需要安装：
 
-- macOS/Linux：Python 3.11+、Node.js 与 `npm`、[`uv`](https://docs.astral.sh/uv/) 和 `screen`
+- macOS/Linux：Python 3.11+、Node.js 与 `npm`、[`uv`](https://docs.astral.sh/uv/)、`screen`、`lsof` 和 `curl`
 - Windows：PowerShell 5.1+ 和 `winget`；启动脚本会补齐缺失的 Git、Node.js LTS/npm 与 `uv`
 
 macOS：
@@ -62,7 +62,7 @@ Windows PowerShell：
 
 在向导的 **模型** 页选择居民运行时，填写下表的 GOD 模型配置，再点 **测试连接**。向导会发一条短消息验证模型能回复。选了 Codex 时，向导还会用一个临时 Codex 会话发测试消息。
 
-点 **保存并选择实验**，打开 **浏览内置实验**，在 GOD 小镇或北大访问实验旁点 **一键启动**。第一帧完成后会自动打开控制台。你也可以导入实验包，或进入草案编辑器创建自己的实验。
+点 **保存并选择实验**，打开 **浏览内置实验**，在 GOD 小镇或北大访问实验旁点 **一键启动**。第一帧完成后会自动打开控制台。下载了 ExperimentPack 时，在同一页点 **导入实验 Zip**。也可以进入草案编辑器创建自己的实验。
 
 | 变量 | 示例 |
 | :-- | :-- |
@@ -131,6 +131,12 @@ http://127.0.0.1:5174/pixel-replay/god_town/1
 只做决策的后端从已挂载且没有必填参数的技能里选。可以通过 `ask_backend` 或本机的 `GOD_AGENT_ASK_BACKEND` 单独指定问答后端。GOD 执行技能，并在运行记录中保存 `decision_backend` 和是否触发后备选择。
 
 把服务地址、密钥和命令参数留在本机 `.env`。例如 `{"type":"command","profile":"local-agent"}` 会从本机的 `GOD_AGENT_COMMANDS` 选择命令。受信任的包装脚本从 stdin 读提示词，从 stdout 输出含 `selected_skill_id` 和 `args` 的 JSON，或输出 Ask 的纯文本答案。只需选择和问答时，在包装脚本中禁用工具。
+
+本机已安装并登录 Claude Code 或 Cursor CLI 时，可将下面一行加入本地 `.env`。在实验的 `agent_backend` 中填 `{"type":"command","profile":"claude"}`，使用 Cursor 时改成 `"profile":"cursor"`。每次选技能或 Ask 都启动一个新进程。Cursor 的 `--trust` 针对 GOD 为这次调用创建的空临时目录。
+
+```dotenv
+GOD_AGENT_COMMANDS='{"claude":["claude","-p","--tools=","--disable-slash-commands","--no-session-persistence","--output-format","text"],"cursor":["cursor-agent","-p","--trust","--mode","ask","--sandbox","enabled","--output-format","text"]}'
+```
 
 更改后端设置后，运行 `./scripts/god.sh restart`。
 

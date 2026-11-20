@@ -10,10 +10,12 @@ import re
 import shutil
 import sqlite3
 from typing import Any
-from zipfile import ZIP_DEFLATED, ZipFile
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 import yaml
 
+from agentsociety2.society.launch_config import apply_map_override, launch_map_id
+from agentsociety2.society.experiment_runner import MAX_STOCK_RUNNER_BYTES, portable_experiment_runner
 from agentsociety2.backend.services.experiment_packs import sanitize_experiment_pack_config
 from agentsociety2.backend.services import experiment_registry
 from agentsociety2.backend.services.map_packages import (
@@ -166,6 +168,7 @@ def export_public_replay(
         display_name=title,
         replay_slug=slug,
         map_pack_id=map_pack_id,
+        map_override=launch_map_id(experiment_root),
         agent_pack_id=agent_pack_id,
         summary=summary,
         tags=list(tags),
@@ -886,6 +889,7 @@ def _export_experiment_pack(
     total_steps: int,
     agent_count: int,
     command_count: int,
+    map_override: str | None = None,
     image: str | None = None,
     download_base_url: str | None = None,
 ) -> dict[str, Any]:
@@ -942,6 +946,7 @@ def _export_experiment_pack(
         experiment_root,
         downloads_dir / f"{pack_id}-experiment-pack.zip",
         map_id=map_pack_id or None,
+        map_override=map_override,
     )
     return {**manifest, "_package_path": str(pack_root)}
 
@@ -959,6 +964,7 @@ def _resolve_experiment_map_package(
         / "init_config.json"
     )
     config = _load_structured_file(config_path)
+    apply_map_override(config, launch_map_id(config_path.parent.parent))
     env_modules = config.get("env_modules") or []
     manifest_path: Path | None = None
     map_id: str | None = None
@@ -1046,6 +1052,7 @@ def _create_downloads(
         experiment_root,
         downloads_dir / f"{slug}-experiment-pack.zip",
         map_id=map_id,
+        map_override=launch_map_id(experiment_root),
     )
     return downloads
 
@@ -1107,7 +1114,9 @@ def _download_href(download_base_url: str | None, filename: str) -> str:
     return download_base_url.rstrip("/") + "/" + filename
 
 
-def _zip_experiment_pack(source_dir: Path, zip_path: Path, *, map_id: str | None = None) -> None:
+def _zip_experiment_pack(
+    source_dir: Path, zip_path: Path, *, map_id: str | None = None, map_override: str | None = None,
+) -> None:
     with ZipFile(zip_path, "w", ZIP_DEFLATED) as archive:
         for path in sorted(source_dir.rglob("*")):
             if path == zip_path:
@@ -1119,8 +1128,15 @@ def _zip_experiment_pack(source_dir: Path, zip_path: Path, *, map_id: str | None
             if path.is_dir():
                 continue
             rel = path.relative_to(source_dir)
+            if rel.parts == ("run.sh",) and path.stat().st_size <= MAX_STOCK_RUNNER_BYTES:
+                archive.writestr(
+                    ZipInfo.from_file(path, rel), portable_experiment_runner(path.read_bytes()),
+                    compress_type=ZIP_DEFLATED,
+                )
+                continue
             if rel.parts == ("init", "init_config.json"):
                 config = _load_structured_file(path)
+                apply_map_override(config, map_override)
                 safe_config = sanitize_experiment_pack_config(config, map_id=map_id)
                 archive.writestr(
                     rel.as_posix(),

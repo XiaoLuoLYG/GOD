@@ -3,6 +3,7 @@ import importlib.util
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from time import get_clock_info
 
 import anyio
 import pytest
@@ -293,13 +294,14 @@ def _keepalive_frame(request_id: str) -> str:
     )
 
 
-def test_silent_open_socket_fails_at_request_timeout_and_reconnects():
+def test_silent_open_socket_fails_at_request_timeout_and_reconnects(monkeypatch):
     """Session cancel leaves the socket ESTABLISHED and sends no final frame.
 
     recv() does not raise. The request deadline must still end the attempt,
     release the shared semaphore, and let the next request open a new socket.
     """
 
+    monkeypatch.setenv("AGENTSOCIETY_JIUWENCLAW_REQUEST_CONCURRENCY", "1")
     JiuwenClawAgent = _load_jiuwenclaw_agent_class()
     JiuwenClawAgent._request_semaphore = None
     JiuwenClawAgent._request_semaphore_loop = None
@@ -322,29 +324,30 @@ def test_silent_open_socket_fails_at_request_timeout_and_reconnects():
 
         async with serve(handler, "127.0.0.1", 0) as server:
             port = server.sockets[0].getsockname()[1]
+            request_timeout = 0.4
             agent = JiuwenClawAgent(
                 id=6,
                 name="Agent 6",
                 profile={"name": "Agent 6"},
                 jiuwenclaw_ws_url=f"ws://127.0.0.1:{port}",
-                request_timeout=0.4,
+                request_timeout=request_timeout,
             )
             loop = asyncio.get_running_loop()
             started = loop.time()
-            decision = await agent._select_next_skill(**_skill_choice_kwargs())
+            decision = await asyncio.wait_for(agent._select_next_skill(**_skill_choice_kwargs()), timeout=1.2)
             elapsed = loop.time() - started
-            assert elapsed < 1.2
-            assert elapsed >= 0.4
+            # asyncio can dispatch a timer up to one monotonic clock tick early.
+            assert request_timeout - get_clock_info("monotonic").resolution <= elapsed < 1.2
             assert decision["fallback"] is True
             assert decision["selected_skill_id"] == "routine.daily"
             assert agent._ws is None
-            assert agent._last_response.startswith("九问技能选择失败")
+            assert agent._last_response == "九问技能选择失败：TimeoutError"
             assert seen["n"] == 1
             _semaphore, limit = agent._request_semaphore_for_current_loop()
-            assert limit == 24
+            assert limit == 1
 
             started = loop.time()
-            text = await agent._send_jiuwenclaw_request("again")
+            text = await asyncio.wait_for(agent._send_jiuwenclaw_request("again"), timeout=2)
             assert loop.time() - started < 2
             assert "routine.daily" in text
             assert agent._ws is not None

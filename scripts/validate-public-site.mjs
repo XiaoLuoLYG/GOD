@@ -219,6 +219,14 @@ async function main() {
   const base = arg;
   const catalog = parseCatalog(await readText(base, "data/catalog.js"));
   const allErrors = [];
+  const experiments = JSON.parse(await readText(base, "public-data/experiments/index.json"));
+  for (const pack of experiments) {
+    const fallback = (catalog.experiments || []).find((entry) => entry.slug === pack.pack_id);
+    const replayHref = pack.replay_slug ? `replays/${pack.replay_slug}/` : undefined;
+    if (!fallback || fallback.replayHref !== replayHref) {
+      allErrors.push(`ExperimentPack ${pack.pack_id}: fallback catalog must match the published replay link`);
+    }
+  }
 
   for (const entry of catalog.mapPacks || []) {
     allErrors.push(...(await validateMapPack(base, entry)));

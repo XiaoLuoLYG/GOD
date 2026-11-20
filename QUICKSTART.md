@@ -10,7 +10,7 @@ The shortest path from a clean machine to the setup wizard and then a live GOD c
 
 You will need:
 
-- macOS/Linux: Python 3.11+, Node.js & `npm`, [`uv`](https://docs.astral.sh/uv/), and `screen`
+- macOS/Linux: Python 3.11+, Node.js & `npm`, [`uv`](https://docs.astral.sh/uv/), `screen`, `lsof`, and `curl`
 - Windows: PowerShell 5.1+ and `winget`; the startup script installs missing Git, Node.js LTS/npm, and `uv`
 
 macOS:
@@ -62,7 +62,7 @@ On first run, GOD will:
 
 On the **Model** page, choose the resident runtime and enter the GOD model settings below. Click **Test Connection** to send a short test message. If you select Codex, the wizard also sends a test message through a temporary Codex conversation.
 
-Click **Save and Choose Experiment**, then **Browse Built-Ins** and **Start Now** for GOD Town or PKU Trump Visit. GOD opens the control room when the first live frame is ready. You can also start with an imported pack or use the draft editor to create your own experiment.
+Click **Save and Choose Experiment**, then **Browse Built-Ins** and **Start Now** for GOD Town or PKU Trump Visit. GOD opens the control room when the first live frame is ready. For a downloaded ExperimentPack, choose **Import Experiment Zip** on the same page. Use the draft editor to create your own experiment.
 
 | Variable | Example |
 | --- | --- |
@@ -131,6 +131,12 @@ Set `agent_backend` in an experiment's `init/init_config.json` to override the w
 The choice-only backends receive mounted skills that have no required arguments. Pair them with an Ask backend using `ask_backend` or the local default `GOD_AGENT_ASK_BACKEND`. GOD runs the selected skill and records `decision_backend` and any fallback in the run data.
 
 Keep provider URLs, keys and command arguments in the local `.env`. A `command` backend such as `{"type":"command","profile":"local-agent"}` selects a profile from that machine's `GOD_AGENT_COMMANDS`. The trusted wrapper reads the prompt from stdin and writes a skill decision object with `selected_skill_id` and `args`, or a plain-text Ask answer, to stdout. Configure wrappers with tools disabled when they only need to select or answer.
+
+For an installed, signed-in Claude Code or Cursor CLI, add the following line to the local `.env`. Set the experiment’s `agent_backend` to `{"type":"command","profile":"claude"}` or use `"profile":"cursor"`. Each choice and Ask starts a fresh process. Cursor’s trust flag applies to the empty temporary directory GOD creates for that call.
+
+```dotenv
+GOD_AGENT_COMMANDS='{"claude":["claude","-p","--tools=","--disable-slash-commands","--no-session-persistence","--output-format","text"],"cursor":["cursor-agent","-p","--trust","--mode","ask","--sandbox","enabled","--output-format","text"]}'
+```
 
 Run `./scripts/god.sh restart` after changing the backend settings.
 

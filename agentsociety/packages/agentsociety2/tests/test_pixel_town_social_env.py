@@ -408,6 +408,13 @@ def test_english_agent_name_does_not_break_chinese_event_policy(tmp_path: Path) 
         fallback = await env.publish_event("The visitor arrived.")
         assert fallback["event"] == "收到一条公共环境事件。"
 
+        operator_text = "The book exchange opens."
+        result = await env.publish_operator_event(operator_text)
+        observed = await env.observe_agent(1)
+        assert result["event"] == observed["latest_event"] == operator_text
+        assert operator_text in observed["recent_messages"][-1]["content"]
+        assert operator_text in env._step_communications[-1]["content"]
+
     asyncio.run(scenario())
 
 

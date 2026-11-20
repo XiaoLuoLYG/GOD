@@ -6,6 +6,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from agentsociety2.backend.routers.live_experiments import (
+    AskRequest,
     AskTarget,
     LiveExperimentSession,
     _read_replay_tail,
@@ -141,9 +142,10 @@ async def _targeted_live_ask_uses_external_question_api(tmp_path):
 
     assert "direct agent answer" in result
     assert agent.ask_calls == []
-    assert agent.external_question_calls == [
-        ("你今天做了什么", current_time, "text")
-    ]
+    [(prompt, time, response_type)] = agent.external_question_calls
+    assert prompt.startswith("你今天做了什么\n\n")
+    assert "请使用简体中文回答" in prompt
+    assert (time, response_type) == (current_time, "text")
 
 
 async def _targeted_live_ask_uses_english_response_language(tmp_path):
@@ -181,6 +183,38 @@ async def _targeted_live_ask_uses_english_response_language(tmp_path):
     assert "Simulation time: 2026-05-08T09:30:00" in result
     assert "Completed steps: 3" in result
     assert "目标：" not in result
+
+
+def test_system_ask_keeps_response_language_through_planning_and_summary(tmp_path):
+    from agentsociety2.society.helper import AgentSocietyHelper
+
+    now = datetime(2026, 5, 8, 8)
+    helper = AgentSocietyHelper(SimpleNamespace(t=now), [])
+    prompts = []
+
+    async def complete(*, messages, **_):
+        prompt = messages[0]["content"]
+        prompts.append(prompt)
+        if "Task Planning" in prompt:
+            content = ('{"direct_answer":false,"steps":[{"description":"Read the clock",'
+                       '"tool":"get_current_time","args":{},"expected_output":"time"}]}')
+        else:
+            content = '{"answer":"08:00"}'
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+
+    helper._router = SimpleNamespace(acompletion=complete)
+    live = LiveExperimentSession(workspace_path=tmp_path, hypothesis_id="town", experiment_id="1", default_tick=60)
+    live.society = SimpleNamespace(current_time=now, step_count=1, ask=helper.ask)
+    live.status = "waiting"
+    for request, instruction in [
+        (AskRequest(question="现在几点？", response_language="en"), "Answer in English only."),
+        (AskRequest(question="What time is it?"), "请使用简体中文回答"),
+    ]:
+        prompts.clear()
+        assert asyncio.run(live.ask(request)).result == "08:00"
+        planning, summary = prompts
+        assert instruction in planning and instruction in summary
+        assert "respond in the same language as the task" not in summary
 
 
 def test_live_intervene_directly_moves_agents_for_gather_instruction(tmp_path):
@@ -272,6 +306,16 @@ async def _live_intervene_directly_moves_agents_for_english_gather_instruction(t
     assert "Started environment pathfinding to: library" in result
     assert "Alice (agent_id=1): moving -> park, path_length=4" in result
     assert not any("\u4e00" <= char <= "\u9fff" for char in result)
+
+    env.calls.clear()
+    result = await session._intervene_with_target(
+        society,
+        "Please gather at Hobbs Cafe.",
+        AskTarget(type="agent", agent_id=1),
+        response_language="en",
+    )
+    assert env.calls == [(1, "Hobbs Cafe")]
+    assert "Started environment pathfinding to: Hobbs Cafe" in result
 
 
 async def _system_intervene_hides_non_english_model_result_in_english_ui(tmp_path):

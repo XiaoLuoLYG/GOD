@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 from agentsociety2.backend.routers import replay
 from agentsociety2.backend.services import map_packages
@@ -88,7 +89,7 @@ def _write_package(root: Path) -> Path:
 
 
 def test_map_package_validation_and_replay_metadata(tmp_path: Path) -> None:
-    agentsociety_root = tmp_path / "agentsociety"
+    agentsociety_root = tmp_path / "maps & experiments"
     workspace = agentsociety_root / "quick_experiments"
     package = _write_package(agentsociety_root)
     init_dir = workspace / "hypothesis_demo" / "experiment_1" / "init"
@@ -116,9 +117,9 @@ def test_map_package_validation_and_replay_metadata(tmp_path: Path) -> None:
 
     info = replay._map_info_response(str(workspace), "demo", "1")
     assert info.map_id == "demo_map"
-    assert info.preview_url == (
-        "/api/v1/replay/demo/1/map/preview?workspace_path=" + str(workspace)
-    )
+    preview_url = urlsplit(info.preview_url)
+    assert preview_url.path == "/api/v1/replay/demo/1/map/preview"
+    assert parse_qs(preview_url.query) == {"workspace_path": [str(workspace.resolve())]}
     assert info.tilesets[0].image_url.startswith("/api/v1/replay/demo/1/map/assets/0")
     assert info.character_sprites[0].name == "Resident"
     assert info.locations[0].id == "plaza"

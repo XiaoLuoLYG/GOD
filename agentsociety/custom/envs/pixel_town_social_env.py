@@ -485,9 +485,20 @@ supports direct/group messages between agents.
         broadcast: bool = True,
         group_id: int = 1,
     ) -> dict[str, Any]:
-        """Publish a system-level world event that agents can observe and react to."""
+        """Publish an agent-authored world event under the simulation's language policy."""
+        event = self._force_visible_text(event, "收到一条公共环境事件。")
+        return await self.publish_operator_event(event, severity, broadcast, group_id)
+
+    async def publish_operator_event(
+        self,
+        event: str,
+        severity: str = "info",
+        broadcast: bool = True,
+        group_id: int = 1,
+    ) -> dict[str, Any]:
+        """Store operator text verbatim in the world and its public chat."""
         async with self._lock:
-            event = self._force_visible_text(event, "收到一条公共环境事件。")
+            event = str(event or "").strip()
             severity = str(severity or "info").strip().lower()
             if not event:
                 return {"event": "", "severity": severity, "broadcast": False}
@@ -1055,7 +1066,10 @@ supports direct/group messages between agents.
             "type": message_type,
             "sender_id": sender_id,
             "sender_name": self._display_name(sender_id),
-            "content": self._force_visible_text(content, "我会用中文继续处理。"),
+            "content": (
+                content if message_type == "system_event"
+                else self._force_visible_text(content, "我会用中文继续处理。")
+            ),
             "timestamp": self.t.isoformat() if hasattr(self, "t") else "",
         }
         if group_id is not None:
@@ -1202,7 +1216,10 @@ supports direct/group messages between agents.
             "type": message_type,
             "sender_id": sender_id,
             "sender_name": self._display_name(sender_id),
-            "content": self._force_visible_text(content, "我会用中文继续处理。"),
+            "content": (
+                content if message_type == "system_event"
+                else self._force_visible_text(content, "我会用中文继续处理。")
+            ),
         }
         if receiver_id is not None:
             communication["receiver_id"] = receiver_id

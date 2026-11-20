@@ -948,6 +948,7 @@ window.GOD_CATALOG = {
       "slug": "god-town-daily-life",
       "summary": "A playable setup seed for GOD Town. Example replays are published separately as watchable results.",
       "image": "assets/screenshots/map-the-ville.png",
+      "replayHref": "replays/god-town/",
       "download": "https://github.com/XiaoLuoLYG/GOD/releases/download/public-site-packs/god-town-daily-life-experiment-pack.zip",
       "downloadLabel": "Download ExperimentPack",
       "stats": [
@@ -1088,6 +1089,7 @@ window.GOD_CATALOG = {
       "slug": "pku-public-situation",
       "summary": "A playable setup seed for PKU Public Situation. Example replays are published separately as watchable results.",
       "image": "assets/screenshots/map-pku.png",
+      "replayHref": "replays/pku-public-situation/",
       "download": "https://github.com/XiaoLuoLYG/GOD/releases/download/public-site-packs/pku-public-situation-experiment-pack.zip",
       "downloadLabel": "Download ExperimentPack",
       "stats": [

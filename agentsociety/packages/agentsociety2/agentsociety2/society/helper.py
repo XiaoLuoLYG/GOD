@@ -733,7 +733,7 @@ Based on the execution results above, generate a clear, concise, and accurate fi
 1. **Synthesize information** from all successful step results
 2. **Address the task directly** - answer what was asked
 3. **Be concise** - provide only relevant information
-4. **Use the user's language** - respond in the same language as the task
+4. **Answer language** - use the response language requested in the task, or the question's language if none is specified
 5. **Acknowledge failures** if they prevented completing the task
 6. **Be factual** - only state what the execution results support
 

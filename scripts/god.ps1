@@ -324,19 +324,6 @@ function Set-EnvValuesInFile {
   Write-TextUtf8NoBom $Path (($out -join "`n").TrimEnd() + "`n")
 }
 
-function Set-ObjectProperty {
-  param(
-    [object]$Object,
-    [string]$Name,
-    [object]$Value
-  )
-  if ($Object.PSObject.Properties[$Name]) {
-    $Object.$Name = $Value
-  } else {
-    $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value
-  }
-}
-
 function Get-ObjectPropertyValue {
   param(
     [AllowNull()][object]$Object,
@@ -710,25 +697,27 @@ function Require-CurrentExperimentConfig {
   }
 }
 
-function Stop-ProcessTree {
+function Get-ProcessTree {
   param([int]$ProcessId)
   if ($ProcessId -le 0) {
     return
   }
-  try {
-    $children = Get-CimInstance Win32_Process -Filter "ParentProcessId = $ProcessId" -ErrorAction SilentlyContinue
-    foreach ($child in $children) {
-      Stop-ProcessTree -ProcessId ([int]$child.ProcessId)
-    }
-  } catch {
+  $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+  $root = $processes | Where-Object { $_.ProcessId -eq $ProcessId } | Select-Object -First 1
+  if (-not $root -or -not $root.CreationDate) {
+    return
   }
-  try {
-    $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
-    if ($proc) {
-      Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+  $members = @{ $ProcessId = $root }
+  do {
+    $count = $members.Count
+    foreach ($process in $processes) {
+      $parent = $members[[int]$process.ParentProcessId]
+      if ($parent -and -not $members.ContainsKey([int]$process.ProcessId) -and $process.CreationDate -ge $parent.CreationDate) {
+        $members[[int]$process.ProcessId] = $process
+      }
     }
-  } catch {
-  }
+  } while ($members.Count -gt $count)
+  return $members.Values | Sort-Object CreationDate -Descending
 }
 
 function Get-ServiceProcessId {
@@ -816,12 +805,40 @@ function Test-ServicePort {
   return $true
 }
 
+function Confirm-ControlPorts {
+  param([switch]$ReuseServices)
+  $frontendUp = Test-ServicePort $script:GodFrontendPort $script:FrontendPidFile GOD_FRONTEND_PORT
+  $backendUp = Test-ServicePort $script:GodBackendPort $script:BackendPidFile GOD_BACKEND_PORT
+  if ($ReuseServices -and (
+    (-not $backendUp -and ($frontendUp -or (Get-ServiceProcessId $script:BackendPidFile))) -or
+    (-not $frontendUp -and (Get-ServiceProcessId $script:FrontendPidFile))
+  )) {
+    Stop-God "Running GOD services do not match the configured ports. Run .\scripts\god.cmd restart."
+  }
+}
+
 function Stop-PidFile {
   param([string]$Path, [string]$Label)
   $processId = Get-ServiceProcessId $Path
   if ($processId -gt 0) {
+    $snapshot = @(Get-ProcessTree -ProcessId $processId)
     Write-GodLog "Stopping $Label pid=$processId"
-    Stop-ProcessTree -ProcessId $processId
+    # Native stop can remove the Front before its independently launched workers.
+    if ($Path -eq $script:RuntimePidFile) {
+      Stop-RuntimeInstance $script:RuntimeInstance
+    }
+    foreach ($process in $snapshot) {
+      $current = Get-CimInstance Win32_Process -Filter "ProcessId = $($process.ProcessId)" -ErrorAction SilentlyContinue
+      if ($current -and $current.CreationDate -eq $process.CreationDate) {
+        $target = Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue
+        if ($target) {
+          Stop-Process -InputObject $target -Force -ErrorAction SilentlyContinue
+          if (-not $target.WaitForExit(2000)) {
+            Stop-God "Service process $($process.ProcessId) did not stop"
+          }
+        }
+      }
+    }
   }
   Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
 }
@@ -897,9 +914,6 @@ function Stop-All {
     }
   }
   Stop-ControlServices
-  if (Get-ServiceProcessId $script:RuntimePidFile) {
-    Stop-RuntimeInstance $script:RuntimeInstance
-  }
   Stop-PidFile $script:RuntimePidFile "agent runtime"
 }
 
@@ -1151,62 +1165,10 @@ function Prepare-Experiment {
     $RuntimeRequired = Test-ExperimentRequiresRuntime
   }
 
-  $sessionPrefix = Get-EnvValue "GOD_SESSION_PREFIX" "$($script:GodExperiment)_run_$($script:GodExperimentRun)"
+  $port = if ($RuntimeRequired) { $script:RuntimeAgentPort } else { 0 }
+  $helper = Join-PathMany "packages" "agentsociety2" "agentsociety2" "society" "launch_config.py"
   Write-GodLog "Preparing experiment: $($script:GodExperiment) (run $($script:GodExperimentRun))"
-  $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
-  $agentRoot = (Resolve-Path $script:BackendRoot).Path
-  $wsUrl = "ws://127.0.0.1:$($script:RuntimeAgentPort)"
-  $requestedMapId = if ($script:InitialEnv.GOD_MAP_ID -ne $null) { Get-EnvValue "GOD_MAP_ID" "" } else { "" }
-
-  foreach ($module in @(Get-ObjectPropertyValue -Object $config -Name "env_modules" -Default @())) {
-    if ($null -eq $module) {
-      continue
-    }
-    if ((Get-ObjectPropertyValue $module "module_type" "") -ne "PixelTownSocialEnv") {
-      continue
-    }
-    if (-not $module.PSObject.Properties["kwargs"] -or $null -eq $module.kwargs) {
-      Set-ObjectProperty $module "kwargs" ([pscustomobject]@{})
-    }
-    $kwargs = $module.kwargs
-    if (-not [string]::IsNullOrWhiteSpace($requestedMapId)) {
-      Set-ObjectProperty $kwargs "map_id" $requestedMapId
-      Set-ObjectProperty $kwargs "map_manifest_path" "custom/maps/$requestedMapId/map.yaml"
-    } else {
-      $mapId = if ($kwargs.PSObject.Properties["map_id"]) { [string]$kwargs.map_id } else { "" }
-      $manifestPath = if ($kwargs.PSObject.Properties["map_manifest_path"]) { [string]$kwargs.map_manifest_path } else { "" }
-      if ([string]::IsNullOrWhiteSpace($manifestPath)) {
-        if ([string]::IsNullOrWhiteSpace($mapId)) {
-          $mapId = "the_ville"
-          Set-ObjectProperty $kwargs "map_id" $mapId
-        }
-        Set-ObjectProperty $kwargs "map_manifest_path" "custom/maps/$mapId/map.yaml"
-      }
-    }
-  }
-
-  foreach ($agent in @(Get-ObjectPropertyValue -Object $config -Name "agents" -Default @())) {
-    if (-not $RuntimeRequired -or (Get-ObjectPropertyValue $agent "agent_type" "") -cne "JiuwenClawAgent") {
-      continue
-    }
-    if (-not $agent.PSObject.Properties["kwargs"] -or $null -eq $agent.kwargs) {
-      Set-ObjectProperty $agent "kwargs" ([pscustomobject]@{})
-    }
-    $kwargs = $agent.kwargs
-    $agentId = 0
-    $rawAgentId = Get-ObjectPropertyValue $agent "agent_id" $null
-    $rawKwargsId = Get-ObjectPropertyValue $kwargs "id" $null
-    if ($rawAgentId) {
-      $agentId = [int]$rawAgentId
-    } elseif ($rawKwargsId) {
-      $agentId = [int]$rawKwargsId
-    }
-    Set-ObjectProperty $kwargs "jiuwenclaw_ws_url" $wsUrl
-    Set-ObjectProperty $kwargs "session_id" "$sessionPrefix`_agent_$agentId"
-    Set-ObjectProperty $kwargs "trusted_dirs" @($agentRoot)
-  }
-
-  Write-TextUtf8NoBom $configPath (($config | ConvertTo-Json -Depth 100) + "`n")
+  Invoke-CheckedCommand -FilePath (Get-ToolPath @("uv")) -Arguments @("run", "--no-project", "--managed-python", "python", $helper, (Resolve-Path -LiteralPath $configPath).Path, (Resolve-Path -LiteralPath $script:BackendRoot).Path, [string]$port) -WorkingDirectory $script:BackendRoot
 }
 
 function Start-Runtime {
@@ -1216,7 +1178,6 @@ function Start-Runtime {
   $uiReady = Test-ServicePort $script:RuntimeUiPort $script:RuntimePidFile RUNTIME_UI_PORT
   $ready = $agentReady -and $webReady -and $gatewayReady -and $uiReady
   if ((-not $ready) -and (Get-ServiceProcessId $script:RuntimePidFile)) {
-    Stop-RuntimeInstance $script:RuntimeInstance
     Stop-PidFile $script:RuntimePidFile "agent runtime"
   }
   Ensure-RuntimeInstance
@@ -1274,11 +1235,9 @@ function Start-Backend {
     "`$env:GOD_ROOT = $(Quote-PSLiteral $script:RootDir)",
     "`$env:GOD_ENV_FILE = $(Quote-PSLiteral $script:EnvFile)",
     "`$env:LIVE_WORKSPACE_PATH = $(Quote-PSLiteral $script:LiveWorkspacePath)",
-    "`$env:AGENTSOCIETY_LLM_API_KEY = $(Quote-PSLiteral (Get-EnvValue 'AGENTSOCIETY_LLM_API_KEY' ''))",
     "`$env:AGENTSOCIETY_LLM_API_BASE = $(Quote-PSLiteral (Get-EnvValue 'AGENTSOCIETY_LLM_API_BASE' 'https://api.openai.com/v1'))",
     "`$env:AGENTSOCIETY_LLM_MODEL = $(Quote-PSLiteral (Get-EnvValue 'AGENTSOCIETY_LLM_MODEL' 'gpt-5.4'))",
     "`$env:AGENTSOCIETY_NANO_LLM_MODEL = $(Quote-PSLiteral (Get-EnvValue 'AGENTSOCIETY_NANO_LLM_MODEL' 'gpt-5.4-nano'))",
-    "`$env:AGENTSOCIETY_EMBEDDING_API_KEY = $(Quote-PSLiteral (Get-EnvValue 'AGENTSOCIETY_EMBEDDING_API_KEY' (Get-EnvValue 'AGENTSOCIETY_LLM_API_KEY' '')))",
     "`$env:AGENTSOCIETY_EMBEDDING_API_BASE = $(Quote-PSLiteral (Get-EnvValue 'AGENTSOCIETY_EMBEDDING_API_BASE' (Get-EnvValue 'AGENTSOCIETY_LLM_API_BASE' 'https://api.openai.com/v1')))",
     "`$env:AGENTSOCIETY_EMBEDDING_MODEL = $(Quote-PSLiteral (Get-EnvValue 'AGENTSOCIETY_EMBEDDING_MODEL' 'text-embedding-3-large'))",
     "`$env:BACKEND_HOST = $(Quote-PSLiteral $script:GodBackendHost)",
@@ -1324,12 +1283,12 @@ function Start-Frontend {
 }
 
 function Start-SetupServices {
-  Setup-Dependencies -RuntimeRequired $false
   Set-ProcessEnv "GOD_SETUP_MODE" "1"
   Ensure-EnvFile
+  Confirm-ControlPorts
+  Setup-Dependencies -RuntimeRequired $false
   Remove-Item $script:StartRequestFile -Force -ErrorAction SilentlyContinue
   Stop-All
-  Test-ServicePort $script:GodFrontendPort $script:FrontendPidFile GOD_FRONTEND_PORT | Out-Null
   Start-Backend
   Start-Frontend
   Open-SetupPage
@@ -1366,18 +1325,27 @@ function Receive-StartRequest {
 function Wait-ForStartRequest {
   Write-GodLog "Waiting for setup wizard to save and request startup"
   $nextNotice = (Get-Date).AddSeconds(30)
-  while (-not (Test-Path $script:StartRequestFile)) {
+  $pidFiles = @($script:FrontendPidFile, $script:BackendPidFile)
+  $setupPids = @(Get-Content -LiteralPath $pidFiles -ErrorAction SilentlyContinue)
+  while ($setupPids.Count -eq 2) {
+    $recordedPids = @(Get-Content -LiteralPath $pidFiles -ErrorAction SilentlyContinue)
+    if (($setupPids -join ",") -ne ($recordedPids -join ",")) {
+      break
+    }
+    if (Test-Path $script:StartRequestFile) {
+      Receive-StartRequest
+      return
+    }
     Start-Sleep -Seconds 2
     if ((Get-Date) -ge $nextNotice) {
       Write-GodLog "Still waiting on $(Get-SetupUrl)"
       $nextNotice = (Get-Date).AddSeconds(30)
     }
   }
-  Receive-StartRequest
+  Stop-God "Setup services stopped or restarted. Run .\scripts\god.cmd start to open setup again."
 }
 
 function Start-WithSetupIfNeeded {
-  Ensure-Prerequisites
   Load-Env
   if (Test-PendingStartRequest) {
     Write-GodLog "Applying pending setup startup request"
@@ -1401,7 +1369,6 @@ function Start-WithSetupIfNeeded {
 }
 
 function Configure-Experiment {
-  Ensure-Prerequisites
   Write-GodLog "Starting new experiment setup wizard"
   Start-SetupServices
   Wait-ForStartRequest
@@ -1412,6 +1379,7 @@ function Configure-Experiment {
 
 function New-LiveSession {
   if (-not (Test-BackendHealthy)) {
+    Confirm-ControlPorts -ReuseServices
     Start-Backend
   }
   Write-GodLog "Creating live session"
@@ -1435,8 +1403,8 @@ function Start-All {
   Load-Env
   Require-CurrentExperimentConfig
   Ensure-EnvFile
-  Test-ServicePort $script:GodFrontendPort $script:FrontendPidFile GOD_FRONTEND_PORT | Out-Null
-  Test-ServicePort $script:GodBackendPort $script:BackendPidFile GOD_BACKEND_PORT | Out-Null
+  Confirm-ControlPorts -ReuseServices
+  Ensure-Prerequisites
   $runtimeRequired = Test-ExperimentRequiresRuntime
   Setup-Dependencies -RuntimeRequired $runtimeRequired
   Prepare-Experiment -RuntimeRequired $runtimeRequired
@@ -1459,12 +1427,16 @@ function Start-NewRun {
   Ensure-Prerequisites
   Load-Env
   Require-CurrentExperimentConfig
-  Set-ProcessEnv "GOD_SESSION_PREFIX" "$($script:GodExperiment)_fresh_$((Get-Date).ToString('yyyyMMdd_HHmmss'))"
+  $freshPrefix = "$($script:GodExperiment)_fresh_$((Get-Date).ToString('yyyyMMdd_HHmmss'))"
   Stop-All
   $runDir = Join-PathMany $script:LiveWorkspacePath "hypothesis_$($script:GodExperiment)" "experiment_$($script:GodExperimentRun)" "run"
   Write-GodLog "New run will clear: $runDir"
-  Remove-Item -LiteralPath $runDir -Recurse -Force -ErrorAction SilentlyContinue
+  if (Test-Path -LiteralPath $runDir) {
+    Remove-Item -LiteralPath $runDir -Recurse -Force
+  }
   Write-GodLog "Cleared previous run"
+  Write-TextUtf8NoBom (Join-Path $runDir ".god-session-prefix") "$freshPrefix`n"
+  Set-ProcessEnv "GOD_SESSION_PREFIX" $freshPrefix
   Start-All
 }
 

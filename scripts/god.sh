@@ -580,24 +580,79 @@ service_port_up() {
   owns_port "$port" "$file" || die "Port $port is occupied. Set $setting to an unused port in $ENV_FILE and retry."
 }
 
+preflight_control_ports() {
+  local frontend_up=0 backend_up=0
+  service_port_up "$GOD_FRONTEND_PORT" "$FRONTEND_PID_FILE" GOD_FRONTEND_PORT && frontend_up=1
+  service_port_up "$GOD_BACKEND_PORT" "$BACKEND_PID_FILE" GOD_BACKEND_PORT && backend_up=1
+  if [[ "${1:-}" == "reuse" ]] && {
+    { (( ! backend_up )) && { (( frontend_up )) || service_processes "$BACKEND_PID_FILE" >/dev/null; }; } ||
+    { (( ! frontend_up )) && service_processes "$FRONTEND_PID_FILE" >/dev/null; }
+  }; then
+    die "Running GOD services do not match the configured ports. Run ./scripts/god.sh restart."
+  fi
+}
+
 stop_control_services() {
   kill_pid_file "$FRONTEND_PID_FILE" "control room"
   kill_pid_file "$BACKEND_PID_FILE" "backend"
 }
 
 kill_pid_file() {
-  local file="$1" label="$2" members pid
+  local file="$1" label="$2" members snapshot snapshot_status=0
   if members="$(service_processes "$file")"; then
+    snapshot="$(LC_ALL=C ps -p "$(paste -sd, - <<< "$members")" -o pid=,lstart= 2>&1)" || snapshot_status=$?
+    if [[ "$snapshot_status" != "0" && ( "$snapshot_status" != "1" || -n "$snapshot" ) ]]; then
+      die "Could not snapshot $label processes (ps exited $snapshot_status): $snapshot"
+    fi
+    if [[ -z "$snapshot" ]]; then
+      rm -f "$file"
+      return 0
+    fi
     log "Stopping $label"
-    local -a pids=()
-    while IFS= read -r pid; do
-      pids+=("$pid")
-    done <<< "$members"
-    kill "${pids[@]}" 2>/dev/null || true
-    local deadline=$((SECONDS + 8))
-    while (( SECONDS < deadline )) && ps -o stat= -p "$(paste -sd, - <<< "$members")" 2>/dev/null | awk '$1 !~ /^Z/ {live=1} END {exit !live}'; do
-      sleep 0.2
-    done
+    # Native stop can orphan workers in their own sessions. Keep their birth times.
+    if [[ "$file" == "$RUNTIME_PID_FILE" ]]; then
+      stop_runtime_instance "$RUNTIME_INSTANCE"
+    fi
+    python3 - "$snapshot" <<'PY'
+import os
+import signal
+import subprocess
+import sys
+import time
+
+expected = dict(line.strip().split(None, 1) for line in sys.argv[1].splitlines())
+
+def live_processes():
+    result = subprocess.run(
+        ["ps", "-p", ",".join(expected), "-o", "pid=,lstart=,stat="],
+        capture_output=True, text=True, env=dict(os.environ, LC_ALL="C"),
+    )
+    if result.returncode not in (0, 1) or result.stderr.strip():
+        raise RuntimeError(result.stderr.strip() or "Could not inspect service processes")
+    live = []
+    for line in result.stdout.splitlines():
+        pid, details = line.strip().split(None, 1)
+        started, status = details.rsplit(None, 1)
+        if expected.get(pid) == started and not status.startswith("Z"):
+            live.append(int(pid))
+    return live
+
+for sig, timeout in ((signal.SIGTERM, 8), (signal.SIGKILL, 2)):
+    for pid in live_processes():
+        try:
+            os.kill(pid, sig)
+        except ProcessLookupError:
+            pass
+    deadline = time.monotonic() + timeout
+    live = live_processes()
+    while live and time.monotonic() < deadline:
+        time.sleep(0.1)
+        live = live_processes()
+    if not live:
+        break
+else:
+    raise SystemExit(f"[GOD] error: Service processes did not stop: {live}")
+PY
   fi
   rm -f "$file"
 }
@@ -629,9 +684,6 @@ stop_all() {
     curl -fsS --max-time 10 -X POST "$(stop_live_url)" >/dev/null 2>&1 || true
   fi
   stop_control_services
-  if service_processes "$RUNTIME_PID_FILE" >/dev/null; then
-    stop_runtime_instance "$RUNTIME_INSTANCE"
-  fi
   kill_pid_file "$RUNTIME_PID_FILE" "agent runtime"
 }
 
@@ -759,63 +811,15 @@ sync_runtime_model_env() {
 }
 
 prepare_experiment() {
-  local config_path runtime_required
+  local config_path runtime_port=0
   config_path="$(experiment_config_path)"
   [[ -f "$config_path" ]] || die "Experiment config not found: $config_path"
-  runtime_required="${1:-$(experiment_requires_runtime)}"
-
-  local session_prefix="${GOD_SESSION_PREFIX:-${GOD_EXPERIMENT}_run_${GOD_EXPERIMENT_RUN}}"
+  if [[ "${1:-$(experiment_requires_runtime)}" == "1" ]]; then
+    runtime_port="$RUNTIME_AGENT_PORT"
+  fi
   log "Preparing experiment: $GOD_EXPERIMENT (run $GOD_EXPERIMENT_RUN)"
-  BACKEND_ROOT="$BACKEND_ROOT" \
-  RUNTIME_REQUIRED="$runtime_required" \
-  RUNTIME_AGENT_PORT="$RUNTIME_AGENT_PORT" \
-  GOD_SESSION_PREFIX="$session_prefix" \
-  GOD_MAP_ID_WAS_EXPLICIT="$GOD_MAP_ID_WAS_EXPLICIT" \
-  GOD_MAP_ID="${GOD_MAP_ID:-}" \
-  python3 - "$config_path" <<'PY'
-import json
-import os
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-config = json.loads(path.read_text(encoding="utf-8"))
-runtime_required = os.environ["RUNTIME_REQUIRED"] == "1"
-agent_root = str(Path(os.environ["BACKEND_ROOT"]).resolve())
-ws_url = f"ws://127.0.0.1:{os.environ['RUNTIME_AGENT_PORT']}"
-session_prefix = os.environ["GOD_SESSION_PREFIX"]
-requested_map_id = (
-    os.environ.get("GOD_MAP_ID", "").strip()
-    if os.environ.get("GOD_MAP_ID_WAS_EXPLICIT")
-    else ""
-)
-
-for module in config.get("env_modules", []):
-    if module.get("module_type") == "PixelTownSocialEnv":
-        kwargs = module.setdefault("kwargs", {})
-        if requested_map_id:
-            kwargs["map_id"] = requested_map_id
-            kwargs["map_manifest_path"] = f"custom/maps/{requested_map_id}/map.yaml"
-        else:
-            map_id = str(kwargs.get("map_id") or "").strip()
-            manifest_path = str(kwargs.get("map_manifest_path") or "").strip()
-            if not manifest_path:
-                if not map_id:
-                    map_id = "the_ville"
-                    kwargs["map_id"] = map_id
-                kwargs["map_manifest_path"] = f"custom/maps/{map_id}/map.yaml"
-
-for agent in config.get("agents", []):
-    if not runtime_required or agent.get("agent_type") != "JiuwenClawAgent":
-        continue
-    kwargs = agent.setdefault("kwargs", {})
-    agent_id = int(agent.get("agent_id") or kwargs.get("id") or 0)
-    kwargs["jiuwenclaw_ws_url"] = ws_url
-    kwargs["session_id"] = f"{session_prefix}_agent_{agent_id}"
-    kwargs["trusted_dirs"] = [agent_root]
-
-path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-PY
+  python3 "$BACKEND_ROOT/packages/agentsociety2/agentsociety2/society/launch_config.py" \
+    "$config_path" "$BACKEND_ROOT" "$runtime_port"
 }
 
 start_runtime() {
@@ -825,7 +829,6 @@ start_runtime() {
   service_port_up "$RUNTIME_GATEWAY_PORT" "$RUNTIME_PID_FILE" RUNTIME_GATEWAY_PORT || ready=0
   service_port_up "$RUNTIME_UI_PORT" "$RUNTIME_PID_FILE" RUNTIME_UI_PORT || ready=0
   if [[ "$ready" == "0" ]] && service_processes "$RUNTIME_PID_FILE" >/dev/null; then
-    stop_runtime_instance "$RUNTIME_INSTANCE"
     kill_pid_file "$RUNTIME_PID_FILE" "agent runtime"
   fi
   ensure_runtime_instance
@@ -962,12 +965,12 @@ PY
 }
 
 start_setup_services() {
-  setup_deps 0
   export GOD_SETUP_MODE=1
   ensure_env_file
+  preflight_control_ports
+  setup_deps 0
   rm -f "$START_REQUEST_FILE"
   stop_all
-  service_port_up "$GOD_FRONTEND_PORT" "$FRONTEND_PID_FILE" GOD_FRONTEND_PORT || true
   start_backend
   start_frontend
   open_setup_page
@@ -1009,15 +1012,20 @@ PY
 
 wait_for_start_request() {
   log "Waiting for setup wizard to save and request startup"
-  local next_notice=$((SECONDS + 30))
-  while [[ ! -f "$START_REQUEST_FILE" ]]; do
+  local next_notice=$((SECONDS + 30)) setup_pids
+  setup_pids="$(cat "$FRONTEND_PID_FILE" "$BACKEND_PID_FILE" 2>/dev/null)" || setup_pids=""
+  while [[ -n "$setup_pids" && "$setup_pids" == "$(cat "$FRONTEND_PID_FILE" "$BACKEND_PID_FILE" 2>/dev/null)" ]]; do
+    if [[ -f "$START_REQUEST_FILE" ]]; then
+      consume_start_request
+      return 0
+    fi
     sleep 2
     if (( SECONDS >= next_notice )); then
       log "Still waiting on $(setup_url)"
       next_notice=$((SECONDS + 30))
     fi
   done
-  consume_start_request
+  die "Setup services stopped or restarted. Run ./scripts/god.sh start to open setup again."
 }
 
 start_with_setup_if_needed() {
@@ -1056,6 +1064,7 @@ configure_experiment() {
 
 create_session() {
   if ! owns_port "$GOD_BACKEND_PORT" "$BACKEND_PID_FILE" || ! curl -fsS --max-time 5 "$backend_url/health" >/dev/null 2>&1; then
+    preflight_control_ports reuse
     start_backend
   fi
   log "Creating live session"
@@ -1078,8 +1087,7 @@ start_all() {
   load_env
   require_current_experiment_config
   ensure_env_file
-  service_port_up "$GOD_FRONTEND_PORT" "$FRONTEND_PID_FILE" GOD_FRONTEND_PORT || true
-  service_port_up "$GOD_BACKEND_PORT" "$BACKEND_PID_FILE" GOD_BACKEND_PORT || true
+  preflight_control_ports reuse
   local runtime_required
   runtime_required="$(experiment_requires_runtime)"
   setup_deps "$runtime_required"
@@ -1103,12 +1111,15 @@ new_run() {
   require_base_tools
   load_env
   require_current_experiment_config
-  export GOD_SESSION_PREFIX="${GOD_EXPERIMENT}_fresh_$(date +%Y%m%d_%H%M%S)"
+  local fresh_prefix="${GOD_EXPERIMENT}_fresh_$(date +%Y%m%d_%H%M%S)"
   stop_all
   local run_dir="$LIVE_WORKSPACE_PATH/hypothesis_${GOD_EXPERIMENT}/experiment_${GOD_EXPERIMENT_RUN}/run"
   log "New run will clear: $run_dir"
   rm -rf "$run_dir"
   log "Cleared previous run"
+  mkdir -p "$run_dir"
+  printf '%s\n' "$fresh_prefix" >"$run_dir/.god-session-prefix"
+  export GOD_SESSION_PREFIX="$fresh_prefix"
   start_all
 }
 

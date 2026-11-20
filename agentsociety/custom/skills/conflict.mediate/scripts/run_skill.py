@@ -12,6 +12,7 @@ from agent_skill_runtime import (  # noqa: E402
     choose_available_interaction,
     choose_available_location,
     emit_result,
+    group_message,
     load_local_skill_spec,
     memory_effect,
     observation_from,
@@ -41,12 +42,6 @@ def choose_world_effect(observation: dict, spec: dict) -> dict:
     return {"type": "set_state", "action": SUMMARY, "status": str(spec.get("status") or STATUS), "emotion": str(spec.get("emotion") or EMOTION), "reason": f"{SKILL_ID}: no configured map target is reachable"}
 
 
-def maybe_speech(world_effect: dict) -> dict | None:
-    if not SPEECH or world_effect.get("type") == "move":
-        return None
-    return {"type": "group_message", "group_id": 1, "content": SPEECH}
-
-
 def build_memory(observation: dict, spec: dict) -> dict:
     location_id = str(observation.get("location_id") or "unknown")
     template = str(spec.get("memory_template") or MEMORY_TEMPLATE)
@@ -63,7 +58,7 @@ def main() -> int:
         summary=SUMMARY,
         reason=f"{SKILL_ID} uses its own local skill.json targets and script constants; no central keyword rule selected this behavior.",
         world_effect=world_effect,
-        speech_effect=maybe_speech(world_effect),
+        speech_effect=group_message(spec.get("speech", SPEECH)) if world_effect["type"] != "move" else None,
         memory_effects=[build_memory(observation, spec)],
         confidence=0.76,
     )

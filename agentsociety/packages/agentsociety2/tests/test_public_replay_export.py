@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 from zipfile import ZipFile
 
-from agentsociety2.backend.services import package_imports
+import pytest
+
+from agentsociety2.backend.services import map_packages, package_imports
 from agentsociety2.backend.services.public_replay_export import (
     export_curated_experiment_packs,
     export_public_replay,
@@ -45,7 +49,8 @@ def test_load_operator_commands_backfills_markdown_artifacts(tmp_path: Path) -> 
     ]
 
 
-def test_export_public_replay_writes_static_bundle(tmp_path: Path) -> None:
+@pytest.mark.parametrize("map_override", [False, True])
+def test_export_public_replay_writes_static_bundle(tmp_path: Path, map_override: bool) -> None:
     workspace = tmp_path / "quick_experiments"
     experiment_root = workspace / "hypothesis_demo_world" / "experiment_1"
     run_dir = experiment_root / "run"
@@ -53,6 +58,9 @@ def test_export_public_replay_writes_static_bundle(tmp_path: Path) -> None:
     run_dir.mkdir(parents=True)
     init_dir.mkdir(parents=True)
     map_manifest = _write_map_package(tmp_path / "custom" / "maps" / "demo")
+    if map_override:
+        (run_dir / ".god-launch.json").write_text(json.dumps({"map_id": "demo"}), encoding="utf-8")
+        map_manifest = tmp_path / "custom/maps/original/map.yaml"
     init_dir.joinpath("init_config.json").write_text(
         json.dumps(
                 {
@@ -182,7 +190,11 @@ def test_export_public_replay_writes_static_bundle(tmp_path: Path) -> None:
         assert str(tmp_path) not in exported_text
         assert "/Users/" not in exported_text
         assert exported_config["env_modules"][0]["kwargs"]["map_id"] == "demo"
-        assert "map_manifest_path" not in exported_config["env_modules"][0]["kwargs"]
+        map_kwargs = exported_config["env_modules"][0]["kwargs"]
+        if map_override:
+            assert map_kwargs["map_manifest_path"] == "custom/maps/demo/map.yaml"
+        else:
+            assert "map_manifest_path" not in map_kwargs
         assert not any(name.startswith("run/") or name.startswith("run_") for name in names)
         assert not any(".runtime/" in name for name in names)
         assert not any(name.endswith(("sqlite.db", ".sqlite", ".sqlite3", ".log")) for name in names)
@@ -356,6 +368,38 @@ def test_curated_experiment_release_download_urls(tmp_path: Path) -> None:
     )
 
 
+def test_public_release_uses_native_map_from_experiment_pack(tmp_path: Path) -> None:
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "catalog.js").write_text(
+        '"https://github.com/XiaoLuoLYG/GOD/releases/download/public-site-packs/demo-map-pack.zip"',
+        encoding="utf-8",
+    )
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    with ZipFile(assets / "demo-map-pack.zip", "w") as archive:
+        archive.writestr("map.json", '{"map_id":"demo","tiled_map_url":"tiled-map.json"}')
+        archive.writestr("tiled-map.json", "{}")
+    native_map = _write_map_package(tmp_path / "native").parent
+    with ZipFile(assets / "demo-experiment-pack.zip", "w") as archive:
+        for file in sorted(native_map.rglob("*")):
+            if file.is_file():
+                archive.write(file, "dependencies/maps/demo/" + file.relative_to(native_map).as_posix())
+    script = Path(__file__).resolve().parents[4] / "scripts" / "publish_site_release_assets.py"
+    command = [sys.executable, str(script), "--site-root", str(site), "--asset-root", str(assets), "--dry-run"]
+
+    unstaged = subprocess.run(command, capture_output=True, text=True, check=False)
+    assert unstaged.returncode != 0, unstaged.stdout
+    assert "native MapPack" in unstaged.stderr
+
+    staging = tmp_path / "staged"
+    staged = subprocess.run([*command, "--staging-dir", str(staging)], capture_output=True, text=True, check=False)
+    assert staged.returncode == 0, staged.stderr
+    installed = map_packages.import_map_pack_zip(staging / "demo-map-pack.zip", root=tmp_path / "fresh")
+    assert installed.validation.ok
+    assert installed.map_id == "demo"
+
+
 def _write_map_package(package_root: Path) -> Path:
     package_root.mkdir(parents=True)
     downloads = package_root / "downloads"
@@ -400,7 +444,8 @@ def _write_map_package(package_root: Path) -> Path:
                         "type": "tilelayer",
                         "visible": True,
                         "data": [1] * 12,
-                    }
+                    },
+                    {"name": "Collisions", "type": "tilelayer", "visible": False, "data": [0] * 12},
                 ],
             }
         ),

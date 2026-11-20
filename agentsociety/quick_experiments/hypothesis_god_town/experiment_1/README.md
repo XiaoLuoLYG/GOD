@@ -30,6 +30,8 @@
 ./agentsociety/quick_experiments/hypothesis_god_town/experiment_1/run.sh
 ```
 
+From an imported copy's directory, run `bash ./run.sh`, or `BACKEND_ROOT="/path/to/GOD/agentsociety" bash ./run.sh` if the workspace is outside the GOD checkout.
+
 When startup finishes, open:
 
 ```text

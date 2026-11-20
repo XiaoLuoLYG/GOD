@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from agentsociety2.backend.routers.god_setup import _workspace_path
 from agentsociety2.backend.services.map_packages import load_map_package, safe_resolve
+from agentsociety2.society.launch_config import launch_map_id
 from agentsociety2.society.models import InitConfig
 
 router = APIRouter(prefix="/api/v1/experiment-configs", tags=["experiment-configs"])
@@ -547,7 +548,8 @@ async def get_init_config(
     config_path = _init_config_path(workspace_path, hypothesis_id, experiment_id)
     config = _load_init_config(config_path)
     context = _load_experiment_context(config_path, config)
-    map_id = _map_id_from_config(config, context)
+    experiment = _experiment_path(workspace_path, hypothesis_id, experiment_id)
+    map_id = launch_map_id(experiment) or _map_id_from_config(config, context)
     return InitConfigResponse(
         config=config,
         path=str(config_path),

@@ -3,8 +3,7 @@ import {
     Button, message, Modal, Space, Switch, Tag, Popconfirm,
     Form, Input, Upload, Typography, Select,
 } from "antd";
-import { ProTable, ProColumns } from "@ant-design/pro-components";
-import { ActionType } from "@ant-design/pro-table";
+import { ProTable, type ActionType, type ProColumns } from "@ant-design/pro-components";
 import { useTranslation } from "react-i18next";
 import { fetchCustom } from "../../components/fetch";
 import LanguageToggle from "../../components/LanguageToggle";

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import shutil
 import tempfile
 from typing import Any
@@ -12,6 +12,8 @@ from typing import Any
 import yaml
 
 from agentsociety2.backend.services import agent_packs, map_packages, package_archives
+from agentsociety2.society.experiment_runner import MAX_STOCK_RUNNER_BYTES, portable_experiment_runner
+from agentsociety2.society.launch_config import apply_map_override, launch_map_id
 from agentsociety2.society.models import InitConfig, StepsConfig
 
 _PRIVATE_INIT_CONFIG_KEYS = {"session_id", "trusted_dirs"}
@@ -91,11 +93,12 @@ def export_experiment_pack(
         staging = Path(temp) / experiment_path.name
         ignore = None if include_legacy_run_artifacts else _experiment_pack_ignore()
         shutil.copytree(experiment_path, staging, ignore=ignore)
+        _migrate_experiment_runner(staging)
         if not include_legacy_run_artifacts:
             _remove_runtime_state(staging)
+        _sanitize_experiment_pack_files(staging, map_override=launch_map_id(experiment_path))
         if agentsociety_root is not None:
             _stage_dependencies(staging, agentsociety_root=agentsociety_root)
-        _sanitize_experiment_pack_files(staging)
         return package_archives.zip_directory(staging, zip_path)
 
 
@@ -116,6 +119,7 @@ def import_experiment_pack_zip(
         preview = preview_experiment_pack(package_path)
         if not preview.ok:
             raise ValueError(f"Imported ExperimentPack is invalid: {preview.validation.errors}")
+        _migrate_experiment_runner(package_path)
         hypothesis_id = package_archives.sanitize_id(requested_hypothesis_id or preview.hypothesis_id, "experiment")
         experiment_id = package_archives.sanitize_id(requested_experiment_id or preview.experiment_id, "1")
         target = workspace_root / f"hypothesis_{hypothesis_id}" / f"experiment_{experiment_id}"
@@ -166,7 +170,10 @@ def _stage_dependencies(package_path: Path, *, agentsociety_root: Path) -> None:
                 agents=[item for item in agents if isinstance(item, dict)],
                 initial_locations=initial_locations,
             )
-            shutil.copytree(pack.package_path, dependencies_root / "agent_packs" / pack.pack_id)
+            target = dependencies_root / "agent_packs" / pack.pack_id
+            if target.exists():
+                shutil.rmtree(target)
+            shutil.copytree(pack.package_path, target)
 
 
 def _install_dependencies(package_path: Path, *, agentsociety_root: Path) -> None:
@@ -221,6 +228,20 @@ def _copy_experiment_without_run(source: Path, target: Path) -> None:
     _sanitize_experiment_pack_files(target)
 
 
+def _migrate_experiment_runner(package_path: Path) -> None:
+    path = package_path / "run.sh"
+    if path.is_file() and path.stat().st_size <= MAX_STOCK_RUNNER_BYTES:
+        original = path.read_bytes()
+        portable = portable_experiment_runner(original)
+        if portable != original:
+            mode = path.stat().st_mode
+            path.chmod(mode | 0o200)
+            try:
+                path.write_bytes(portable)
+            finally:
+                path.chmod(mode)
+
+
 def sanitize_experiment_pack_config(
     config: dict[str, Any],
     *,
@@ -235,7 +256,7 @@ def sanitize_experiment_pack_config(
     return {}
 
 
-def _sanitize_experiment_pack_files(package_path: Path, *, map_id: str | None = None) -> None:
+def _sanitize_experiment_pack_files(package_path: Path, *, map_override: str | None = None) -> None:
     init_path = package_path / "init" / "init_config.json"
     if not init_path.exists():
         return
@@ -245,7 +266,8 @@ def _sanitize_experiment_pack_files(package_path: Path, *, map_id: str | None = 
         return
     if not isinstance(raw_config, dict):
         return
-    sanitized = sanitize_experiment_pack_config(raw_config, map_id=map_id)
+    sanitized = sanitize_experiment_pack_config(raw_config)
+    apply_map_override(sanitized, map_override)
     if sanitized != raw_config:
         init_path.write_text(
             json.dumps(sanitized, ensure_ascii=False, indent=2) + "\n",
@@ -278,8 +300,13 @@ def _sanitize_env_module_paths(config: dict[str, Any], *, map_id: str | None = N
         if map_id and module.get("module_type") == "PixelTownSocialEnv":
             kwargs.setdefault("map_id", map_id)
         manifest_path = kwargs.get("map_manifest_path")
-        if manifest_path and Path(str(manifest_path)).expanduser().is_absolute():
-            kwargs.pop("map_manifest_path", None)
+        if isinstance(manifest_path, str) and manifest_path:
+            # Packs can come from either OS. Windows path syntax recognizes both separators.
+            reference = PureWindowsPath(manifest_path)
+            if reference.anchor or (reference.parts and reference.parts[0].startswith("~")):
+                del kwargs["map_manifest_path"]
+            else:
+                kwargs["map_manifest_path"] = manifest_path.replace("\\", "/")
 
 
 def _experiment_pack_ignore() -> Any:
