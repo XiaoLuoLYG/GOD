@@ -3,6 +3,10 @@
   var root = document.body.dataset.siteRoot || "";
   var pageDefaultLocale = (document.documentElement.lang || "en").toLowerCase().indexOf("zh") === 0 ? "zh" : "en";
   var locale = resolveLocale();
+  if (locale === "en" && document.body.dataset.englishPage) {
+    window.location.replace(document.body.dataset.englishPage + window.location.search + window.location.hash);
+    return;
+  }
   document.documentElement.lang = locale === "zh" ? "zh-CN" : "en";
 
   var STATIC_TEXT = {
