@@ -100,12 +100,17 @@ jobs:
           PY
 
   python-tests:
-    name: Backend tests (${{ matrix.os }})
+    name: ${{ matrix.check_name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            # The main branch ruleset requires this check name.
+            check_name: Python targeted tests
+          - os: windows-latest
+            check_name: Windows backend tests
     timeout-minutes: 40
     defaults:
       run:
