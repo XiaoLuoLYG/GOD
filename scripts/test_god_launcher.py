@@ -150,10 +150,14 @@ time.sleep(90)
             front_code = """
 import json, os, subprocess, sys, time
 from pathlib import Path
-worker = subprocess.Popen([sys.executable, "-u", "-c", sys.argv[1], *sys.argv[3:]], start_new_session=True)
+worker = subprocess.Popen([sys.executable, "-u", sys.argv[1], *sys.argv[3:]], start_new_session=True)
 Path(sys.argv[2]).write_text(json.dumps({"front": os.getpid(), "worker": worker.pid}))
 time.sleep(90)
 """
+            worker_script = fixture / "worker.py"
+            worker_script.write_text(worker_code, encoding="utf-8")
+            front_script = fixture / "front.py"
+            front_script.write_text(front_code, encoding="utf-8")
             runtime_root = fixture / "runtime"
             metadata = fixture / "worker.json"
             env["RUNTIME_ROOT"] = str(runtime_root)
@@ -184,7 +188,7 @@ function Stop-RuntimeInstance {
             for mode in ("graceful", "stubborn"):
                 marker = fixture / f"{mode}.signal"
                 log = fixture / ".god" / "logs" / "runtime.log"
-                front_cmd = [sys.executable, "-u", "-c", front_code, worker_code, str(metadata),
+                front_cmd = [sys.executable, "-u", str(front_script), str(worker_script), str(metadata),
                              str(marker), mode, str(runtime_port)]
                 if windows:
                     encoded = base64.b64encode(
@@ -205,6 +209,8 @@ function Stop-RuntimeInstance {
                     else:
                         raise AssertionError(f"the {mode} worker did not start")
                     worker_id = int(ready.read_text())
+                    status = run("status")
+                    assert status.returncode == 0 and f"{runtime_port} up" in status.stdout, status.stdout + status.stderr
                     stopped = run("stop")
                     assert stopped.returncode == 0, stopped.stdout + stopped.stderr
                     front.wait(timeout=10)
