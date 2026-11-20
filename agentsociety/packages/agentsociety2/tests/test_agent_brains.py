@@ -322,6 +322,35 @@ def test_openai_compat_mocked_http_chooses_skill_and_answers(monkeypatch):
     assert "secret" not in captured["calls"][0]["content"]
 
 
+def test_openai_compat_corrects_a_map_interaction_once(monkeypatch):
+    agent = _agent(brain={"type": "openai_compat"})
+    prompts = []
+
+    async def complete(prompt):
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            return '{"selected_skill_id":"inspect_supplies","reason":"Check the shelves"}', {"input_tokens": 12}
+        assert 'inspect_supplies' in prompt and 'Check the shelves' in prompt
+        assert 'inventory.count' in prompt and 'required' in prompt
+        assert 'unmounted.skill' not in prompt
+        return '{"selected_skill_id":"inventory.count","args":{"shelf":2}}', {"input_tokens": 3, "output_tokens": 5}
+
+    monkeypatch.setattr(agent._brain, "_complete", complete)
+    choice = _choice_kwargs()
+    choice.update(
+        mounted_skill_ids=["inventory.count"],
+        catalog=[{"name": "inventory.count", "args_schema": {"required": ["shelf"]}}, {"name": "unmounted.skill"}],
+    )
+
+    async def run_case():
+        return await agent._select_next_skill(**choice)
+
+    decision = anyio.run(run_case)
+    assert len(prompts) == 2
+    assert decision["selected_skill_id"] == "inventory.count" and decision["args"] == {"shelf": 2}
+    assert decision["usage"] == {"input_tokens": 15, "output_tokens": 5}
+
+
 def test_openai_compat_http_error_falls_back_without_response_body(monkeypatch):
     monkeypatch.delenv("GOD_AGENT_BACKEND", raising=False)
     monkeypatch.setenv("GOD_LLM_API_KEY", "sk-test")

@@ -6,6 +6,7 @@ constructed when a config or ``GOD_AGENT_BACKEND`` selects it.
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import os
@@ -39,6 +40,23 @@ class OpenAICompatBrain(AgentBrain):
         started = time.perf_counter()
         raw, usage = await self._complete(req.prompt)
         decision = decision_from_text(req.prompt, raw)
+        if req.mounted_skill_ids and decision.selected_skill_id and decision.selected_skill_id not in req.mounted_skill_ids:
+            options = [
+                {key: skill[key] for key in ("name", "description", "args_schema") if key in skill}
+                for skill in req.catalog if skill.get("name") in req.mounted_skill_ids
+            ] or req.mounted_skill_ids
+            correction = (
+                "Pick the mounted skill that fits this intended action. Copy its exact name into selected_skill_id. "
+                "Return only the JSON with args for that skill and the intended reason and public_summary.\n"
+                f"Mounted skills: {json.dumps(options, ensure_ascii=False)}\nIntended action: {raw}"
+            )
+            raw, extra_usage = await self._complete(correction)
+            decision = decision_from_text(req.prompt, raw)
+            for key, value in (extra_usage or {}).items():
+                if isinstance(value, int):
+                    usage = usage or {}
+                    previous = usage.get(key)
+                    usage[key] = value + (previous if isinstance(previous, int) else 0)
         decision.usage = usage
         decision.latency_ms = (time.perf_counter() - started) * 1000
         _log_timing("choose_skill", decision.latency_ms, self._settings().model)
