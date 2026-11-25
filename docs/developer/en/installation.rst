@@ -20,7 +20,7 @@ Clone
 
 .. code-block:: bash
 
-   git clone https://github.com/XiaoLuoLYG/GOD.git
+   git clone --depth 1 https://github.com/XiaoLuoLYG/GOD.git
    cd GOD
 
 The repo contains the integrated AgentSociety and JiuwenClaw checkouts needed by the local GOD stack.

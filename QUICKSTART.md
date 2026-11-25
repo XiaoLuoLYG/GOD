@@ -24,7 +24,7 @@ If `git clone` is not available on Windows yet, install Git first with `winget i
 ## 2. Clone
 
 ```bash
-git clone https://github.com/XiaoLuoLYG/GOD.git
+git clone --depth 1 https://github.com/XiaoLuoLYG/GOD.git
 cd GOD
 ```
 
@@ -62,7 +62,7 @@ On first run, GOD will:
 
 On the **Model** page, choose the resident runtime and enter the GOD model settings below. Click **Test Connection** to send a short test message. If you select Codex, the wizard also sends a test message through a temporary Codex conversation.
 
-Click **Save and Choose Experiment**, then **Browse Built-Ins** and **Start Now** for GOD Town or PKU Trump Visit. GOD opens the control room when the first live frame is ready. For a downloaded ExperimentPack, choose **Import Experiment Zip** on the same page. Use the draft editor to create your own experiment.
+Click **Save and Choose Experiment**, then **Browse Built-Ins** and **Start Now** for GOD Town or PKU Trump Visit. GOD opens the control room when the first live frame is ready. Download an ExperimentPack from [GitHub Releases](https://github.com/XiaoLuoLYG/GOD/releases/tag/public-site-packs) or [AtomGit Releases](https://atomgit.com/yigeluo/GOD/releases), then choose **Import Experiment Zip** on the same page. Use the draft editor to create your own experiment.
 
 | Variable | Example |
 | --- | --- |

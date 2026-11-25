@@ -44,7 +44,7 @@
 </p>
 
 <p align="center">
-  <a href="https://atomgit.com/yigeluo/GOD">
+  <a href="https://atomgit.com/yigeluo/GOD/releases">
     <img alt="AtomGit Download" src="https://atomgit.com/yigeluo/GOD/download/badge.svg" />
   </a>
   <a href="https://github.com/XiaoLuoLYG/GOD/releases/latest">
@@ -124,7 +124,7 @@
 ## 🚀 快速开始
 
 ```bash
-git clone https://github.com/XiaoLuoLYG/GOD.git
+git clone --depth 1 https://github.com/XiaoLuoLYG/GOD.git
 cd GOD
 ./scripts/god.sh start
 ```

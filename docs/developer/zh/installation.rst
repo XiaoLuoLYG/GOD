@@ -20,7 +20,7 @@ macOS:
 
 .. code-block:: bash
 
-   git clone https://github.com/XiaoLuoLYG/GOD.git
+   git clone --depth 1 https://github.com/XiaoLuoLYG/GOD.git
    cd GOD
 
 这个仓库已经包含本地 GOD 栈需要的 AgentSociety 和 JiuwenClaw 集成目录。
