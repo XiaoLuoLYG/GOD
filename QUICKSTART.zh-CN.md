@@ -24,7 +24,7 @@ Windows 如果还不能执行 `git clone`，先运行 `winget install --id Git.G
 ## 2. 克隆
 
 ```bash
-git clone https://github.com/XiaoLuoLYG/GOD.git
+git clone --depth 1 https://github.com/XiaoLuoLYG/GOD.git
 cd GOD
 ```
 
@@ -62,7 +62,7 @@ Windows PowerShell：
 
 在向导的 **模型** 页选择居民运行时，填写下表的 GOD 模型配置，再点 **测试连接**。向导会发一条短消息验证模型能回复。选了 Codex 时，向导还会用一个临时 Codex 会话发测试消息。
 
-点 **保存并选择实验**，打开 **浏览内置实验**，在 GOD 小镇或北大访问实验旁点 **一键启动**。第一帧完成后会自动打开控制台。下载了 ExperimentPack 时，在同一页点 **导入实验 Zip**。也可以进入草案编辑器创建自己的实验。
+点 **保存并选择实验**，打开 **浏览内置实验**，在 GOD 小镇或北大访问实验旁点 **一键启动**。第一帧完成后会自动打开控制台。可以从 [GitHub 发行包](https://github.com/XiaoLuoLYG/GOD/releases/tag/public-site-packs) 或 [AtomGit 发行包](https://atomgit.com/yigeluo/GOD/releases) 下载实验包，再在同一页点 **导入实验 Zip**。也可以进入草案编辑器创建自己的实验。
 
 | 变量 | 示例 |
 | :-- | :-- |
